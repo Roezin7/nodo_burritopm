@@ -1,84 +1,106 @@
-# Sistema Ibérico
+# NODO · Burrito Parrilla Mexicana
 
-Back-office multi-negocio (Finanzas, Inventario, Tareas, Patrimonio) como **PWA**.
-Primer negocio: **Ibérico** (bar). UI en español · MXN · `America/Mexico_City`.
+Sistema de **abastecimiento centralizado** (bodega central + ~15 sucursales) como **PWA**.
+La sucursal **no pide a ojo**: captura su inventario físico y el sistema calcula cuánto
+enviarle para volver a su stock objetivo, consolida un pedido maestro y el admin lo aprueba.
+UI en español · USD · `America/Chicago`.
+
+Proyecto independiente derivado del esqueleto de NODO (repo, base de datos y servicio
+propios). Reutiliza infraestructura, auth (PIN+JWT), PWA/offline y diseño; el dominio de
+inventario/abastecimiento se construyó desde cero.
 
 ## Arquitectura
 
-Monorepo con despliegue de **un solo servicio** en Render: el servidor Node sirve
-la API REST bajo `/api` y los archivos estáticos de la PWA compilada.
+Monorepo con despliegue de **un solo servicio**: el servidor Node sirve la API REST bajo
+`/api` y los archivos estáticos de la PWA compilada.
 
 ```
 /
 ├── server/          API REST (Express + TypeScript + Prisma + Zod)
 │   ├── prisma/       esquema y migraciones
 │   └── src/
-├── client/          PWA (React + Vite + vite-plugin-pwa)  → build a server/public
-├── render.yaml       config de despliegue (single service)
-└── package.json      workspaces npm
+│       ├── auth/         PIN + JWT, roles, asignación de ubicación
+│       ├── ubicaciones/  bodega + sucursales
+│       ├── catalogo/     categorías, unidades, productos, stock objetivo
+│       ├── conteos/      conteo físico por ubicación (máquina de estados)
+│       ├── distribuciones/  abastecimiento, consolidado, aprobación (+ tests)
+│       └── dashboard/    panel del admin
+├── client/          PWA (React + Vite + vite-plugin-pwa) → build a server/public
+├── reference/       código de NODO conservado para fases posteriores (IA de conteo)
+└── package.json     workspaces npm
 ```
 
-## Puesta en marcha
+## Modelo
 
-1. Copia el ejemplo de entorno y llena `DATABASE_URL` (Postgres de Render):
+Organización (`negocios`, una fila) → **ubicaciones** (bodega | sucursal) → inventario por
+`(negocio_id, ubicacion_id)`. Roles: `admin`, `encargado_bodega`, `encargado_sucursal`,
+`repartidor`. Cantidades `Decimal(12,3)`; costos/factores `Decimal(12,4)`.
+
+**Flujo (Fase 1, MVP):** el encargado de cada sucursal captura su conteo físico → al cerrarlo
+es la fotografía oficial del inventario → el admin **calcula la distribución** (sugerido =
+objetivo + seguridad − disponible − en tránsito, redondeado al múltiplo de empaque, nunca
+negativo) → revisa el consolidado (por producto / por sucursal, con disponibilidad de bodega
+y faltante) → ajusta y **aprueba**. Picking, carga, entrega y recepción son Fase 2 (la máquina
+de estados ya está diseñada).
+
+## Puesta en marcha (local)
+
+1. Entorno (usa una base de datos **propia**, separada de cualquier otro proyecto):
    ```bash
-   cp .env.example .env
-   # edita .env -> DATABASE_URL y JWT_SECRET
+   cp server/.env.example .env && cp .env server/.env
+   # edita DATABASE_URL y JWT_SECRET
    ```
-   > ⚠️ Rota la contraseña de la DB antes de usar credenciales en producción.
-
-2. Instala dependencias:
+2. Instala y prepara la base de datos:
    ```bash
    npm install
-   ```
-
-3. Adopta el esquema existente y aplica migraciones (ver `server/prisma`):
-   ```bash
-   npm run prisma:introspect   # db pull: trae las tablas existentes
    npm run prisma:generate
-   # baseline + migraciones por fase (documentado en server/prisma/MIGRACIONES.md)
+   npx --workspace server prisma migrate deploy
+   npm run seed                 # admin "Admin" (PIN 1234)
+   # opcional: datos de ejemplo (3 ubicaciones, 5 productos, usuarios Maria/Beto)
+   SEED_DEMO=1 npm run seed
    ```
-
-4. Desarrollo (API en :3000, PWA en :5173 con proxy a /api):
+3. Desarrollo (API :3000, PWA :5173 con proxy a /api):
    ```bash
    npm run dev
    ```
-
-5. Producción local (build + servir todo desde :3000):
+4. Producción local (build + servir todo desde :3000):
    ```bash
    npm run build && npm start
    ```
 
-## Estado por fase
+> Si corres **otro NODO** (p. ej. Ibérico) en el :3000, levanta este en otro puerto:
+> `PORT=3100 npm start`.
 
-- [x] Fase 0 — Scaffold (monorepo, single-service, PWA shell, health)
-- [x] Fase 1 — Multi-tenant + auth (PIN + JWT, login visual, gating por rol)
-- [x] Fase 2 — Inventario v2 (zonas, unidades por zona, conteo, lista de compras, valor)
-- [x] Fase 3 — Finanzas (semanas encadenadas, movimientos, comisión 1.99%, cuadre, resumen, capital socio)
-- [x] Fase 4 — Patrimonio (snapshot automático al cerrar semana, pasivos, tendencia)
-- [x] Fase 5 — Tareas (checklists apertura/cierre, instancias diarias, completado por empleados)
-- [x] Fase 6 — PWA offline (cola de escrituras en IndexedDB, sync al reconectar, indicador, iconos)
-- [x] **Silvia** — coach de negocio con IA y memoria (burbuja flotante, admin) · requiere `ANTHROPIC_API_KEY`
-- [x] Fase 7 — IA opcional para conteos (borrador editable desde foto/texto) · pestaña "Borrador IA" en Inventario · requiere `ANTHROPIC_API_KEY`
-- [x] Configuración (admin) — negocio, productos/mínimos, zonas y unidades, saldos, ubicaciones/categorías/socios, **usuarios y PINs**
-- [x] Operación — reabrir/editar semanas cerradas · export CSV (finanzas/patrimonio) · `/api/health` verifica la DB · la cola offline avisa cambios rechazados
+## Pruebas
 
-## Silvia (coach de negocio con IA)
+```bash
+npm test            # vitest: fórmula de abastecimiento (server/src/distribuciones/logic.test.ts)
+```
 
-Burbuja flotante (esquina inferior derecha, solo admin) con una coach que observa los
-KPIs reales del negocio (ventas/semana, utilidad, margen, comisión, patrimonio, inventario)
-y da recomendaciones accionables. Tiene **memoria**: conversación persistente, registro de
-**eventos/cambios** del negocio (botón 📌) y **aprendizajes** que ella misma guarda vía
-tool-use. Modelo: `claude-opus-4-8` con adaptive thinking.
+## Despliegue (Coolify)
 
-- Solo se activa si `ANTHROPIC_API_KEY` está configurada en el servidor (si no, la burbuja
-  no aparece y `/api/silvia/chat` responde 503).
-- La IA **solo escribe en su propia tabla de memoria** (`silvia_memoria`), nunca en datos
-  del negocio.
+Servicio propio + PostgreSQL propio. Build con el `Dockerfile` (single-service, Node 22-slim).
+Variables: `DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=production`, `ALLOWED_ORIGINS` (dominio),
+opcional `ANTHROPIC_API_KEY`. Healthcheck: `/api/health`. El contenedor aplica
+`prisma migrate deploy` al arrancar.
+
+## Estado por bloque (Fase 1 — MVP)
+
+- [x] Bloque 0 — Bootstrap (proyecto nuevo, auth, PWA, re-marca)
+- [x] Bloque 1 — Organización + ubicaciones
+- [x] Bloque 2 — Usuarios, roles y asignación de ubicación
+- [x] Bloque 3 — Catálogo (categorías, unidades, productos con conversiones)
+- [x] Bloque 4 — Stock objetivo por (producto, ubicación)
+- [x] Bloque 5 — Conteo físico por ubicación (tablet)
+- [x] Bloque 6 — Abastecimiento + consolidado + aprobación
+- [x] Bloque 7 — Panel del administrador
+
+**Fase 2 (siguiente):** reserva de inventario, picking con doble verificación, carga del
+camión, entrega y recepción con incidencias, ledger de movimientos y existencias.
 
 ## Reglas de oro
 
-- Todo registro lleva `negocio_id` (multi-negocio desde el día 1).
-- `empleado` solo accede a Inventario y Tareas (gating en backend, no solo UI).
-- La IA **nunca** escribe en la DB: devuelve borradores que el usuario confirma.
-- No se usa la tabla `ingests` (sistema viejo de Telegram, deprecado).
+- Todo registro lleva `negocio_id`; el inventario se scopea además por `ubicacion_id`.
+- La sucursal **no decide** cuánto pedir: la cantidad surge del conteo + parámetros.
+- Cada encargado solo opera sus ubicaciones asignadas (gating en backend, no solo UI).
+- Un conteo cerrado y una distribución aprobada no cambian en silencio.
