@@ -4,9 +4,10 @@ import Usuarios from './Usuarios';
 import Categorias from './Categorias';
 import Unidades from './Unidades';
 import Productos from './Productos';
+import StockObjetivo from './StockObjetivo';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
-type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos';
+type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos' | 'stock';
 
 const TABS: { clave: Tab; label: string }[] = [
   { clave: 'ubicaciones', label: 'Ubicaciones' },
@@ -14,6 +15,7 @@ const TABS: { clave: Tab; label: string }[] = [
   { clave: 'categorias', label: 'Categorías' },
   { clave: 'unidades', label: 'Unidades' },
   { clave: 'productos', label: 'Productos' },
+  { clave: 'stock', label: 'Stock objetivo' },
 ];
 
 export default function Configuracion() {
@@ -46,6 +48,7 @@ export default function Configuracion() {
         {tab === 'categorias' && <Categorias />}
         {tab === 'unidades' && <Unidades />}
         {tab === 'productos' && <Productos />}
+        {tab === 'stock' && <StockObjetivo />}
       </div>
     </div>
   );

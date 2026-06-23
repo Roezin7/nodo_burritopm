@@ -270,3 +270,116 @@ catalogoRouter.patch(
     res.json({ ok: true });
   }),
 );
+
+// ──────────────────── Stock objetivo por (producto, ubicación) ──────────────
+
+/** GET /catalogo/producto-ubicacion?ubicacion=ID — parámetros par de cada producto activo
+ *  en esa ubicación (con defaults si aún no se configuró). */
+catalogoRouter.get(
+  '/producto-ubicacion',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const ubicacionId = BigInt(z.coerce.number().int().positive().parse(req.query.ubicacion));
+    const ubic = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: req.auth!.negocioId } });
+    if (!ubic) throw new HttpError(404, 'Ubicación no encontrada');
+
+    const [productos, params] = await Promise.all([
+      prisma.products.findMany({
+        where: { negocio_id: req.auth!.negocioId, activo: true },
+        include: { categorias: true, unidad_distribucion: true },
+        orderBy: [{ nombre: 'asc' }],
+      }),
+      prisma.producto_ubicacion.findMany({ where: { ubicacion_id: ubicacionId } }),
+    ]);
+    const porProducto = new Map(params.map((p) => [p.product_id.toString(), p]));
+
+    res.json({
+      ubicacion: { id: Number(ubic.id), nombre: ubic.nombre, tipo: ubic.tipo },
+      items: productos.map((p) => {
+        const pu = porProducto.get(p.id.toString());
+        return {
+          product_id: Number(p.id),
+          nombre: p.nombre,
+          sku: p.sku,
+          categoria: p.categorias?.nombre ?? null,
+          unidad_distribucion: p.unidad_distribucion.nombre,
+          configurado: !!pu,
+          habilitado: pu?.habilitado ?? false,
+          stock_objetivo: num(pu?.stock_objetivo) ?? 0,
+          stock_min: num(pu?.stock_min) ?? 0,
+          stock_max: num(pu?.stock_max),
+          stock_seguridad: num(pu?.stock_seguridad) ?? 0,
+          multiplo_distribucion: num(pu?.multiplo_distribucion) ?? 1,
+          minimo_envio: num(pu?.minimo_envio) ?? 0,
+        };
+      }),
+    });
+  }),
+);
+
+const puItemSchema = z.object({
+  product_id: z.coerce.number().int().positive(),
+  habilitado: z.boolean().optional(),
+  stock_objetivo: z.coerce.number().nonnegative().optional(),
+  stock_min: z.coerce.number().nonnegative().optional(),
+  stock_max: z.coerce.number().nonnegative().optional().nullable(),
+  stock_seguridad: z.coerce.number().nonnegative().optional(),
+  multiplo_distribucion: z.coerce.number().positive().optional(),
+  minimo_envio: z.coerce.number().nonnegative().optional(),
+});
+
+/** PUT /catalogo/producto-ubicacion { ubicacion_id, items[] } — upsert masivo de niveles par. */
+catalogoRouter.put(
+  '/producto-ubicacion',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const b = z
+      .object({ ubicacion_id: z.coerce.number().int().positive(), items: z.array(puItemSchema) })
+      .parse(req.body);
+    const ubicacionId = BigInt(b.ubicacion_id);
+    const ubic = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: req.auth!.negocioId } });
+    if (!ubic) throw new HttpError(404, 'Ubicación no encontrada');
+
+    const productIds = b.items.map((i) => BigInt(i.product_id));
+    const ok = await prisma.products.findMany({
+      where: { id: { in: productIds }, negocio_id: req.auth!.negocioId },
+      select: { id: true },
+    });
+    if (ok.length !== new Set(productIds.map(String)).size) {
+      throw new HttpError(400, 'Algún producto no pertenece al negocio');
+    }
+
+    await prisma.$transaction(
+      b.items.map((i) =>
+        prisma.producto_ubicacion.upsert({
+          where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: BigInt(i.product_id) } },
+          create: {
+            negocio_id: req.auth!.negocioId,
+            ubicacion_id: ubicacionId,
+            product_id: BigInt(i.product_id),
+            habilitado: i.habilitado ?? false,
+            stock_objetivo: i.stock_objetivo ?? 0,
+            stock_min: i.stock_min ?? 0,
+            stock_max: i.stock_max ?? null,
+            stock_seguridad: i.stock_seguridad ?? 0,
+            multiplo_distribucion: i.multiplo_distribucion ?? 1,
+            minimo_envio: i.minimo_envio ?? 0,
+            actualizado_por: req.auth!.usuarioId,
+          },
+          update: {
+            habilitado: i.habilitado,
+            stock_objetivo: i.stock_objetivo,
+            stock_min: i.stock_min,
+            stock_max: i.stock_max === undefined ? undefined : i.stock_max,
+            stock_seguridad: i.stock_seguridad,
+            multiplo_distribucion: i.multiplo_distribucion,
+            minimo_envio: i.minimo_envio,
+            actualizado_por: req.auth!.usuarioId,
+          },
+        }),
+      ),
+    );
+    res.json({ ok: true, guardados: b.items.length });
+  }),
+);

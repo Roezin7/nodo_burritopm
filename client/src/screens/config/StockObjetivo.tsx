@@ -1,0 +1,149 @@
+import { useEffect, useState } from 'react';
+import { api, ApiError } from '../../api';
+import type { Ubicacion } from './Ubicaciones';
+
+interface Item {
+  product_id: number;
+  nombre: string;
+  sku: string;
+  categoria: string | null;
+  unidad_distribucion: string;
+  configurado: boolean;
+  habilitado: boolean;
+  stock_objetivo: number;
+  stock_min: number;
+  stock_max: number | null;
+  stock_seguridad: number;
+  multiplo_distribucion: number;
+  minimo_envio: number;
+}
+
+export default function StockObjetivo() {
+  const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
+  const [ubicId, setUbicId] = useState<string>('');
+  const [items, setItems] = useState<Item[]>([]);
+  const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    api<Ubicacion[]>('/ubicaciones')
+      .then((us) => {
+        const activas = us.filter((u) => u.activo);
+        setUbicaciones(activas);
+        const primera = activas.find((u) => u.tipo === 'sucursal') ?? activas[0];
+        if (primera) setUbicId(String(primera.id));
+      })
+      .catch(() => setError('No se pudieron cargar las ubicaciones'));
+  }, []);
+
+  useEffect(() => {
+    if (!ubicId) return;
+    setCargando(true);
+    setOk('');
+    api<{ items: Item[] }>(`/catalogo/producto-ubicacion?ubicacion=${ubicId}`)
+      .then((r) => setItems(r.items))
+      .catch(() => setError('No se pudo cargar el stock objetivo'))
+      .finally(() => setCargando(false));
+  }, [ubicId]);
+
+  function set(idx: number, campo: keyof Item, valor: number | boolean) {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, [campo]: valor } : it)));
+  }
+
+  async function guardar() {
+    setGuardando(true);
+    setError('');
+    setOk('');
+    try {
+      await api('/catalogo/producto-ubicacion', {
+        method: 'PUT',
+        body: {
+          ubicacion_id: Number(ubicId),
+          items: items.map((it) => ({
+            product_id: it.product_id,
+            habilitado: it.habilitado,
+            stock_objetivo: it.stock_objetivo,
+            stock_min: it.stock_min,
+            stock_max: it.stock_max,
+            stock_seguridad: it.stock_seguridad,
+            multiplo_distribucion: it.multiplo_distribucion,
+            minimo_envio: it.minimo_envio,
+          })),
+        },
+      });
+      setOk('Stock objetivo guardado');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Error al guardar');
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div>
+      <label className="so-ubic">
+        Ubicación
+        <select value={ubicId} onChange={(e) => setUbicId(e.target.value)}>
+          {ubicaciones.map((u) => (
+            <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>
+          ))}
+        </select>
+      </label>
+
+      {error && <p className="error-msg">{error}</p>}
+      {ok && <p className="ok-msg">{ok}</p>}
+
+      {cargando ? (
+        <p className="muted">Cargando…</p>
+      ) : items.length === 0 ? (
+        <p className="muted">No hay productos activos. Crea productos en la pestaña Productos.</p>
+      ) : (
+        <>
+          <p className="muted">
+            Habilita los productos que usa esta ubicación y fija sus niveles (en{' '}
+            <strong>unidad de distribución</strong>). El abastecimiento se calcula a partir del objetivo.
+          </p>
+          <div className="so-grid-head">
+            <span>Producto</span>
+            <span>Usa</span>
+            <span>Objetivo</span>
+            <span>Mín</span>
+            <span>Seguridad</span>
+            <span>Múltiplo</span>
+            <span>Mín. envío</span>
+          </div>
+          <div className="so-rows">
+            {items.map((it, idx) => (
+              <div key={it.product_id} className={`so-row ${it.habilitado ? '' : 'so-row--off'}`}>
+                <div className="so-prod">
+                  <strong>{it.nombre}</strong>
+                  <small className="muted">{it.unidad_distribucion}{it.categoria ? ` · ${it.categoria}` : ''}</small>
+                </div>
+                <label className="so-check">
+                  <input type="checkbox" checked={it.habilitado} onChange={(e) => set(idx, 'habilitado', e.target.checked)} />
+                </label>
+                <input className="so-num" inputMode="decimal" value={it.stock_objetivo}
+                  onChange={(e) => set(idx, 'stock_objetivo', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+                <input className="so-num" inputMode="decimal" value={it.stock_min}
+                  onChange={(e) => set(idx, 'stock_min', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+                <input className="so-num" inputMode="decimal" value={it.stock_seguridad}
+                  onChange={(e) => set(idx, 'stock_seguridad', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+                <input className="so-num" inputMode="decimal" value={it.multiplo_distribucion}
+                  onChange={(e) => set(idx, 'multiplo_distribucion', Number(e.target.value) || 1)} disabled={!it.habilitado} />
+                <input className="so-num" inputMode="decimal" value={it.minimo_envio}
+                  onChange={(e) => set(idx, 'minimo_envio', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+              </div>
+            ))}
+          </div>
+          <div className="form-actions">
+            <button className="btn btn-primary" onClick={() => void guardar()} disabled={guardando}>
+              {guardando ? 'Guardando…' : 'Guardar stock objetivo'}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

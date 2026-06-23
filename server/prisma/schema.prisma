@@ -70,7 +70,8 @@ model ubicaciones {
   creado_at  DateTime      @default(now()) @db.Timestamptz(6)
   negocios   negocios      @relation(fields: [negocio_id], references: [id])
 
-  usuarios_asignados usuario_ubicaciones[]
+  usuarios_asignados  usuario_ubicaciones[]
+  producto_ubicacion  producto_ubicacion[]
 
   @@unique([negocio_id, codigo])
   @@index([negocio_id])
@@ -154,8 +155,46 @@ model products {
   unidad_distribucion unidades    @relation("unidad_distribucion", fields: [unidad_distribucion_id], references: [id])
   unidad_compra       unidades?   @relation("unidad_compra", fields: [unidad_compra_id], references: [id])
   unidad_almacen      unidades?   @relation("unidad_almacen", fields: [unidad_almacen_id], references: [id])
+  producto_ubicacion  producto_ubicacion[]
 
   @@unique([negocio_id, sku])
   @@unique([negocio_id, nombre])
   @@index([negocio_id])
+}
+
+// ===========================================================================
+//  STOCK OBJETIVO por (producto, ubicación) — niveles par (Bloque 4)
+// ===========================================================================
+
+enum OrigenCalculo {
+  manual
+  historico
+  automatico
+}
+
+model producto_ubicacion {
+  id                    BigInt        @id @default(autoincrement())
+  negocio_id            BigInt
+  ubicacion_id          BigInt
+  product_id            BigInt
+  habilitado            Boolean       @default(true)
+  stock_objetivo        Decimal       @default(0) @db.Decimal(12, 3)
+  stock_min             Decimal       @default(0) @db.Decimal(12, 3)
+  stock_max             Decimal?      @db.Decimal(12, 3)
+  stock_seguridad       Decimal       @default(0) @db.Decimal(12, 3)
+  frecuencia_abasto     String?
+  consumo_promedio      Decimal?      @db.Decimal(12, 3)
+  dias_cobertura        Int?
+  multiplo_distribucion Decimal       @default(1) @db.Decimal(12, 3)
+  minimo_envio          Decimal       @default(0) @db.Decimal(12, 3)
+  origen_calculo        OrigenCalculo @default(manual)
+  actualizado_at        DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
+  actualizado_por       BigInt?
+
+  ubicaciones ubicaciones @relation(fields: [ubicacion_id], references: [id], onDelete: Cascade)
+  products    products    @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([ubicacion_id, product_id])
+  @@index([negocio_id])
+  @@index([product_id])
 }
