@@ -1,0 +1,28 @@
+{
+  "name": "nodo-burrito",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NODO · Burrito Parrilla Mexicana — abastecimiento centralizado (bodega + sucursales): conteos, distribución, inventario. PWA.",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client && npm run build -w server",
+    "start": "npm run start -w server",
+    "prisma:generate": "npm run prisma:generate -w server",
+    "prisma:migrate": "npm run prisma:migrate -w server",
+    "prisma:introspect": "npm run prisma:introspect -w server",
+    "prisma:studio": "npm run prisma:studio -w server",
+    "seed": "npm run seed -w server",
+    "test": "npm run test -w server",
+    "render-build": "npm install && npm run build && npm run prisma:generate -w server && npx --workspace server prisma migrate deploy"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

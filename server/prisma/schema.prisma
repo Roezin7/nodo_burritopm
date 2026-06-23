@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================================================
+//  NÚCLEO MULTI-ORGANIZACIÓN + AUTH (Bloque 0)
+//  Burrito Parrilla Mexicana: una organización (negocio) con muchas ubicaciones
+//  (bodega central + sucursales). El dominio de inventario se construye en los
+//  bloques siguientes.
+// ===========================================================================
+
+enum RolUsuario {
+  admin // administrador general
+  encargado_bodega
+  encargado_sucursal
+  repartidor
+}
+
+model negocios {
+  id           BigInt   @id @default(autoincrement())
+  nombre       String
+  tipo         String?
+  zona_horaria String   @default("America/Chicago")
+  creado_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  usuarios usuarios[]
+}
+
+model usuarios {
+  id         BigInt     @id @default(autoincrement())
+  negocio_id BigInt
+  nombre     String
+  rol        RolUsuario @default(encargado_sucursal)
+  pin_hash   String
+  activo     Boolean    @default(true)
+  creado_at  DateTime   @default(now()) @db.Timestamptz(6)
+  negocios   negocios   @relation(fields: [negocio_id], references: [id])
+
+  @@index([negocio_id])
+}

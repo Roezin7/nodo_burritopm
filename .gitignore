@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# build output
+server/dist/
+server/public/
+client/dist/
+*.tsbuildinfo
+
+# prisma
+server/prisma/*.db
+
+# logs / os
+*.log
+.DS_Store
+
+# claude code (config local con permisos/atajos de esta máquina)
+.claude/settings.local.json

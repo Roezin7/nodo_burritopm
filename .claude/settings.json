@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $1, $2, $9}')",
+      "Bash(lsof -nP -iTCP:5174 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:5175 -sTCP:LISTEN)",
+      "Bash(awk '{print $NF}')"
+    ]
+  }
+}

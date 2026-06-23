@@ -1,0 +1,23 @@
+# No copiar dependencias ni artefactos locales (se instalan/compilan dentro de la imagen).
+node_modules
+**/node_modules
+server/dist
+server/public
+client/dist
+*.tsbuildinfo
+
+# Secretos y entorno local
+.env
+.env.*
+!.env.example
+
+# Git / editor / SO
+.git
+.gitignore
+.claude
+*.log
+.DS_Store
+
+# Docs/infra que no afectan el runtime
+README.md
+render.yaml

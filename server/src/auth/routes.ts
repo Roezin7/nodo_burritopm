@@ -1,0 +1,170 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { prisma } from '../db.js';
+import { asyncHandler, HttpError } from '../middleware/error.js';
+import { firmarToken } from './jwt.js';
+import { requireAuth, soloAdmin } from './middleware.js';
+
+export const authRouter = Router();
+
+/**
+ * GET /auth/usuarios?negocio=1
+ * Lista para la pantalla de login (selección visual). No expone pin_hash.
+ * Por ahora el negocio es el de Ibérico (id 1); a futuro vendrá por subdominio/selección.
+ */
+authRouter.get(
+  '/usuarios',
+  asyncHandler(async (req, res) => {
+    const negocioId = BigInt(z.coerce.number().int().positive().catch(1).parse(req.query.negocio));
+    const usuarios = await prisma.usuarios.findMany({
+      where: { negocio_id: negocioId, activo: true },
+      select: { id: true, nombre: true, rol: true },
+      orderBy: { nombre: 'asc' },
+    });
+    res.json(usuarios);
+  }),
+);
+
+const loginSchema = z.object({
+  usuario_id: z.coerce.number().int().positive(),
+  pin: z.string().min(3).max(12),
+});
+
+/** POST /auth/login { usuario_id, pin } -> { token, usuario } */
+authRouter.post(
+  '/login',
+  asyncHandler(async (req, res) => {
+    const { usuario_id, pin } = loginSchema.parse(req.body);
+    const usuario = await prisma.usuarios.findFirst({
+      where: { id: BigInt(usuario_id), activo: true },
+    });
+    // Mensaje genérico para no filtrar qué falló.
+    if (!usuario || !(await bcrypt.compare(pin, usuario.pin_hash))) {
+      throw new HttpError(401, 'Usuario o PIN incorrecto');
+    }
+    const token = firmarToken({
+      sub: usuario.id.toString(),
+      negocio_id: usuario.negocio_id.toString(),
+      rol: usuario.rol,
+      nombre: usuario.nombre,
+    });
+    res.json({
+      token,
+      usuario: { id: usuario.id, nombre: usuario.nombre, rol: usuario.rol },
+    });
+  }),
+);
+
+/** GET /auth/me -> datos del usuario autenticado */
+authRouter.get(
+  '/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const usuario = await prisma.usuarios.findUnique({
+      where: { id: req.auth!.usuarioId },
+      select: { id: true, nombre: true, rol: true, negocio_id: true },
+    });
+    if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
+    res.json(usuario);
+  }),
+);
+
+const cambiarPinSchema = z.object({
+  pin_actual: z.string().min(3).max(12),
+  pin_nuevo: z.string().min(4).max(12),
+});
+
+/** POST /auth/cambiar-pin { pin_actual, pin_nuevo } */
+authRouter.post(
+  '/cambiar-pin',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { pin_actual, pin_nuevo } = cambiarPinSchema.parse(req.body);
+    const usuario = await prisma.usuarios.findUnique({ where: { id: req.auth!.usuarioId } });
+    if (!usuario || !(await bcrypt.compare(pin_actual, usuario.pin_hash))) {
+      throw new HttpError(401, 'PIN actual incorrecto');
+    }
+    await prisma.usuarios.update({
+      where: { id: usuario.id },
+      data: { pin_hash: await bcrypt.hash(pin_nuevo, 10) },
+    });
+    res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+//  Administración de usuarios (solo admin)
+// ---------------------------------------------------------------------------
+const rol = z.enum(['admin', 'encargado_bodega', 'encargado_sucursal', 'repartidor']);
+const idParam = z.coerce.number().int().positive();
+
+/** GET /auth/admin/usuarios — lista completa (incluye inactivos) para gestión. */
+authRouter.get(
+  '/admin/usuarios',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const usuarios = await prisma.usuarios.findMany({
+      where: { negocio_id: req.auth!.negocioId },
+      select: { id: true, nombre: true, rol: true, activo: true },
+      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+    });
+    res.json(usuarios.map((u) => ({ id: Number(u.id), nombre: u.nombre, rol: u.rol, activo: u.activo })));
+  }),
+);
+
+/** POST /auth/admin/usuarios { nombre, rol, pin } — crea un usuario. */
+authRouter.post(
+  '/admin/usuarios',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const b = z.object({ nombre: z.string().min(1), rol, pin: z.string().min(4).max(12) }).parse(req.body);
+    const u = await prisma.usuarios.create({
+      data: { negocio_id: req.auth!.negocioId, nombre: b.nombre, rol: b.rol, pin_hash: await bcrypt.hash(b.pin, 10) },
+    });
+    res.status(201).json({ id: Number(u.id) });
+  }),
+);
+
+/** Evita dejar al negocio sin ningún admin activo. */
+async function quedaAlgunAdmin(negocioId: bigint, exceptoId: bigint): Promise<boolean> {
+  const n = await prisma.usuarios.count({ where: { negocio_id: negocioId, rol: 'admin', activo: true, id: { not: exceptoId } } });
+  return n > 0;
+}
+
+/** PATCH /auth/admin/usuarios/:id { nombre?, rol?, activo? } */
+authRouter.patch(
+  '/admin/usuarios/:id',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const b = z.object({ nombre: z.string().min(1).optional(), rol: rol.optional(), activo: z.boolean().optional() }).parse(req.body);
+    const usuario = await prisma.usuarios.findFirst({ where: { id, negocio_id: req.auth!.negocioId } });
+    if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
+    // No permitir quitar el último admin (ni desactivándolo ni cambiándolo a empleado).
+    const dejaDeSerAdmin = (b.rol && b.rol !== 'admin') || b.activo === false;
+    if (usuario.rol === 'admin' && dejaDeSerAdmin && !(await quedaAlgunAdmin(req.auth!.negocioId, id))) {
+      throw new HttpError(409, 'No puedes dejar el negocio sin ningún administrador activo.');
+    }
+    await prisma.usuarios.update({ where: { id }, data: { nombre: b.nombre, rol: b.rol, activo: b.activo } });
+    res.json({ ok: true });
+  }),
+);
+
+/** POST /auth/admin/usuarios/:id/reset-pin { pin_nuevo } — el admin restablece el PIN. */
+authRouter.post(
+  '/admin/usuarios/:id/reset-pin',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const { pin_nuevo } = z.object({ pin_nuevo: z.string().min(4).max(12) }).parse(req.body);
+    const usuario = await prisma.usuarios.findFirst({ where: { id, negocio_id: req.auth!.negocioId } });
+    if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
+    await prisma.usuarios.update({ where: { id }, data: { pin_hash: await bcrypt.hash(pin_nuevo, 10) } });
+    res.json({ ok: true });
+  }),
+);

@@ -1,0 +1,22 @@
+# Render — un solo Web Service que sirve la API + la PWA compilada.
+services:
+  - type: web
+    name: sistema-iberico
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm run render-build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false # se configura en el dashboard de Render (rotar contraseña antes de prod)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
+      # Opcional: orígenes CORS extra. Vacío = solo mismo origen (suficiente para single-service).
+      - key: ALLOWED_ORIGINS
+        sync: false
