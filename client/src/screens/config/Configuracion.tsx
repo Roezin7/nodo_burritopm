@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import Ubicaciones from './Ubicaciones';
+import Usuarios from './Usuarios';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
-type Tab = 'ubicaciones';
+type Tab = 'ubicaciones' | 'usuarios';
 
 const TABS: { clave: Tab; label: string }[] = [
   { clave: 'ubicaciones', label: 'Ubicaciones' },
+  { clave: 'usuarios', label: 'Usuarios' },
 ];
 
 export default function Configuracion() {
@@ -34,6 +36,7 @@ export default function Configuracion() {
 
       <div className="tab-body">
         {tab === 'ubicaciones' && <Ubicaciones />}
+        {tab === 'usuarios' && <Usuarios />}
       </div>
     </div>
   );

@@ -2,10 +2,19 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { api, getToken, setToken } from './api';
 
 export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal' | 'repartidor';
+
+export interface UbicacionAsignada {
+  id: number;
+  nombre: string;
+  tipo: 'bodega' | 'sucursal';
+  activo: boolean;
+}
+
 export interface Usuario {
   id: number;
   nombre: string;
   rol: Rol;
+  ubicaciones?: UbicacionAsignada[];
 }
 
 interface AuthCtx {

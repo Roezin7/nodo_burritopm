@@ -8,6 +8,22 @@ import { requireAuth, soloAdmin } from './middleware.js';
 
 export const authRouter = Router();
 
+/** Ubicaciones asignadas a un usuario (DTO ligero para login / gestión). */
+async function ubicacionesDe(usuarioId: bigint) {
+  const filas = await prisma.usuario_ubicaciones.findMany({
+    where: { usuario_id: usuarioId },
+    include: { ubicaciones: { select: { id: true, nombre: true, tipo: true, activo: true } } },
+  });
+  return filas
+    .map((f) => ({
+      id: Number(f.ubicaciones.id),
+      nombre: f.ubicaciones.nombre,
+      tipo: f.ubicaciones.tipo,
+      activo: f.ubicaciones.activo,
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+}
+
 /**
  * GET /auth/usuarios?negocio=1
  * Lista para la pantalla de login (selección visual). No expone pin_hash.
@@ -51,7 +67,12 @@ authRouter.post(
     });
     res.json({
       token,
-      usuario: { id: usuario.id, nombre: usuario.nombre, rol: usuario.rol },
+      usuario: {
+        id: Number(usuario.id),
+        nombre: usuario.nombre,
+        rol: usuario.rol,
+        ubicaciones: await ubicacionesDe(usuario.id),
+      },
     });
   }),
 );
@@ -66,7 +87,13 @@ authRouter.get(
       select: { id: true, nombre: true, rol: true, negocio_id: true },
     });
     if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
-    res.json(usuario);
+    res.json({
+      id: Number(usuario.id),
+      nombre: usuario.nombre,
+      rol: usuario.rol,
+      negocio_id: Number(usuario.negocio_id),
+      ubicaciones: await ubicacionesDe(usuario.id),
+    });
   }),
 );
 
@@ -99,6 +126,32 @@ authRouter.post(
 const rol = z.enum(['admin', 'encargado_bodega', 'encargado_sucursal', 'repartidor']);
 const idParam = z.coerce.number().int().positive();
 
+/**
+ * Valida que los ids de ubicación pertenezcan al negocio y devuelve los BigInt.
+ * Lanza 400 si alguno no existe en el negocio.
+ */
+async function validarUbicaciones(negocioId: bigint, ids: number[]): Promise<bigint[]> {
+  if (ids.length === 0) return [];
+  const bigIds = [...new Set(ids)].map((n) => BigInt(n));
+  const ok = await prisma.ubicaciones.findMany({
+    where: { id: { in: bigIds }, negocio_id: negocioId },
+    select: { id: true },
+  });
+  if (ok.length !== bigIds.length) throw new HttpError(400, 'Alguna ubicación no pertenece al negocio');
+  return bigIds;
+}
+
+/** Reemplaza las asignaciones de ubicación de un usuario. */
+async function setUbicaciones(usuarioId: bigint, ubicacionIds: bigint[]) {
+  await prisma.$transaction([
+    prisma.usuario_ubicaciones.deleteMany({ where: { usuario_id: usuarioId } }),
+    prisma.usuario_ubicaciones.createMany({
+      data: ubicacionIds.map((ubicacion_id) => ({ usuario_id: usuarioId, ubicacion_id })),
+      skipDuplicates: true,
+    }),
+  ]);
+}
+
 /** GET /auth/admin/usuarios — lista completa (incluye inactivos) para gestión. */
 authRouter.get(
   '/admin/usuarios',
@@ -107,23 +160,46 @@ authRouter.get(
   asyncHandler(async (req, res) => {
     const usuarios = await prisma.usuarios.findMany({
       where: { negocio_id: req.auth!.negocioId },
-      select: { id: true, nombre: true, rol: true, activo: true },
+      select: {
+        id: true,
+        nombre: true,
+        rol: true,
+        activo: true,
+        ubicaciones_asignadas: { select: { ubicacion_id: true } },
+      },
       orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
     });
-    res.json(usuarios.map((u) => ({ id: Number(u.id), nombre: u.nombre, rol: u.rol, activo: u.activo })));
+    res.json(
+      usuarios.map((u) => ({
+        id: Number(u.id),
+        nombre: u.nombre,
+        rol: u.rol,
+        activo: u.activo,
+        ubicacion_ids: u.ubicaciones_asignadas.map((a) => Number(a.ubicacion_id)),
+      })),
+    );
   }),
 );
 
-/** POST /auth/admin/usuarios { nombre, rol, pin } — crea un usuario. */
+/** POST /auth/admin/usuarios { nombre, rol, pin, ubicacion_ids? } — crea un usuario. */
 authRouter.post(
   '/admin/usuarios',
   requireAuth,
   soloAdmin,
   asyncHandler(async (req, res) => {
-    const b = z.object({ nombre: z.string().min(1), rol, pin: z.string().min(4).max(12) }).parse(req.body);
+    const b = z
+      .object({
+        nombre: z.string().min(1),
+        rol,
+        pin: z.string().min(4).max(12),
+        ubicacion_ids: z.array(z.coerce.number().int().positive()).optional().default([]),
+      })
+      .parse(req.body);
+    const ubic = await validarUbicaciones(req.auth!.negocioId, b.ubicacion_ids);
     const u = await prisma.usuarios.create({
       data: { negocio_id: req.auth!.negocioId, nombre: b.nombre, rol: b.rol, pin_hash: await bcrypt.hash(b.pin, 10) },
     });
+    if (ubic.length) await setUbicaciones(u.id, ubic);
     res.status(201).json({ id: Number(u.id) });
   }),
 );
@@ -134,20 +210,31 @@ async function quedaAlgunAdmin(negocioId: bigint, exceptoId: bigint): Promise<bo
   return n > 0;
 }
 
-/** PATCH /auth/admin/usuarios/:id { nombre?, rol?, activo? } */
+/** PATCH /auth/admin/usuarios/:id { nombre?, rol?, activo?, ubicacion_ids? } */
 authRouter.patch(
   '/admin/usuarios/:id',
   requireAuth,
   soloAdmin,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
-    const b = z.object({ nombre: z.string().min(1).optional(), rol: rol.optional(), activo: z.boolean().optional() }).parse(req.body);
+    const b = z
+      .object({
+        nombre: z.string().min(1).optional(),
+        rol: rol.optional(),
+        activo: z.boolean().optional(),
+        ubicacion_ids: z.array(z.coerce.number().int().positive()).optional(),
+      })
+      .parse(req.body);
     const usuario = await prisma.usuarios.findFirst({ where: { id, negocio_id: req.auth!.negocioId } });
     if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
-    // No permitir quitar el último admin (ni desactivándolo ni cambiándolo a empleado).
+    // No permitir quitar el último admin (ni desactivándolo ni cambiándolo de rol).
     const dejaDeSerAdmin = (b.rol && b.rol !== 'admin') || b.activo === false;
     if (usuario.rol === 'admin' && dejaDeSerAdmin && !(await quedaAlgunAdmin(req.auth!.negocioId, id))) {
       throw new HttpError(409, 'No puedes dejar el negocio sin ningún administrador activo.');
+    }
+    if (b.ubicacion_ids !== undefined) {
+      const ubic = await validarUbicaciones(req.auth!.negocioId, b.ubicacion_ids);
+      await setUbicaciones(id, ubic);
     }
     await prisma.usuarios.update({ where: { id }, data: { nombre: b.nombre, rol: b.rol, activo: b.activo } });
     res.json({ ok: true });
