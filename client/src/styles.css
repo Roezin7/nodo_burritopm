@@ -1633,3 +1633,40 @@ select:disabled {
   align-items: baseline;
   gap: 0.45rem;
 }
+
+/* ── Configuración: formularios y listas (Bloque 1+) ───────────────────────── */
+.card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.card label input,
+.card label select,
+.card label textarea {
+  width: 100%;
+}
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  align-items: center;
+}
+.card--off {
+  opacity: 0.6;
+}
+.lista-ubicaciones {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.ubic-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}

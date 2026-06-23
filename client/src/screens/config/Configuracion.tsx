@@ -1,16 +1,40 @@
-// Configuración (admin). Placeholder de Bloque 0; se construye por pestañas en los
-// bloques siguientes: ubicaciones, usuarios/roles, categorías, unidades, catálogo y
-// stock objetivo por sucursal.
+import { useState } from 'react';
+import Ubicaciones from './Ubicaciones';
+
+// Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
+type Tab = 'ubicaciones';
+
+const TABS: { clave: Tab; label: string }[] = [
+  { clave: 'ubicaciones', label: 'Ubicaciones' },
+];
+
 export default function Configuracion() {
+  const [tab, setTab] = useState<Tab>('ubicaciones');
+
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>Configuración</h1>
-          <p className="page-sub">Ubicaciones, usuarios, catálogo y niveles objetivo.</p>
+          <p className="page-sub">Bodega, sucursales y catálogo.</p>
         </div>
       </header>
-      <p className="muted">Próximamente: gestión de bodega y sucursales.</p>
+
+      <div className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.clave}
+            className={tab === t.clave ? 'tab tab--on' : 'tab'}
+            onClick={() => setTab(t.clave)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="tab-body">
+        {tab === 'ubicaciones' && <Ubicaciones />}
+      </div>
     </div>
   );
 }
