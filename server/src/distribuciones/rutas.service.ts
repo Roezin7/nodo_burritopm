@@ -147,6 +147,15 @@ export async function rutaDetalle(negocioId: bigint, distId: bigint) {
   };
 }
 
+/** Monitor del admin: TODAS las rutas activas (en curso) con sus paradas e items. */
+export async function rutasActivas(negocioId: bigint) {
+  const rutas = await prisma.rutas.findMany({
+    where: { negocio_id: negocioId, estado: 'en_curso' },
+    orderBy: [{ despachada_at: 'desc' }, { id: 'desc' }],
+  });
+  return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
+}
+
 /** Rutas en curso asignadas a un repartidor (su tablero del día). */
 export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint) {
   const rutas = await prisma.rutas.findMany({

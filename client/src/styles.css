@@ -2175,3 +2175,18 @@ select:disabled {
   transition: transform 0.18s;
 }
 .switch--on .switch-knob { transform: translateX(22px); }
+
+/* Monitor de rutas activas (admin) */
+.monitor-ruta { margin-bottom: 1rem; }
+.monitor-estado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+.monitor-actual { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; }
+.ruta-parada-fila--actual { background: var(--brand-tint); border-radius: 10px; padding-left: 0.5rem; padding-right: 0.5rem; }

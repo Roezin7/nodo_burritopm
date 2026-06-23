@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/error.js';
-import { requireAuth, requireRole } from '../auth/middleware.js';
+import { requireAuth, requireRole, soloAdmin } from '../auth/middleware.js';
 import * as rutas from './rutas.service.js';
 
 export const rutasRouter = Router();
@@ -11,6 +11,15 @@ const idParam = z.coerce.number().int().positive();
 const repartidor = requireRole('encargado_bodega', 'admin');
 
 rutasRouter.use(requireAuth);
+
+/** GET /rutas/activas — monitor del admin: todas las rutas en curso. */
+rutasRouter.get(
+  '/activas',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    res.json(await rutas.rutasActivas(req.auth!.negocioId));
+  }),
+);
 
 /** GET /rutas/mias — rutas en curso asignadas al repartidor autenticado. */
 rutasRouter.get(

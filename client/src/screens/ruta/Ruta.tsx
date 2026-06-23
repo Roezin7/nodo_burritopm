@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../api';
+import { useAuth } from '../../auth';
 import { ParadaChip, FlujoStepper, paradaLabel } from '../../flujo';
 
 interface ParadaItem {
@@ -31,8 +32,15 @@ interface RutaDetalle {
 }
 
 const cerrada = (e: string) => ['entregada', 'confirmada', 'con_incidencia', 'omitida'].includes(e);
+const hora = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('es-MX', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit' }) : '');
 
 export default function Ruta() {
+  const { usuario } = useAuth();
+  if (usuario?.rol === 'admin') return <MonitorRutas />;
+  return <RutaRepartidor />;
+}
+
+function RutaRepartidor() {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [parada, setParada] = useState<{ ruta: RutaDetalle; parada: Parada } | null>(null);
   const [error, setError] = useState('');
@@ -200,6 +208,108 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
             </button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────── Monitor del admin (rutas activas en vivo) ─────────────
+function MonitorRutas() {
+  const [rutas, setRutas] = useState<RutaDetalle[]>([]);
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(true);
+  const [actualizado, setActualizado] = useState<Date | null>(null);
+  const primera = useRef(true);
+
+  async function cargar() {
+    try {
+      const r = (await api<(RutaDetalle | null)[]>('/rutas/activas')).filter((x): x is RutaDetalle => x != null);
+      setRutas(r);
+      setActualizado(new Date());
+      setError('');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No se pudieron cargar las rutas');
+    } finally {
+      if (primera.current) { setCargando(false); primera.current = false; }
+    }
+  }
+  useEffect(() => {
+    void cargar();
+    const t = setInterval(() => void cargar(), 15000); // auto-refresco cada 15 s
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1>Rutas activas</h1>
+          <p className="page-sub">
+            En vivo: dónde va cada camión y qué sucursal sigue.
+            {actualizado && <> · actualizado {hora(actualizado.toISOString())}</>}
+          </p>
+        </div>
+      </header>
+      <FlujoStepper activo="ruta" />
+      {error && <p className="error-msg">{error}</p>}
+
+      {cargando ? (
+        <p className="muted">Cargando…</p>
+      ) : rutas.length === 0 ? (
+        <div className="card"><p className="muted">No hay rutas en curso ahora mismo. Aparecerán aquí cuando un camión salga de bodega.</p></div>
+      ) : (
+        rutas.map((r) => <MonitorRutaCard key={r.ruta_id} ruta={r} />)
+      )}
+    </div>
+  );
+}
+
+function MonitorRutaCard({ ruta }: { ruta: RutaDetalle }) {
+  const paradas = [...ruta.paradas].sort((a, b) => a.orden - b.orden);
+  const total = paradas.length;
+  const hechas = paradas.filter((p) => cerrada(p.estado)).length;
+  const pct = total ? Math.round((hechas / total) * 100) : 0;
+  const actual = paradas.find((p) => !cerrada(p.estado)) ?? null;
+  const ultimaEntregada = [...paradas].reverse().find((p) => p.entregada_at);
+
+  return (
+    <div className="card monitor-ruta">
+      <div className="card-head">
+        <strong>{ruta.nombre ?? `Ruta #${ruta.ruta_id}`}</strong>
+        <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}</span>
+      </div>
+
+      <div className="monitor-estado">
+        {actual ? (
+          <span className="monitor-actual"><span className="ruta-dot ruta-dot--en_camino" /> En camino a <strong>{actual.ubicacion.nombre}</strong> (parada {actual.orden} de {total})</span>
+        ) : (
+          <span className="monitor-actual"><span className="ruta-dot ruta-dot--confirmada" /> Ruta completada</span>
+        )}
+        {ultimaEntregada && <span className="muted">Última entrega: {ultimaEntregada.ubicacion.nombre} · {hora(ultimaEntregada.entregada_at)}</span>}
+      </div>
+
+      <div className="ruta-progreso">
+        <span className="ruta-progreso-num">{hechas}/{total} entregadas</span>
+        <div className="ruta-progreso-barra"><div className="ruta-progreso-fill" style={{ width: `${pct}%` }} /></div>
+      </div>
+
+      <div className="ruta-tablero">
+        {paradas.map((p) => {
+          const esActual = actual?.parada_id === p.parada_id;
+          return (
+            <div key={p.parada_id} className={`ruta-parada-fila ${esActual ? 'ruta-parada-fila--actual' : ''}`}>
+              <span className={`ruta-dot ruta-dot--${esActual ? 'en_camino' : p.estado}`} />
+              <span>
+                <strong>{p.orden}. {p.ubicacion.nombre}</strong>
+                {p.ubicacion.direccion && <small className="muted"> · {p.ubicacion.direccion}</small>}
+                {(p.entregada_at || p.confirmada_at) && (
+                  <small className="muted"> · {p.confirmada_at ? `confirmada ${hora(p.confirmada_at)}` : `entregada ${hora(p.entregada_at)}`}</small>
+                )}
+              </span>
+              <ParadaChip estado={esActual && p.estado === 'pendiente' ? 'en_camino' : p.estado} />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
