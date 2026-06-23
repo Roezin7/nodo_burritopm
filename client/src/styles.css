@@ -1697,3 +1697,23 @@ select:disabled {
 .ubic-check input {
   width: auto !important;
 }
+
+/* ── Catálogo: secciones plegables del formulario de producto (Bloque 3) ───── */
+.prod-extra {
+  border: 1px dashed var(--border);
+  border-radius: var(--r-card);
+  padding: 0.5rem 0.75rem;
+  margin: 0.3rem 0;
+}
+.prod-extra > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.prod-extra[open] > summary {
+  margin-bottom: 0.5rem;
+}
+.prod-extra label {
+  margin-bottom: 0.4rem;
+}

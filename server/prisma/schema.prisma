@@ -30,6 +30,9 @@ model negocios {
 
   usuarios    usuarios[]
   ubicaciones ubicaciones[]
+  categorias  categorias[]
+  unidades    unidades[]
+  products    products[]
 }
 
 model usuarios {
@@ -83,4 +86,76 @@ model usuario_ubicaciones {
 
   @@id([usuario_id, ubicacion_id])
   @@index([ubicacion_id])
+}
+
+// ===========================================================================
+//  CATÁLOGO — categorías, unidades y productos con conversiones (Bloque 3)
+//  Cantidades Decimal(12,3) (admiten fracciones); costos/factores Decimal(12,4).
+// ===========================================================================
+
+model categorias {
+  id         BigInt     @id @default(autoincrement())
+  negocio_id BigInt
+  nombre     String
+  orden      Int        @default(0)
+  activo     Boolean    @default(true)
+  negocios   negocios   @relation(fields: [negocio_id], references: [id])
+  products   products[]
+
+  @@unique([negocio_id, nombre])
+  @@index([negocio_id])
+}
+
+model unidades {
+  id         BigInt   @id @default(autoincrement())
+  negocio_id BigInt
+  nombre     String // Caja, Pieza, Galón, Bolsa, Rollo, Botella, Paquete…
+  activo     Boolean  @default(true)
+  negocios   negocios @relation(fields: [negocio_id], references: [id])
+
+  productos_compra       products[] @relation("unidad_compra")
+  productos_almacen      products[] @relation("unidad_almacen")
+  productos_distribucion products[] @relation("unidad_distribucion")
+
+  @@unique([negocio_id, nombre])
+  @@index([negocio_id])
+}
+
+model products {
+  id            BigInt  @id @default(autoincrement())
+  negocio_id    BigInt
+  nombre        String
+  sku           String
+  codigo_barras String?
+  categoria_id  BigInt?
+
+  // Unidades. La de distribución es la que cuenta/recibe la sucursal (requerida).
+  // Compra y almacén (para reabasto de bodega, Fase 3) son opcionales por ahora.
+  unidad_distribucion_id BigInt
+  unidad_compra_id       BigInt?
+  unidad_almacen_id      BigInt?
+  factor_compra_almacen      Decimal @default(1) @db.Decimal(12, 4)
+  factor_almacen_distribucion Decimal @default(1) @db.Decimal(12, 4)
+
+  // Costos (manuales en MVP; promedio ponderado en Fase 3).
+  costo_promedio Decimal? @db.Decimal(12, 4)
+  ultimo_costo   Decimal? @db.Decimal(12, 4)
+
+  administrado_bodega    Boolean  @default(true)
+  requiere_refrigeracion Boolean  @default(false)
+  stock_min_bodega       Decimal? @db.Decimal(12, 3)
+  stock_seguridad_bodega Decimal? @db.Decimal(12, 3)
+  lead_time_dias         Int?
+  imagen_url             String?
+  activo                 Boolean  @default(true)
+
+  negocios            negocios    @relation(fields: [negocio_id], references: [id])
+  categorias          categorias? @relation(fields: [categoria_id], references: [id])
+  unidad_distribucion unidades    @relation("unidad_distribucion", fields: [unidad_distribucion_id], references: [id])
+  unidad_compra       unidades?   @relation("unidad_compra", fields: [unidad_compra_id], references: [id])
+  unidad_almacen      unidades?   @relation("unidad_almacen", fields: [unidad_almacen_id], references: [id])
+
+  @@unique([negocio_id, sku])
+  @@unique([negocio_id, nombre])
+  @@index([negocio_id])
 }

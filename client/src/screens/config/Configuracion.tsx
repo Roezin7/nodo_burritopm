@@ -1,13 +1,19 @@
 import { useState } from 'react';
 import Ubicaciones from './Ubicaciones';
 import Usuarios from './Usuarios';
+import Categorias from './Categorias';
+import Unidades from './Unidades';
+import Productos from './Productos';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
-type Tab = 'ubicaciones' | 'usuarios';
+type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos';
 
 const TABS: { clave: Tab; label: string }[] = [
   { clave: 'ubicaciones', label: 'Ubicaciones' },
   { clave: 'usuarios', label: 'Usuarios' },
+  { clave: 'categorias', label: 'Categorías' },
+  { clave: 'unidades', label: 'Unidades' },
+  { clave: 'productos', label: 'Productos' },
 ];
 
 export default function Configuracion() {
@@ -37,6 +43,9 @@ export default function Configuracion() {
       <div className="tab-body">
         {tab === 'ubicaciones' && <Ubicaciones />}
         {tab === 'usuarios' && <Usuarios />}
+        {tab === 'categorias' && <Categorias />}
+        {tab === 'unidades' && <Unidades />}
+        {tab === 'productos' && <Productos />}
       </div>
     </div>
   );
