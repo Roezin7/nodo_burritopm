@@ -2,6 +2,7 @@ import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { sugerirEnvio, valor } from './logic.js';
+import { aplicarMovimiento } from '../ledger/service.js';
 
 /** Último conteo CERRADO de la ubicación: mapa product_id(string) → disponible, y su id. */
 async function disponibleConteo(ubicacionId: bigint) {
@@ -269,6 +270,60 @@ export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuario
   return { ok: true };
 }
 
+/**
+ * Confirma la carga del camión: lo verificado (o lo cargado ajustado) sale de la bodega
+ * y pasa a tránsito. Registra un movimiento de transferencia por línea (idempotente).
+ */
+export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: bigint) {
+  const dist = await cargarDistribucion(negocioId, id);
+  if (dist.estado !== 'verificada') throw new HttpError(409, 'Solo se carga una distribución verificada');
+  const bodega = await bodegaDe(negocioId);
+  const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
+
+  await prisma.$transaction(async (tx) => {
+    for (const l of lineas) {
+      const cargada = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+      const reservado = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+      const costo = num(l.costo_unitario);
+
+      // Libera la reserva de TODA línea (el pedido se cierra al cargar), aunque no se cargue.
+      if (reservado > 0) {
+        const ex = await tx.existencias.findUnique({
+          where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
+        });
+        if (ex) {
+          await tx.existencias.update({
+            where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
+            data: { cantidad_reservada: redondear3(Math.max(0, num0(ex.cantidad_reservada) - reservado)) },
+          });
+        }
+      }
+
+      // Lo realmente cargado sale de disponible y entra a tránsito (movimiento idempotente).
+      if (cargada > 0) {
+        await aplicarMovimiento(tx, {
+          negocioId,
+          productId: l.product_id,
+          tipo: 'transferencia',
+          cantidad: cargada,
+          usuarioId,
+          origenId: bodega.id,
+          destinoId: l.ubicacion_destino_id,
+          costoUnitario: costo,
+          documentoTipo: 'distribucion',
+          documentoId: id,
+          comentario: 'Carga al camión (salida de bodega)',
+          idempotencyKey: `carga:${l.id}`,
+          deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }],
+        });
+      }
+      await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_cargada: cargada } });
+    }
+    await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
+  });
+  return { ok: true };
+}
+
 const redondear2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const redondear3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
@@ -370,6 +425,9 @@ export const guardarPreparacion = (negocioId: bigint, id: bigint, items: { linea
 
 export const guardarVerificacion = (negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) =>
   guardarEtapa(negocioId, id, ['preparada'], 'cantidad_verificada', items);
+
+export const guardarCarga = (negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) =>
+  guardarEtapa(negocioId, id, ['verificada'], 'cantidad_cargada', items);
 
 /** Cierra la preparación: las líneas sin cantidad usan la aprobada. */
 export async function marcarPreparada(negocioId: bigint, id: bigint, usuarioId: bigint) {

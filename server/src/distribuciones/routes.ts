@@ -132,3 +132,24 @@ distribucionesRouter.post(
     res.json(await svc.marcarVerificada(req.auth!.negocioId, id, req.auth!.usuarioId));
   }),
 );
+
+/** PATCH /distribuciones/:id/carga { items } — cantidades a cargar al camión. */
+distribucionesRouter.patch(
+  '/:id/carga',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const { items } = etapaSchema.parse(req.body);
+    res.json(await svc.guardarCarga(req.auth!.negocioId, id, items));
+  }),
+);
+
+/** POST /distribuciones/:id/cargar — confirma la carga (sale de bodega → tránsito). */
+distribucionesRouter.post(
+  '/:id/cargar',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.confirmarCarga(req.auth!.negocioId, id, req.auth!.usuarioId));
+  }),
+);

@@ -81,11 +81,13 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
   // Etapa activa según estado.
   const etapa =
     op.estado === 'en_preparacion' ? 'preparacion' :
-    op.estado === 'preparada' ? 'verificacion' : null;
+    op.estado === 'preparada' ? 'verificacion' :
+    op.estado === 'verificada' ? 'carga' : null;
 
   const campoActual = (it: OpItem): number =>
     etapa === 'preparacion' ? (it.cantidad_preparada ?? it.cantidad_aprobada)
     : etapa === 'verificacion' ? (it.cantidad_verificada ?? it.cantidad_preparada ?? it.cantidad_aprobada)
+    : etapa === 'carga' ? (it.cantidad_cargada ?? it.cantidad_verificada ?? it.cantidad_aprobada)
     : it.cantidad_aprobada;
 
   async function accion(fn: () => Promise<unknown>) {
@@ -98,7 +100,10 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
     const items = Object.entries(edits).map(([linea_id, v]) => ({ linea_id: Number(linea_id), cantidad: Number(v) }))
       .filter((i) => !Number.isNaN(i.cantidad));
     if (items.length === 0) return;
-    const url = etapa === 'preparacion' ? `/distribuciones/${op.id}/preparacion` : `/distribuciones/${op.id}/verificacion`;
+    const url =
+      etapa === 'preparacion' ? `/distribuciones/${op.id}/preparacion`
+      : etapa === 'verificacion' ? `/distribuciones/${op.id}/verificacion`
+      : `/distribuciones/${op.id}/carga`;
     setBusy(true); setError('');
     try { await api(url, { method: 'PATCH', body: { items } }); setEdits({}); onRecargar(); }
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); setBusy(false); }
@@ -157,6 +162,15 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
             <button className="btn btn-secondary" disabled={busy} onClick={() => void guardar()}>Guardar verificación</button>
             <button className="btn btn-primary" disabled={busy} onClick={() => void accion(() => api(`/distribuciones/${op.id}/verificada`, { method: 'POST' }))}>Marcar verificada</button>
           </>
+        )}
+        {op.estado === 'verificada' && (
+          <>
+            <button className="btn btn-secondary" disabled={busy} onClick={() => void guardar()}>Guardar carga</button>
+            <button className="btn btn-primary" disabled={busy} onClick={() => void accion(() => api(`/distribuciones/${op.id}/cargar`, { method: 'POST' }))}>Confirmar carga</button>
+          </>
+        )}
+        {(op.estado === 'en_transito' || op.estado === 'parcialmente_entregada') && (
+          <span className="muted">En tránsito — pendiente de recepción en sucursal.</span>
         )}
       </div>
     </div>
