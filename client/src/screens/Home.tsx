@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useAuth } from '../auth';
+import { useAuth, type Rol } from '../auth';
 import PanelAdmin from './PanelAdmin';
 
 interface Modulo {
@@ -9,11 +9,13 @@ interface Modulo {
   desc: string;
   ruta?: string; // si no hay ruta -> aún no disponible
   soloAdmin?: boolean;
+  roles?: Rol[];
 }
 
 const MODULOS: Modulo[] = [
   { clave: 'conteo', titulo: 'Conteo', emoji: '📋', desc: 'Inventario físico de tu ubicación', ruta: '/conteo' },
   { clave: 'distribucion', titulo: 'Distribución', emoji: '🚚', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
+  { clave: 'bodega', titulo: 'Bodega', emoji: '📦', desc: 'Preparar, verificar y cargar', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ajustes', titulo: 'Configuración', emoji: '⚙️', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];
 
@@ -28,7 +30,11 @@ export default function Home() {
   const { usuario } = useAuth();
   if (!usuario) return null;
 
-  const visibles = MODULOS.filter((m) => !m.soloAdmin || usuario.rol === 'admin');
+  const visibles = MODULOS.filter((m) => {
+    if (m.soloAdmin && usuario.rol !== 'admin') return false;
+    if (m.roles && !m.roles.includes(usuario.rol)) return false;
+    return true;
+  });
 
   return (
     <div className="page">

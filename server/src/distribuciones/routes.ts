@@ -1,19 +1,23 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/error.js';
-import { requireAuth, soloAdmin } from '../auth/middleware.js';
+import { requireAuth, requireRole, soloAdmin } from '../auth/middleware.js';
 import * as svc from './service.js';
 
 export const distribucionesRouter = Router();
 
 const idParam = z.coerce.number().int().positive();
 
-// Toda la distribución es del admin general.
-distribucionesRouter.use(requireAuth, soloAdmin);
+// La planeación (calcular/aprobar) es del admin; la operación de bodega la hace
+// también el encargado de bodega. Cada ruta declara su guard.
+distribucionesRouter.use(requireAuth);
+const bodega = requireRole('admin', 'encargado_bodega');
+const etapaSchema = z.object({ items: z.array(z.object({ linea_id: z.coerce.number().int().positive(), cantidad: z.coerce.number().nonnegative() })) });
 
-/** GET /distribuciones — lista. */
+/** GET /distribuciones — lista (admin y bodega). */
 distribucionesRouter.get(
   '/',
+  bodega,
   asyncHandler(async (req, res) => {
     res.json(await svc.listarDistribuciones(req.auth!.negocioId));
   }),
@@ -22,6 +26,7 @@ distribucionesRouter.get(
 /** POST /distribuciones { ubicacion_ids? } — calcula y crea el consolidado. */
 distribucionesRouter.post(
   '/',
+  soloAdmin,
   asyncHandler(async (req, res) => {
     const b = z.object({ ubicacion_ids: z.array(z.coerce.number().int().positive()).optional() }).parse(req.body ?? {});
     res.status(201).json(await svc.crearDistribucion(req.auth!.negocioId, req.auth!.usuarioId, b.ubicacion_ids));
@@ -31,6 +36,7 @@ distribucionesRouter.post(
 /** GET /distribuciones/:id/consolidado?vista=producto|sucursal */
 distribucionesRouter.get(
   '/:id/consolidado',
+  soloAdmin,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     const vista = z.enum(['producto', 'sucursal']).catch('producto').parse(req.query.vista);
@@ -41,6 +47,7 @@ distribucionesRouter.get(
 /** PATCH /distribuciones/:id/lineas { ajustes: [{linea_id, cantidad_aprobada}] } */
 distribucionesRouter.patch(
   '/:id/lineas',
+  soloAdmin,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     const b = z
@@ -55,8 +62,73 @@ distribucionesRouter.patch(
 /** POST /distribuciones/:id/aprobar */
 distribucionesRouter.post(
   '/:id/aprobar',
+  soloAdmin,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     res.json(await svc.aprobarDistribucion(req.auth!.negocioId, id, req.auth!.usuarioId));
+  }),
+);
+
+// ───────── Operación de bodega (admin + encargado_bodega) ─────────
+
+/** GET /distribuciones/:id/operacion — líneas con cantidades por etapa, por sucursal. */
+distribucionesRouter.get(
+  '/:id/operacion',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.operacionDetalle(req.auth!.negocioId, id));
+  }),
+);
+
+/** POST /distribuciones/:id/preparar — inicia preparación y reserva en bodega. */
+distribucionesRouter.post(
+  '/:id/preparar',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.prepararDistribucion(req.auth!.negocioId, id, req.auth!.usuarioId));
+  }),
+);
+
+/** PATCH /distribuciones/:id/preparacion { items } — cantidades surtidas. */
+distribucionesRouter.patch(
+  '/:id/preparacion',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const { items } = etapaSchema.parse(req.body);
+    res.json(await svc.guardarPreparacion(req.auth!.negocioId, id, items));
+  }),
+);
+
+/** POST /distribuciones/:id/preparada — cierra preparación. */
+distribucionesRouter.post(
+  '/:id/preparada',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.marcarPreparada(req.auth!.negocioId, id, req.auth!.usuarioId));
+  }),
+);
+
+/** PATCH /distribuciones/:id/verificacion { items } — cantidades verificadas (2da persona). */
+distribucionesRouter.patch(
+  '/:id/verificacion',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const { items } = etapaSchema.parse(req.body);
+    res.json(await svc.guardarVerificacion(req.auth!.negocioId, id, items));
+  }),
+);
+
+/** POST /distribuciones/:id/verificada — cierra verificación (persona distinta). */
+distribucionesRouter.post(
+  '/:id/verificada',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.marcarVerificada(req.auth!.negocioId, id, req.auth!.usuarioId));
   }),
 );

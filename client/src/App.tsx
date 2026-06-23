@@ -4,6 +4,7 @@ import Login from './screens/Login';
 import Home from './screens/Home';
 import Conteo from './screens/conteo/Conteo';
 import Distribucion from './screens/distribucion/Distribucion';
+import Bodega from './screens/bodega/Bodega';
 import Configuracion from './screens/config/Configuracion';
 import OfflineBanner from './OfflineBanner';
 import Shell from './Shell';
@@ -35,6 +36,7 @@ function AppBody() {
         <Route path="/" element={<Home />} />
         <Route path="/conteo" element={<SoloRol roles={['admin', 'encargado_bodega', 'encargado_sucursal']}><Conteo /></SoloRol>} />
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
+        <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

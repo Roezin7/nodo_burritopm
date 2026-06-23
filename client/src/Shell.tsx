@@ -20,6 +20,7 @@ const ITEMS: Item[] = [
   { ruta: '/', label: 'Inicio', icono: 'home' },
   { ruta: '/conteo', label: 'Conteo', icono: 'package', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
+  { ruta: '/bodega', label: 'Bodega', icono: 'package', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
 ];
 
