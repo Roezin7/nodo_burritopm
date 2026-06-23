@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/error.js';
 import { authRouter } from '../auth/routes.js';
 import { ubicacionesRouter } from '../ubicaciones/routes.js';
 import { catalogoRouter } from '../catalogo/routes.js';
+import { conteosRouter } from '../conteos/routes.js';
 
 export const apiRouter = Router();
 
@@ -21,3 +22,4 @@ apiRouter.get('/health', asyncHandler(async (_req, res) => {
 apiRouter.use('/auth', authRouter); // Bloque 0
 apiRouter.use('/ubicaciones', ubicacionesRouter); // Bloque 1
 apiRouter.use('/catalogo', catalogoRouter); // Bloque 3
+apiRouter.use('/conteos', conteosRouter); // Bloque 5

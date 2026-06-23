@@ -72,6 +72,7 @@ model ubicaciones {
 
   usuarios_asignados  usuario_ubicaciones[]
   producto_ubicacion  producto_ubicacion[]
+  conteos             conteos[]
 
   @@unique([negocio_id, codigo])
   @@index([negocio_id])
@@ -156,6 +157,7 @@ model products {
   unidad_compra       unidades?   @relation("unidad_compra", fields: [unidad_compra_id], references: [id])
   unidad_almacen      unidades?   @relation("unidad_almacen", fields: [unidad_almacen_id], references: [id])
   producto_ubicacion  producto_ubicacion[]
+  conteo_lineas       conteo_lineas[]
 
   @@unique([negocio_id, sku])
   @@unique([negocio_id, nombre])
@@ -196,5 +198,50 @@ model producto_ubicacion {
 
   @@unique([ubicacion_id, product_id])
   @@index([negocio_id])
+  @@index([product_id])
+}
+
+// ===========================================================================
+//  CONTEO FÍSICO por ubicación (Bloque 5)
+//  Un conteo cerrado = fotografía verificable del inventario de esa ubicación.
+// ===========================================================================
+
+enum EstadoConteo {
+  borrador
+  en_captura
+  cerrado
+  reabierto
+}
+
+model conteos {
+  id           BigInt          @id @default(autoincrement())
+  negocio_id   BigInt
+  ubicacion_id BigInt
+  estado       EstadoConteo    @default(en_captura)
+  creado_por   BigInt
+  creado_at    DateTime        @default(now()) @db.Timestamptz(6)
+  cerrado_por  BigInt?
+  cerrado_at   DateTime?       @db.Timestamptz(6)
+  notas        String?
+  ubicaciones  ubicaciones     @relation(fields: [ubicacion_id], references: [id])
+  lineas       conteo_lineas[]
+
+  @@index([negocio_id, ubicacion_id])
+  @@index([ubicacion_id, estado])
+}
+
+model conteo_lineas {
+  conteo_id  BigInt
+  product_id BigInt
+  qty        Decimal  @default(0) @db.Decimal(12, 3)
+  unidad_id  BigInt
+  factor     Decimal  @default(1) @db.Decimal(12, 4)
+  contado    Boolean  @default(false)
+  atipico    Boolean  @default(false)
+  comentario String?
+  conteos    conteos  @relation(fields: [conteo_id], references: [id], onDelete: Cascade)
+  products   products @relation(fields: [product_id], references: [id])
+
+  @@id([conteo_id, product_id])
   @@index([product_id])
 }

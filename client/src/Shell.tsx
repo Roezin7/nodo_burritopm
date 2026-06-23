@@ -6,15 +6,19 @@ import { Icono } from './icons';
 import { useOffline } from './offline';
 import NodoIsotipo from './brand/NodoIsotipo';
 
+import type { Rol } from './auth';
+
 interface Item {
   ruta: string;
   label: string;
   icono: Parameters<typeof Icono>[0]['name'];
   soloAdmin?: boolean;
+  roles?: Rol[]; // si se define, solo estos roles ven el ítem
 }
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Inicio', icono: 'home' },
+  { ruta: '/conteo', label: 'Conteo', icono: 'package', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
 ];
 
@@ -23,7 +27,11 @@ export default function Shell({ children }: { children: ReactNode }) {
   const { tema, alternar } = useTema();
   const { online, pendientes, sincronizar } = useOffline();
 
-  const items = ITEMS.filter((i) => !i.soloAdmin || usuario?.rol === 'admin');
+  const items = ITEMS.filter((i) => {
+    if (i.soloAdmin && usuario?.rol !== 'admin') return false;
+    if (i.roles && !(usuario && i.roles.includes(usuario.rol))) return false;
+    return true;
+  });
 
   const syncChip = !online ? (
     <span className="ctx-chip ctx-chip--off">
