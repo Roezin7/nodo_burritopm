@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
+import { FlujoStepper } from '../../flujo';
 
 interface ConteoResumen {
   id: number;
@@ -110,6 +111,7 @@ export default function Conteo() {
           <p className="page-sub">Captura el inventario de tu ubicación.</p>
         </div>
       </header>
+      <FlujoStepper activo="conteo" />
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes ubicaciones asignadas. Pide a un administrador que te asigne una.</p>

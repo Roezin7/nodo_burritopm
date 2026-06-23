@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
+import { EstadoDistChip, FlujoStepper } from '../../flujo';
 
 interface LineaRec {
   linea_id: number;
@@ -67,8 +68,9 @@ export default function Recepcion() {
   return (
     <div className="page conteo-page">
       <header className="page-head">
-        <div><h1>Recepción</h1><p className="page-sub">Confirma lo que llega del camión.</p></div>
+        <div><h1>Recepción 📥</h1><p className="page-sub">Confirma lo que llega del camión.</p></div>
       </header>
+      <FlujoStepper activo="recepcion" />
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes una sucursal asignada.</p>
@@ -87,7 +89,7 @@ export default function Recepcion() {
           ) : (
             dists.map((d) => (
               <div key={d.id} className="card">
-                <div className="card-head"><strong>Distribución #{d.id}</strong> <span className="chip chip--info">{d.estado}</span></div>
+                <div className="card-head"><strong>Distribución #{d.id}</strong> <EstadoDistChip estado={d.estado} /></div>
                 {d.lineas.map((l) => (
                   <div key={l.linea_id} className="dist-row">
                     <div className="conteo-prod">

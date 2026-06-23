@@ -75,6 +75,7 @@ model ubicaciones {
   conteos             conteos[]
   distribucion_lineas distribucion_lineas[]
   existencias         existencias[]
+  ruta_paradas        ruta_paradas[]
   mov_origen          movimientos_inventario[] @relation("mov_origen")
   mov_destino         movimientos_inventario[] @relation("mov_destino")
 
@@ -294,6 +295,7 @@ model distribuciones {
   cargado_at    DateTime?           @db.Timestamptz(6)
   notas         String?
   lineas        distribucion_lineas[]
+  rutas         rutas[]
 
   @@index([negocio_id])
 }
@@ -411,4 +413,66 @@ model incidencias {
   resuelto_por         BigInt?
 
   @@index([negocio_id, estado])
+}
+
+// ===========================================================================
+//  RUTAS DE ENTREGA (Bloque 12)
+//  El admin planea una ruta: subconjunto ordenado de sucursales de una
+//  distribución. El repartidor entrega parada por parada (1 toque) y la
+//  sucursal confirma la recepción aparte. La ruta solo orquesta el orden y el
+//  estado de entrega; el inventario lo sigue moviendo la recepción (recibir).
+// ===========================================================================
+
+enum EstadoRuta {
+  planificada // el admin la está armando
+  en_curso // el camión salió (distribución en tránsito)
+  completada // todas las paradas entregadas
+  cerrada
+  cancelada
+}
+
+enum EstadoParada {
+  pendiente // aún no llega el repartidor
+  en_camino // siguiente parada activa
+  entregada // el repartidor dejó la orden
+  confirmada // la sucursal confirmó la recepción
+  con_incidencia // entrega/recepción con diferencia
+  omitida // no se entregó (se saltó la parada)
+}
+
+model rutas {
+  id              BigInt         @id @default(autoincrement())
+  negocio_id      BigInt
+  distribucion_id BigInt
+  nombre          String?
+  estado          EstadoRuta     @default(planificada)
+  repartidor_id   BigInt?
+  creado_por      BigInt
+  creado_at       DateTime       @default(now()) @db.Timestamptz(6)
+  despachada_at   DateTime?      @db.Timestamptz(6)
+  completada_at   DateTime?      @db.Timestamptz(6)
+  notas           String?
+  distribuciones  distribuciones @relation(fields: [distribucion_id], references: [id], onDelete: Cascade)
+  paradas         ruta_paradas[]
+
+  @@index([negocio_id])
+  @@index([distribucion_id])
+  @@index([repartidor_id])
+}
+
+model ruta_paradas {
+  id            BigInt       @id @default(autoincrement())
+  ruta_id       BigInt
+  ubicacion_id  BigInt
+  orden         Int
+  estado        EstadoParada @default(pendiente)
+  entregada_por BigInt?
+  entregada_at  DateTime?    @db.Timestamptz(6)
+  confirmada_at DateTime?    @db.Timestamptz(6)
+  notas         String?
+  rutas         rutas        @relation(fields: [ruta_id], references: [id], onDelete: Cascade)
+  ubicaciones   ubicaciones  @relation(fields: [ubicacion_id], references: [id])
+
+  @@unique([ruta_id, ubicacion_id])
+  @@index([ruta_id])
 }

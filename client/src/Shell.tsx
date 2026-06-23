@@ -4,7 +4,7 @@ import { useAuth } from './auth';
 import { useTema } from './theme';
 import { Icono } from './icons';
 import { useOffline } from './offline';
-import NodoIsotipo from './brand/NodoIsotipo';
+import BurritoLockup from './brand/BurritoLockup';
 
 import type { Rol } from './auth';
 
@@ -21,6 +21,7 @@ const ITEMS: Item[] = [
   { ruta: '/conteo', label: 'Conteo', icono: 'package', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
   { ruta: '/bodega', label: 'Bodega', icono: 'package', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/ruta', label: 'Ruta', icono: 'truck', roles: ['admin', 'repartidor'] },
   { ruta: '/recepcion', label: 'Recepción', icono: 'checks', roles: ['admin', 'encargado_sucursal'] },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'wallet', soloAdmin: true },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
@@ -56,8 +57,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     <div className="shell">
       <aside className="nav-rail">
         <div className="nav-brand">
-          <NodoIsotipo size={30} />
-          <span className="nav-wordmark">NODO</span>
+          <BurritoLockup size={30} variante="rail" />
         </div>
         <nav className="nav-links">
           {items.map((i) => (

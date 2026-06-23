@@ -15,14 +15,19 @@
   --border: #e6e0d7;
   --border-strong: #d5ccbf;
 
-  /* Marca Ibérico — acento disciplinado */
-  --brand: #6e1423;
-  --brand-tint: #f3e3e1;
+  /* Marca Burrito Parrilla — verde protagonista */
+  --brand: #1e8a3c;
+  --brand-strong: #15722f;
+  --brand-tint: #e3f3e6;
 
-  /* Acción primaria = tinta (no rojo: choca con peligro) */
-  --primary: #1b1815;
-  --primary-hover: #2e2a25;
-  --on-primary: #faf8f4;
+  /* Acento rojo Burrito — energía/llamadas de atención (no es peligro) */
+  --accent: #e5392b;
+  --accent-tint: #fde6e3;
+
+  /* Acción primaria = verde de marca (estilo fast-food, alegre y claro) */
+  --primary: #1e8a3c;
+  --primary-hover: #15722f;
+  --on-primary: #ffffff;
 
   /* Semánticos */
   --success: #1e7a46;
@@ -72,12 +77,16 @@
   --border: #342e26;
   --border-strong: #463e33;
 
-  --brand: #c24a5a;
-  --brand-tint: #3a2024;
+  --brand: #4cc16a;
+  --brand-strong: #3da856;
+  --brand-tint: #16331f;
 
-  --primary: #f3eee6;
-  --primary-hover: #e4ddd2;
-  --on-primary: #1b1815;
+  --accent: #ef5b4f;
+  --accent-tint: #3a1c19;
+
+  --primary: #4cc16a;
+  --primary-hover: #3da856;
+  --on-primary: #10240f;
 
   --success: #4fb87e;
   --success-bg: #16331f;
@@ -1826,3 +1835,210 @@ select:disabled {
 .kpi-card--warn { border-color: color-mix(in srgb, #d98324 55%, var(--border)); }
 .kpi-label { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
 .kpi-card .big-number small { font-size: 0.9rem; font-weight: 400; }
+
+/* ============================================================================
+   Bloque 12 — Marca BurritoPM, flujo visual, carga total y rutas de entrega
+   ========================================================================== */
+
+/* ── Lockup co-branded NODO · BurritoPM ────────────────────────────────────── */
+.bpm-lockup { display: flex; align-items: center; gap: 0.55rem; }
+.bpm-lockup-text { display: flex; flex-direction: column; line-height: 1; }
+.bpm-lockup-nodo {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+.bpm-lockup-burrito {
+  font-family: var(--font-brand);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 1.15rem;
+  color: var(--brand);
+  margin-top: 0.05rem;
+}
+.bpm-lockup-pm {
+  font-family: var(--font-ui);
+  font-style: normal;
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  vertical-align: super;
+  margin-left: 0.12rem;
+}
+.bpm-lockup--full .bpm-lockup-nodo { font-size: 1.7rem; }
+.bpm-lockup--full .bpm-lockup-burrito { font-size: 1.85rem; }
+.bpm-lockup--full .bpm-lockup-pm { font-size: 0.85rem; }
+
+/* ── Chips de estado de ruta/parada (color fuerte, fast-food) ──────────────── */
+.chip--accent { background: var(--accent-tint); color: var(--accent); }
+.chip--muted { background: var(--surface-2); color: var(--ink-3); }
+.chip-estado { font-weight: 700; }
+
+/* ── Stepper de flujo (Conteo → Plan → Bodega → Ruta → Recepción) ──────────── */
+.flujo-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.4rem 0;
+  margin-bottom: 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+.flujo-paso {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--ink-3);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.flujo-paso .flujo-num {
+  display: inline-grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--ink-2);
+  font-size: 0.72rem;
+}
+.flujo-paso--on { background: var(--brand-tint); color: var(--brand); }
+.flujo-paso--on .flujo-num { background: var(--brand); color: var(--on-primary); }
+.flujo-paso--done { color: var(--success); }
+.flujo-paso--done .flujo-num { background: var(--success); color: #fff; }
+.flujo-sep { color: var(--ink-3); flex: 0 0 auto; }
+
+/* ── Lista de carga total (bodega) ─────────────────────────────────────────── */
+.carga-total-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.carga-total-item:last-child { border-bottom: 0; }
+.carga-total-qty {
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+  font-size: 1.35rem;
+  color: var(--brand);
+  white-space: nowrap;
+}
+.carga-total-qty small { font-size: 0.8rem; color: var(--ink-3); font-weight: 500; }
+
+/* ── Ruta del repartidor — paradas grandes y táctiles ──────────────────────── */
+.ruta-progreso {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.25rem 0 1rem;
+}
+.ruta-progreso-barra {
+  flex: 1;
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ruta-progreso-fill { height: 100%; background: var(--brand); transition: width 0.35s ease; }
+.ruta-progreso-num { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
+
+.parada-card {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  text-align: left;
+  border: 2px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  padding: 1rem;
+  margin-bottom: 0.7rem;
+  box-shadow: var(--sh-sm);
+  cursor: pointer;
+}
+.parada-card--actual { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
+.parada-card--cerrada { opacity: 0.7; }
+.parada-orden {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-weight: 800;
+  font-size: 1.2rem;
+  flex: 0 0 auto;
+}
+.parada-card--cerrada .parada-orden { background: var(--success-bg); color: var(--success); }
+.parada-info { flex: 1; min-width: 0; }
+.parada-info strong { font-size: 1.1rem; display: block; }
+.parada-info small { color: var(--ink-3); }
+
+/* Vista de una parada (pantalla completa táctil) */
+.parada-items { margin: 0.5rem 0 1rem; }
+.parada-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.05rem;
+}
+.parada-item-qty { font-family: var(--font-mono, monospace); font-weight: 700; font-size: 1.3rem; }
+.btn-entregar {
+  width: 100%;
+  padding: 1.3rem;
+  font-size: 1.4rem;
+  font-weight: 800;
+  border-radius: var(--r-card);
+  letter-spacing: 0.02em;
+}
+.btn-problema {
+  width: 100%;
+  padding: 0.85rem;
+  margin-top: 0.6rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border: 0;
+  border-radius: var(--r-card);
+  cursor: pointer;
+}
+
+/* ── Tablero de rutas del admin (línea de tiempo de paradas) ───────────────── */
+.ruta-tablero { display: flex; flex-direction: column; gap: 0.5rem; }
+.ruta-parada-fila {
+  display: grid;
+  grid-template-columns: 1.8rem 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.ruta-parada-fila:last-child { border-bottom: 0; }
+.ruta-dot {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: var(--border);
+  justify-self: center;
+}
+.ruta-dot--pendiente { background: var(--border-strong); }
+.ruta-dot--en_camino { background: var(--warning); }
+.ruta-dot--entregada { background: var(--brand); }
+.ruta-dot--confirmada { background: var(--success); }
+.ruta-dot--con_incidencia { background: var(--danger); }
+.ruta-dot--omitida { background: var(--ink-3); }

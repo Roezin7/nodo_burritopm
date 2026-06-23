@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import { useAuth, type Usuario } from '../auth';
-import NodoIsotipo from '../brand/NodoIsotipo';
+import BurritoLockup from '../brand/BurritoLockup';
 
 export default function Login() {
   const { login } = useAuth();
@@ -43,8 +43,7 @@ export default function Login() {
     return (
       <div className="login">
         <div className="login__lockup">
-          <NodoIsotipo size={64} glow />
-          <div className="login__wordmark">NODO</div>
+          <BurritoLockup size={64} variante="full" glow />
         </div>
         <p className="subtitle">¿Quién eres?</p>
         <div className="user-grid">

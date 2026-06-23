@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../auth/middleware.js';
 import * as svc from './service.js';
+import * as rutas from './rutas.service.js';
 
 export const distribucionesRouter = Router();
 
@@ -181,5 +182,34 @@ distribucionesRouter.post(
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     res.json(await svc.confirmarCarga(req.auth!.negocioId, id, req.auth!.usuarioId));
+  }),
+);
+
+// ───────── Ruta de entrega (admin planea; bodega/repartidor consultan) ─────────
+
+/** GET /distribuciones/:id/ruta — detalle de la ruta (paradas + items). */
+distribucionesRouter.get(
+  '/:id/ruta',
+  requireRole('admin', 'encargado_bodega', 'repartidor'),
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await rutas.rutaDetalle(req.auth!.negocioId, id));
+  }),
+);
+
+/** PUT /distribuciones/:id/ruta { repartidor_id?, nombre?, paradas:[{ubicacion_id,orden}] } */
+distribucionesRouter.put(
+  '/:id/ruta',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const b = z
+      .object({
+        repartidor_id: z.coerce.number().int().positive().nullable().optional(),
+        nombre: z.string().trim().min(1).max(120).optional(),
+        paradas: z.array(z.object({ ubicacion_id: z.coerce.number().int().positive(), orden: z.coerce.number().int().nonnegative() })),
+      })
+      .parse(req.body);
+    res.json(await rutas.crearOActualizarRuta(req.auth!.negocioId, id, req.auth!.usuarioId, b));
   }),
 );

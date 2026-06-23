@@ -78,6 +78,14 @@ const PATHS: Record<string, JSX.Element> = {
       <circle cx="12" cy="10" r="2.5" />
     </>
   ),
+  truck: (
+    <>
+      <path d="M2 6.5A1.5 1.5 0 0 1 3.5 5H14a1 1 0 0 1 1 1v9H3a1 1 0 0 1-1-1V6.5Z" />
+      <path d="M15 8h3.6a1 1 0 0 1 .8.4L22 12v3a1 1 0 0 1-1 1h-6" />
+      <circle cx="7" cy="17.5" r="1.8" />
+      <circle cx="17.5" cy="17.5" r="1.8" />
+    </>
+  ),
   chevron: <path d="M9 6l6 6-6 6" />,
   back: <path d="M15 6l-6 6 6 6" />,
   sparkles: (

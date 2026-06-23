@@ -3,6 +3,7 @@ import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { sugerirEnvio, valor } from './logic.js';
 import { aplicarMovimiento } from '../ledger/service.js';
+import { despacharRutaDeDist, sellarParadaPorRecepcion } from './rutas.service.js';
 
 /** Último conteo CERRADO de la ubicación: mapa product_id(string) → disponible, y su id. */
 async function disponibleConteo(ubicacionId: bigint) {
@@ -320,6 +321,8 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_cargada: cargada } });
     }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
+    // Si el admin ya planeó la ruta, el camión cargado la pone en curso.
+    await despacharRutaDeDist(tx, negocioId, id);
   });
   return { ok: true };
 }
@@ -379,6 +382,7 @@ export async function recibirDistribucion(
     where: { distribucion_id: id, ubicacion_destino_id: ubicacionId },
   });
 
+  let incidenciaEnSucursal = false;
   await prisma.$transaction(async (tx) => {
     for (const l of lineas) {
       if (l.cantidad_recibida != null) continue; // ya recibida (idempotencia a nivel línea)
@@ -412,6 +416,7 @@ export async function recibirDistribucion(
       let incidenciaId: bigint | null = null;
       let estadoLinea = 'recibido';
       if (diff !== 0) {
+        incidenciaEnSucursal = true;
         estadoLinea = recibida === 0 ? 'no_recibido' : 'incidencia';
         const inc = await tx.incidencias.create({
           data: {
@@ -440,6 +445,8 @@ export async function recibirDistribucion(
     const conIncidencia = await tx.distribucion_lineas.count({ where: { distribucion_id: id, incidencia_id: { not: null } } });
     const nuevoEstado = pendientes > 0 ? 'parcialmente_entregada' : conIncidencia > 0 ? 'cerrada_con_incidencias' : 'cerrada';
     await tx.distribuciones.update({ where: { id }, data: { estado: nuevoEstado } });
+    // Sella la parada de esta sucursal en la ruta (si existe).
+    await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal);
   });
   return { ok: true };
 }
@@ -462,28 +469,47 @@ export async function operacionDetalle(negocioId: bigint, id: bigint) {
     },
   });
   const grupos = new Map<string, { ubicacion: { id: number; nombre: string }; items: unknown[] }>();
+  // Carga total: suma por producto de la cantidad que va al camión, entre todas las sucursales.
+  const total = new Map<string, { product_id: number; nombre: string; unidad: string; categoria: string | null; total_aprobada: number; total_a_cargar: number }>();
   for (const l of lineas) {
     const k = l.ubicacion_destino_id.toString();
     if (!grupos.has(k)) grupos.set(k, { ubicacion: { id: Number(l.ubicaciones.id), nombre: l.ubicaciones.nombre }, items: [] });
+    const aprobada = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+    const aCargar = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? num(l.cantidad_preparada) ?? aprobada;
     grupos.get(k)!.items.push({
       linea_id: Number(l.id),
       product_id: Number(l.product_id),
       nombre: l.products.nombre,
       unidad: l.products.unidad_distribucion.nombre,
       categoria: l.products.categorias?.nombre ?? null,
-      cantidad_aprobada: num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida),
+      cantidad_aprobada: aprobada,
       cantidad_preparada: num(l.cantidad_preparada),
       cantidad_verificada: num(l.cantidad_verificada),
       cantidad_cargada: num(l.cantidad_cargada),
       cantidad_recibida: num(l.cantidad_recibida),
       estado_linea: l.estado_linea,
     });
+    const pk = l.product_id.toString();
+    if (!total.has(pk)) {
+      total.set(pk, {
+        product_id: Number(l.product_id),
+        nombre: l.products.nombre,
+        unidad: l.products.unidad_distribucion.nombre,
+        categoria: l.products.categorias?.nombre ?? null,
+        total_aprobada: 0,
+        total_a_cargar: 0,
+      });
+    }
+    const t = total.get(pk)!;
+    t.total_aprobada = redondear3(t.total_aprobada + aprobada);
+    t.total_a_cargar = redondear3(t.total_a_cargar + aCargar);
   }
   return {
     id: Number(dist.id),
     estado: dist.estado,
     preparado_por: dist.preparado_por ? Number(dist.preparado_por) : null,
     verificado_por: dist.verificado_por ? Number(dist.verificado_por) : null,
+    total_carga: [...total.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     grupos: [...grupos.values()].sort((a, b) => a.ubicacion.nombre.localeCompare(b.ubicacion.nombre, 'es')),
   };
 }

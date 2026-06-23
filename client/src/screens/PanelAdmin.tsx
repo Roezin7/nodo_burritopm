@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
+import { ParadaChip } from '../flujo';
 
 interface Panel {
   sucursales_total: number;
@@ -15,13 +16,32 @@ interface Panel {
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
+interface RutaParada {
+  parada_id: number;
+  ubicacion: { id: number; nombre: string };
+  orden: number;
+  estado: string;
+}
+interface RutaDetalle {
+  ruta_id: number;
+  estado: string;
+  repartidor: { id: number; nombre: string } | null;
+  paradas: RutaParada[];
+}
+
 export default function PanelAdmin() {
   const [p, setP] = useState<Panel | null>(null);
+  const [ruta, setRuta] = useState<RutaDetalle | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     api<Panel>('/dashboard').then(setP).catch(() => setError('No se pudo cargar el panel'));
   }, []);
+
+  useEffect(() => {
+    if (!p?.distribucion_actual) { setRuta(null); return; }
+    api<RutaDetalle | null>(`/distribuciones/${p.distribucion_actual.id}/ruta`).then(setRuta).catch(() => setRuta(null));
+  }, [p?.distribucion_actual?.id]);
 
   if (error) return <p className="error-msg">{error}</p>;
   if (!p) return <p className="muted">Cargando panel…</p>;
@@ -70,6 +90,24 @@ export default function PanelAdmin() {
           <p className="muted">Aún no hay distribuciones. Calcula una cuando las sucursales cierren su conteo.</p>
         )}
       </div>
+
+      {ruta && ruta.paradas.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <strong>Avance de la ruta</strong>
+            <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}</span>
+          </div>
+          <div className="ruta-tablero">
+            {[...ruta.paradas].sort((a, b) => a.orden - b.orden).map((p) => (
+              <div key={p.parada_id} className="ruta-parada-fila">
+                <span className={`ruta-dot ruta-dot--${p.estado}`} />
+                <span><strong>{p.orden}. {p.ubicacion.nombre}</strong></span>
+                <ParadaChip estado={p.estado} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-head"><strong>Valor por ubicación</strong></div>

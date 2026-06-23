@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import { EstadoDistChip, ParadaChip, FlujoStepper } from '../../flujo';
 
 interface DistResumen {
   id: number;
@@ -58,6 +59,8 @@ export default function Distribucion() {
         </div>
       </header>
 
+      <FlujoStepper activo="plan" />
+
       {error && <p className="error-msg">{error}</p>}
       {info && <p className="muted">{info}</p>}
 
@@ -76,7 +79,7 @@ export default function Distribucion() {
             <button key={d.id} className="card card-click" onClick={() => setAbierta(d.id)}>
               <div className="ubic-row">
                 <div>
-                  <strong>Distribución #{d.id}</strong> <EstadoChip estado={d.estado} />
+                  <strong>Distribución #{d.id}</strong> <EstadoDistChip estado={d.estado} />
                   <div className="muted">
                     {new Date(d.creado_at).toLocaleString('es-MX', { timeZone: 'America/Chicago' })} · {d.total_lineas} líneas
                   </div>
@@ -89,12 +92,6 @@ export default function Distribucion() {
       )}
     </div>
   );
-}
-
-function EstadoChip({ estado }: { estado: string }) {
-  const cls: Record<string, string> = { aprobada: 'chip chip--ok', calculada: 'chip chip--info', en_revision: 'chip chip--warn' };
-  const label: Record<string, string> = { aprobada: 'Aprobada', calculada: 'Calculada', en_revision: 'En revisión' };
-  return <span className={cls[estado] ?? 'chip'}>{label[estado] ?? estado}</span>;
 }
 
 // ───────────────────────── Consolidado ─────────────────────────────────────
@@ -140,21 +137,24 @@ interface VistaProducto {
 }
 
 function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
-  const [vista, setVista] = useState<'producto' | 'sucursal'>('producto');
+  const [vista, setVista] = useState<'producto' | 'sucursal' | 'ruta'>('producto');
   const [prod, setProd] = useState<VistaProducto | null>(null);
   const [suc, setSuc] = useState<VistaSucursal | null>(null);
   const [edits, setEdits] = useState<Record<number, string>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const estado = vista === 'producto' ? prod?.estado : suc?.estado;
+  // El estado lo conocemos de cualquier vista ya cargada.
+  const estado = prod?.estado ?? suc?.estado;
   const editable = estado === 'calculada' || estado === 'en_revision';
+  const puedeRuta = estado != null && !['calculada', 'en_revision'].includes(estado);
 
   async function cargar() {
     setError('');
     try {
       if (vista === 'producto') setProd(await api<VistaProducto>(`/distribuciones/${id}/consolidado?vista=producto`));
-      else setSuc(await api<VistaSucursal>(`/distribuciones/${id}/consolidado?vista=sucursal`));
+      else if (vista === 'sucursal') setSuc(await api<VistaSucursal>(`/distribuciones/${id}/consolidado?vista=sucursal`));
+      else if (!prod && !suc) setProd(await api<VistaProducto>(`/distribuciones/${id}/consolidado?vista=producto`));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Error al cargar el consolidado');
     }
@@ -197,16 +197,19 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
       <header className="page-head">
         <div>
           <button className="link-btn" onClick={onSalir}>← Distribuciones</button>
-          <h1>Distribución #{id} {estado && <EstadoChip estado={estado} />}</h1>
+          <h1>Distribución #{id} {estado && <EstadoDistChip estado={estado} />}</h1>
         </div>
       </header>
 
       <div className="tabs">
         <button className={vista === 'producto' ? 'tab tab--on' : 'tab'} onClick={() => setVista('producto')}>Por producto</button>
         <button className={vista === 'sucursal' ? 'tab tab--on' : 'tab'} onClick={() => setVista('sucursal')}>Por sucursal</button>
+        {puedeRuta && <button className={vista === 'ruta' ? 'tab tab--on' : 'tab'} onClick={() => setVista('ruta')}>Ruta</button>}
       </div>
 
       {error && <p className="error-msg">{error}</p>}
+
+      {vista === 'ruta' && <RutaPlanner id={id} />}
 
       {vista === 'producto' && prod && (
         <>
@@ -265,7 +268,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
         </>
       )}
 
-      {editable && (
+      {editable && vista !== 'ruta' && (
         <div className="action-bar">
           {vista === 'sucursal' && (
             <button className="btn btn-secondary" onClick={() => void guardarAjustes()} disabled={busy || Object.keys(edits).length === 0}>
@@ -276,5 +279,162 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ───────────────────────── Planificador de ruta (admin) ────────────────────
+interface RutaParada {
+  parada_id: number;
+  ubicacion: { id: number; nombre: string; direccion: string | null };
+  orden: number;
+  estado: string;
+}
+interface RutaDetalle {
+  ruta_id: number;
+  estado: string;
+  repartidor: { id: number; nombre: string } | null;
+  paradas: RutaParada[];
+}
+interface UsuarioBasico { id: number; nombre: string; rol: string }
+interface Sucursal { id: number; nombre: string }
+
+function RutaPlanner({ id }: { id: number }) {
+  const [ruta, setRuta] = useState<RutaDetalle | null>(null);
+  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  const [repartidores, setRepartidores] = useState<UsuarioBasico[]>([]);
+  const [orden, setOrden] = useState<Sucursal[]>([]); // sucursales seleccionadas, en orden
+  const [repartidorId, setRepartidorId] = useState<string>('');
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function cargar() {
+    setError('');
+    try {
+      const [r, sucCons, usuarios] = await Promise.all([
+        api<RutaDetalle | null>(`/distribuciones/${id}/ruta`),
+        api<VistaSucursal>(`/distribuciones/${id}/consolidado?vista=sucursal`),
+        api<UsuarioBasico[]>('/auth/usuarios?negocio=1', { auth: false }),
+      ]);
+      const sucs = sucCons.grupos.map((g) => ({ id: g.ubicacion.id, nombre: g.ubicacion.nombre }));
+      setSucursales(sucs);
+      setRepartidores(usuarios.filter((u) => u.rol === 'repartidor'));
+      setRuta(r);
+      if (r) {
+        setOrden(r.paradas.sort((a, b) => a.orden - b.orden).map((p) => ({ id: p.ubicacion.id, nombre: p.ubicacion.nombre })));
+        setRepartidorId(r.repartidor ? String(r.repartidor.id) : '');
+      } else {
+        setOrden(sucs); // por defecto, todas en el orden del consolidado
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Error al cargar la ruta');
+    }
+  }
+  useEffect(() => { void cargar(); /* eslint-disable-next-line */ }, [id]);
+
+  const bloqueada = ruta != null && ruta.estado !== 'planificada';
+  const seleccionadas = new Set(orden.map((s) => s.id));
+  const disponibles = sucursales.filter((s) => !seleccionadas.has(s.id));
+
+  function mover(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= orden.length) return;
+    const next = [...orden];
+    [next[i], next[j]] = [next[j], next[i]];
+    setOrden(next);
+  }
+  const quitar = (sid: number) => setOrden(orden.filter((s) => s.id !== sid));
+  const agregar = (s: Sucursal) => setOrden([...orden, s]);
+
+  async function guardar() {
+    if (orden.length === 0) { setError('Agrega al menos una parada'); return; }
+    setBusy(true); setError(''); setInfo('');
+    try {
+      await api(`/distribuciones/${id}/ruta`, {
+        method: 'PUT',
+        body: {
+          repartidor_id: repartidorId ? Number(repartidorId) : null,
+          paradas: orden.map((s, i) => ({ ubicacion_id: s.id, orden: i + 1 })),
+        },
+      });
+      setInfo('Ruta guardada');
+      await cargar();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No se pudo guardar la ruta');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (bloqueada && ruta) {
+    // Ruta despachada o completada: tablero de solo lectura.
+    return (
+      <div className="card">
+        <div className="card-head">
+          <strong>Ruta {ruta.estado === 'completada' ? 'completada' : 'en curso'}</strong>
+          <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}</span>
+        </div>
+        <div className="ruta-tablero">
+          {ruta.paradas.sort((a, b) => a.orden - b.orden).map((p) => (
+            <div key={p.parada_id} className="ruta-parada-fila">
+              <span className={`ruta-dot ruta-dot--${p.estado}`} />
+              <span><strong>{p.orden}. {p.ubicacion.nombre}</strong></span>
+              <ParadaChip estado={p.estado} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {error && <p className="error-msg">{error}</p>}
+      {info && <p className="muted">{info}</p>}
+
+      <div className="card">
+        <label className="so-ubic">Repartidor
+          <select value={repartidorId} onChange={(e) => setRepartidorId(e.target.value)}>
+            <option value="">— Sin asignar —</option>
+            {repartidores.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+          </select>
+        </label>
+        {repartidores.length === 0 && <p className="muted">No hay usuarios con rol repartidor. Créalos en Configuración.</p>}
+      </div>
+
+      <div className="card">
+        <div className="card-head"><strong>Orden de entrega</strong><span className="muted">{orden.length} paradas</span></div>
+        {orden.length === 0 ? (
+          <p className="muted">Agrega sucursales desde la lista de abajo.</p>
+        ) : (
+          orden.map((s, i) => (
+            <div key={s.id} className="ruta-parada-fila">
+              <span className="parada-orden" style={{ width: '2rem', height: '2rem', fontSize: '1rem' }}>{i + 1}</span>
+              <span><strong>{s.nombre}</strong></span>
+              <span style={{ display: 'flex', gap: '0.3rem' }}>
+                <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={i === 0} onClick={() => mover(i, -1)}>↑</button>
+                <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={i === orden.length - 1} onClick={() => mover(i, 1)}>↓</button>
+                <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} onClick={() => quitar(s.id)}>✕</button>
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {disponibles.length > 0 && (
+        <div className="card">
+          <div className="card-head"><strong>Sucursales fuera de la ruta</strong></div>
+          <div className="dist-suc-mini">
+            {disponibles.map((s) => (
+              <button key={s.id} className="chip chip--info" style={{ cursor: 'pointer', border: 0 }} onClick={() => agregar(s)}>+ {s.nombre}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="action-bar">
+        <button className="btn btn-primary" disabled={busy} onClick={() => void guardar()}>Guardar ruta</button>
+      </div>
+    </>
   );
 }
