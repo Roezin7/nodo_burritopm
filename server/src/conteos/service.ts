@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
+import { reconciliarConteo } from '../ledger/service.js';
 
 const EDITABLES = ['borrador', 'en_captura', 'reabierto'] as const;
 type EstadoEditable = (typeof EDITABLES)[number];
@@ -156,6 +157,8 @@ export async function cerrarConteo(negocioId: bigint, conteoId: bigint, usuarioI
     where: { id: conteoId },
     data: { estado: 'cerrado', cerrado_por: usuarioId, cerrado_at: new Date() },
   });
+  // Un conteo cerrado es la verdad física: sincroniza las existencias de la ubicación.
+  await reconciliarConteo(negocioId, conteoId, usuarioId, conteo.ubicacion_id);
   return { ok: true };
 }
 
