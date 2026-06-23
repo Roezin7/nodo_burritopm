@@ -1810,3 +1810,19 @@ select:disabled {
 }
 .dist-input { text-align: right; }
 .dist-aprob { text-align: right; font-weight: 600; }
+
+/* ── Panel admin / dashboard (Bloque 7) ────────────────────────────────────── */
+.panel-admin { margin-bottom: 1.5rem; }
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  box-shadow: var(--sh-sm);
+}
+.kpi-card--warn { border-color: color-mix(in srgb, #d98324 55%, var(--border)); }
+.kpi-label { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+.kpi-card .big-number small { font-size: 0.9rem; font-weight: 400; }

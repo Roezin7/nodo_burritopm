@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth';
+import PanelAdmin from './PanelAdmin';
 
 interface Modulo {
   clave: string;
@@ -37,6 +38,8 @@ export default function Home() {
           <p className="page-sub">¿Qué quieres revisar hoy?</p>
         </div>
       </header>
+
+      {usuario.rol === 'admin' && <PanelAdmin />}
 
       <div className="module-grid">
         {visibles.map((m) =>
