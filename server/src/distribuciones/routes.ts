@@ -112,59 +112,7 @@ distribucionesRouter.get(
   }),
 );
 
-/** POST /distribuciones/:id/preparar — inicia preparación y reserva en bodega. */
-distribucionesRouter.post(
-  '/:id/preparar',
-  bodega,
-  asyncHandler(async (req, res) => {
-    const id = BigInt(idParam.parse(req.params.id));
-    res.json(await svc.prepararDistribucion(req.auth!.negocioId, id, req.auth!.usuarioId));
-  }),
-);
-
-/** PATCH /distribuciones/:id/preparacion { items } — cantidades surtidas. */
-distribucionesRouter.patch(
-  '/:id/preparacion',
-  bodega,
-  asyncHandler(async (req, res) => {
-    const id = BigInt(idParam.parse(req.params.id));
-    const { items } = etapaSchema.parse(req.body);
-    res.json(await svc.guardarPreparacion(req.auth!.negocioId, id, items));
-  }),
-);
-
-/** POST /distribuciones/:id/preparada — cierra preparación. */
-distribucionesRouter.post(
-  '/:id/preparada',
-  bodega,
-  asyncHandler(async (req, res) => {
-    const id = BigInt(idParam.parse(req.params.id));
-    res.json(await svc.marcarPreparada(req.auth!.negocioId, id, req.auth!.usuarioId));
-  }),
-);
-
-/** PATCH /distribuciones/:id/verificacion { items } — cantidades verificadas (2da persona). */
-distribucionesRouter.patch(
-  '/:id/verificacion',
-  bodega,
-  asyncHandler(async (req, res) => {
-    const id = BigInt(idParam.parse(req.params.id));
-    const { items } = etapaSchema.parse(req.body);
-    res.json(await svc.guardarVerificacion(req.auth!.negocioId, id, items));
-  }),
-);
-
-/** POST /distribuciones/:id/verificada — cierra verificación (persona distinta). */
-distribucionesRouter.post(
-  '/:id/verificada',
-  bodega,
-  asyncHandler(async (req, res) => {
-    const id = BigInt(idParam.parse(req.params.id));
-    res.json(await svc.marcarVerificada(req.auth!.negocioId, id, req.auth!.usuarioId));
-  }),
-);
-
-/** PATCH /distribuciones/:id/carga { items } — cantidades a cargar al camión. */
+/** PATCH /distribuciones/:id/carga { items } — surtido: cantidades a cargar al camión. */
 distribucionesRouter.patch(
   '/:id/carga',
   bodega,
@@ -172,6 +120,16 @@ distribucionesRouter.patch(
     const id = BigInt(idParam.parse(req.params.id));
     const { items } = etapaSchema.parse(req.body);
     res.json(await svc.guardarCarga(req.auth!.negocioId, id, items));
+  }),
+);
+
+/** POST /distribuciones/:id/verificada — verificación opcional de 1 toque (sin persona distinta). */
+distribucionesRouter.post(
+  '/:id/verificada',
+  bodega,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.marcarVerificada(req.auth!.negocioId, id, req.auth!.usuarioId));
   }),
 );
 
@@ -190,7 +148,7 @@ distribucionesRouter.post(
 /** GET /distribuciones/:id/ruta — detalle de la ruta (paradas + items). */
 distribucionesRouter.get(
   '/:id/ruta',
-  requireRole('admin', 'encargado_bodega', 'repartidor'),
+  requireRole('admin', 'encargado_bodega'),
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     res.json(await rutas.rutaDetalle(req.auth!.negocioId, id));

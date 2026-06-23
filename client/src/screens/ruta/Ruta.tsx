@@ -65,7 +65,7 @@ export default function Ruta() {
   return (
     <div className="page conteo-page">
       <header className="page-head">
-        <div><h1>Mi ruta 🚐</h1><p className="page-sub">Entrega parada por parada. Toca una parada para empezar.</p></div>
+        <div><h1>Mi ruta</h1><p className="page-sub">Entrega parada por parada. Toca una parada para empezar.</p></div>
       </header>
       <FlujoStepper activo="ruta" />
       {error && <p className="error-msg">{error}</p>}

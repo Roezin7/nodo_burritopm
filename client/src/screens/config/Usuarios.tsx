@@ -12,10 +12,9 @@ interface UsuarioAdmin {
 }
 
 const ROLES: { valor: Rol; label: string }[] = [
-  { valor: 'admin', label: 'Administrador general' },
-  { valor: 'encargado_bodega', label: 'Encargado de bodega' },
-  { valor: 'encargado_sucursal', label: 'Encargado de sucursal' },
-  { valor: 'repartidor', label: 'Repartidor' },
+  { valor: 'admin', label: 'Admin' },
+  { valor: 'encargado_bodega', label: 'Bodega y reparto' },
+  { valor: 'encargado_sucursal', label: 'Sucursal' },
 ];
 const ROL_LABEL = Object.fromEntries(ROLES.map((r) => [r.valor, r.label])) as Record<Rol, string>;
 

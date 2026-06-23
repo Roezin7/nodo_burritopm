@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
-import { useAuth } from './auth';
+import { useAuth, rolLabel } from './auth';
 import { useTema } from './theme';
 import { Icono } from './icons';
 import { useOffline } from './offline';
@@ -18,10 +18,10 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Inicio', icono: 'home' },
-  { ruta: '/conteo', label: 'Conteo', icono: 'package', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
+  { ruta: '/inventario', label: 'Inventario', icono: 'clipboard', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
   { ruta: '/bodega', label: 'Bodega', icono: 'package', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/ruta', label: 'Ruta', icono: 'truck', roles: ['admin', 'repartidor'] },
+  { ruta: '/ruta', label: 'Ruta', icono: 'truck', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/recepcion', label: 'Recepción', icono: 'checks', roles: ['admin', 'encargado_sucursal'] },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'wallet', soloAdmin: true },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
@@ -90,7 +90,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             <span className="ctx-negocio">Burrito Parrilla</span>
             {usuario && (
               <span className="ctx-user">
-                {usuario.nombre} · {usuario.rol}
+                {usuario.nombre} · {rolLabel(usuario.rol)}
               </span>
             )}
           </div>

@@ -107,10 +107,10 @@ async function sembrarDemo(negocioId: bigint) {
   // Usuarios de bodega y sucursal con ubicaciones asignadas.
   const pilsen = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: negocioId, codigo: 'PIL' } });
   const bodega = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: negocioId, codigo: 'BOD' } });
-  const demoUsers: { nombre: string; rol: 'encargado_bodega' | 'encargado_sucursal' | 'repartidor'; pin: string; ubic: bigint | null }[] = [
+  const demoUsers: { nombre: string; rol: 'encargado_bodega' | 'encargado_sucursal'; pin: string; ubic: bigint | null }[] = [
     { nombre: 'Maria (Pilsen)', rol: 'encargado_sucursal', pin: '5678', ubic: pilsen.id },
-    { nombre: 'Beto (Bodega)', rol: 'encargado_bodega', pin: '4321', ubic: bodega.id },
-    { nombre: 'Carlos (Repartidor)', rol: 'repartidor', pin: '9999', ubic: null },
+    { nombre: 'Beto (Bodega y reparto)', rol: 'encargado_bodega', pin: '4321', ubic: bodega.id },
+    { nombre: 'Carlos (Bodega y reparto)', rol: 'encargado_bodega', pin: '9999', ubic: null },
   ];
   for (const u of demoUsers) {
     let usr = await prisma.usuarios.findFirst({ where: { negocio_id: negocioId, nombre: u.nombre } });

@@ -123,7 +123,7 @@ authRouter.post(
 // ---------------------------------------------------------------------------
 //  Administración de usuarios (solo admin)
 // ---------------------------------------------------------------------------
-const rol = z.enum(['admin', 'encargado_bodega', 'encargado_sucursal', 'repartidor']);
+const rol = z.enum(['admin', 'encargado_bodega', 'encargado_sucursal']);
 const idParam = z.coerce.number().int().positive();
 
 /**

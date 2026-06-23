@@ -52,7 +52,7 @@ export async function crearOActualizarRuta(
   }
   if (datos.repartidor_id != null) {
     const rep = await prisma.usuarios.findFirst({
-      where: { id: BigInt(datos.repartidor_id), negocio_id: negocioId, rol: 'repartidor', activo: true },
+      where: { id: BigInt(datos.repartidor_id), negocio_id: negocioId, rol: 'encargado_bodega', activo: true },
       select: { id: true },
     });
     if (!rep) throw new HttpError(400, 'El repartidor indicado no existe o no está activo');

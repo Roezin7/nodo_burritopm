@@ -1370,6 +1370,15 @@ select:disabled {
 .module-emoji {
   font-size: 1.6rem;
 }
+.module-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 14px;
+  background: var(--brand-tint);
+  color: var(--brand);
+}
 .badge-soon {
   font-size: 0.68rem;
   color: var(--ink-3);
@@ -2042,3 +2051,127 @@ select:disabled {
 .ruta-dot--confirmada { background: var(--success); }
 .ruta-dot--con_incidencia { background: var(--danger); }
 .ruta-dot--omitida { background: var(--ink-3); }
+
+/* ============================================================================
+   v2 — selector de ubicación, escala (búsqueda/progreso) y switch de operación
+   ========================================================================== */
+
+/* Selector de ubicación profesional (pills + buscador) */
+.ubic-picker { margin-bottom: 1rem; }
+.ubic-picker-label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--ink-2); margin-bottom: 0.4rem; }
+.ubic-picker-search {
+  width: 100%;
+  max-width: 24rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-input);
+  background: var(--surface);
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+}
+.ubic-picker-pills { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.ubic-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ubic-pill:hover { border-color: var(--brand); }
+.ubic-pill--on { background: var(--brand); border-color: var(--brand); color: var(--on-primary); }
+.ubic-pill-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.35rem;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+}
+.ubic-pill--on .ubic-pill-tag { background: rgba(255, 255, 255, 0.22); color: var(--on-primary); }
+
+/* Búsqueda y progreso (inventario / distribución a escala) */
+.inv-search {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-input);
+  background: var(--surface);
+  color: var(--ink);
+  margin-bottom: 0.8rem;
+}
+.inv-progress {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0;
+  background: var(--bg);
+  margin-bottom: 0.4rem;
+}
+.inv-progress-bar { flex: 1; height: 10px; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; }
+.inv-progress-fill { height: 100%; background: var(--brand); transition: width 0.3s ease; }
+.inv-progress-num { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.dist-filtros { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.dist-filtros .inv-search { margin-bottom: 0; flex: 1; min-width: 12rem; }
+
+/* Cabecera de grupo de categoría con colapso y acción */
+.conteo-grupo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0.2rem;
+}
+.conteo-grupo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: 0;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+.conteo-grupo-caret { transition: transform 0.15s; color: var(--ink-3); }
+.conteo-grupo-caret.is-cerrada { transform: rotate(-90deg); }
+
+/* Switch (toggle) de operación */
+.cfg-switch { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.switch {
+  flex: 0 0 auto;
+  width: 50px;
+  height: 28px;
+  border-radius: var(--r-pill);
+  border: 0;
+  background: var(--border-strong);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.switch--on { background: var(--brand); }
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--sh-sm);
+  transition: transform 0.18s;
+}
+.switch--on .switch-knob { transform: translateX(22px); }

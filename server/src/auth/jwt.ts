@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../env.js';
 
-export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal' | 'repartidor';
+export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal';
 
 export interface JwtPayload {
   sub: string; // usuario_id (string porque viene de BigInt)

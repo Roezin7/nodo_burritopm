@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth, type Rol } from './auth';
 import Login from './screens/Login';
 import Home from './screens/Home';
-import Conteo from './screens/conteo/Conteo';
+import Inventario from './screens/inventario/Inventario';
 import Distribucion from './screens/distribucion/Distribucion';
 import Bodega from './screens/bodega/Bodega';
 import Ruta from './screens/ruta/Ruta';
@@ -37,10 +37,10 @@ function AppBody() {
       <OfflineBanner />
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/conteo" element={<SoloRol roles={['admin', 'encargado_bodega', 'encargado_sucursal']}><Conteo /></SoloRol>} />
+        <Route path="/inventario" element={<SoloRol roles={['admin', 'encargado_bodega', 'encargado_sucursal']}><Inventario /></SoloRol>} />
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
         <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
-        <Route path="/ruta" element={<SoloRol roles={['admin', 'repartidor']}><Ruta /></SoloRol>} />
+        <Route path="/ruta" element={<SoloRol roles={['admin', 'encargado_bodega']}><Ruta /></SoloRol>} />
         <Route path="/recepcion" element={<SoloRol roles={['admin', 'encargado_sucursal']}><Recepcion /></SoloRol>} />
         <Route path="/incidencias" element={<SoloRol roles={['admin']}><Incidencias /></SoloRol>} />
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />

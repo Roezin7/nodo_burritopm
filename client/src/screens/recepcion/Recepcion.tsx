@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { EstadoDistChip, FlujoStepper } from '../../flujo';
+import UbicacionPicker from '../../components/UbicacionPicker';
 
 interface LineaRec {
   linea_id: number;
@@ -68,7 +69,7 @@ export default function Recepcion() {
   return (
     <div className="page conteo-page">
       <header className="page-head">
-        <div><h1>Recepción 📥</h1><p className="page-sub">Confirma lo que llega del camión.</p></div>
+        <div><h1>Recepción</h1><p className="page-sub">Confirma lo que llega del camión.</p></div>
       </header>
       <FlujoStepper activo="recepcion" />
 
@@ -76,13 +77,7 @@ export default function Recepcion() {
         <p className="muted">No tienes una sucursal asignada.</p>
       ) : (
         <>
-          {ubicaciones.length > 1 && (
-            <label className="so-ubic">Sucursal
-              <select value={ubicId} onChange={(e) => setUbicId(e.target.value)}>
-                {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
-              </select>
-            </label>
-          )}
+          <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
           {dists.length === 0 ? (
             <p className="muted">No hay entregas en tránsito para esta sucursal.</p>

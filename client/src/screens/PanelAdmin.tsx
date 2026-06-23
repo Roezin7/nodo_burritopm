@@ -50,11 +50,11 @@ export default function PanelAdmin() {
     <div className="panel-admin">
       <div className="kpi-grid">
         <div className="kpi-card">
-          <span className="kpi-label">Conteos listos</span>
+          <span className="kpi-label">Inventarios listos</span>
           <span className="big-number">{p.conteos_listos}<small className="muted">/{p.sucursales_total}</small></span>
         </div>
         <div className={`kpi-card ${p.conteos_pendientes > 0 ? 'kpi-card--warn' : ''}`}>
-          <span className="kpi-label">Conteos pendientes</span>
+          <span className="kpi-label">Inventarios pendientes</span>
           <span className="big-number">{p.conteos_pendientes}</span>
         </div>
         <div className={`kpi-card ${p.bajo_minimo > 0 ? 'kpi-card--warn' : ''}`}>
@@ -69,7 +69,7 @@ export default function PanelAdmin() {
 
       {p.conteos_pendientes > 0 && (
         <div className="card card--falt">
-          <strong>Sucursales sin conteo cerrado</strong>
+          <strong>Sucursales sin inventario cerrado</strong>
           <div className="dist-suc-mini">
             {p.sucursales_pendientes.map((s) => <span key={s.id}>{s.nombre}</span>)}
           </div>

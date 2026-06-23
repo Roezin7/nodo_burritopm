@@ -10,6 +10,7 @@ import { rutasRouter } from '../distribuciones/rutas.routes.js';
 import { dashboardRouter } from '../dashboard/routes.js';
 import { existenciasRouter } from '../existencias/routes.js';
 import { incidenciasRouter } from '../incidencias/routes.js';
+import { negocioRouter } from '../negocio/routes.js';
 
 export const apiRouter = Router();
 
@@ -33,3 +34,4 @@ apiRouter.use('/rutas', rutasRouter); // Bloque 12 — rutas de entrega
 apiRouter.use('/dashboard', dashboardRouter); // Bloque 7
 apiRouter.use('/existencias', existenciasRouter); // Bloque 8
 apiRouter.use('/incidencias', incidenciasRouter); // Bloque 11
+apiRouter.use('/negocio', negocioRouter); // settings de operación

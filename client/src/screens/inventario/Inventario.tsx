@@ -1,0 +1,333 @@
+import { useEffect, useMemo, useState } from 'react';
+import { api, ApiError } from '../../api';
+import { useAuth, type UbicacionAsignada } from '../../auth';
+import { FlujoStepper } from '../../flujo';
+import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPicker';
+
+interface InventarioResumen {
+  id: number;
+  estado: string;
+  creado_at: string;
+  cerrado_at: string | null;
+  total_lineas: number;
+  contadas: number;
+}
+interface LineaInventario {
+  product_id: number;
+  nombre: string;
+  sku: string;
+  categoria: string | null;
+  unidad: string;
+  qty: number;
+  contado: boolean;
+  atipico: boolean;
+  comentario: string | null;
+  stock_objetivo: number;
+}
+interface InventarioDetalle {
+  id: number;
+  estado: string;
+  editable: boolean;
+  ubicacion: { id: number; nombre: string; tipo: string };
+  creado_at: string;
+  cerrado_at: string | null;
+  lineas: LineaInventario[];
+}
+
+export default function Inventario() {
+  const { usuario } = useAuth();
+  const esAdmin = usuario?.rol === 'admin';
+
+  const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
+  const [ubicId, setUbicId] = useState<string>('');
+  const [inventarios, setInventarios] = useState<InventarioResumen[]>([]);
+  const [detalle, setDetalle] = useState<InventarioDetalle | null>(null);
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(true);
+
+  // Cargar ubicaciones disponibles según rol.
+  useEffect(() => {
+    async function cargarUbic() {
+      try {
+        if (esAdmin) {
+          const us = await api<{ id: number; nombre: string; tipo: 'bodega' | 'sucursal'; activo: boolean }[]>('/ubicaciones');
+          const activas = us.filter((u) => u.activo).map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo, activo: u.activo }));
+          setUbicaciones(activas);
+          if (activas[0]) setUbicId(String(activas[0].id));
+        } else {
+          const asignadas = usuario?.ubicaciones ?? [];
+          setUbicaciones(asignadas);
+          if (asignadas[0]) setUbicId(String(asignadas[0].id));
+        }
+      } catch {
+        setError('No se pudieron cargar las ubicaciones');
+      } finally {
+        setCargando(false);
+      }
+    }
+    void cargarUbic();
+  }, [esAdmin, usuario]);
+
+  async function cargarInventarios(uid: string) {
+    if (!uid) return;
+    try {
+      setInventarios(await api<InventarioResumen[]>(`/conteos?ubicacion=${uid}`));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Error al cargar inventarios');
+    }
+  }
+  useEffect(() => { setDetalle(null); void cargarInventarios(ubicId); }, [ubicId]);
+
+  async function abrir(id: number) {
+    setError('');
+    try {
+      setDetalle(await api<InventarioDetalle>(`/conteos/${id}`));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Error al abrir el inventario');
+    }
+  }
+
+  async function iniciar() {
+    setError('');
+    try {
+      const r = await api<{ id: number }>('/conteos', { method: 'POST', body: { ubicacion_id: Number(ubicId) } });
+      await abrir(r.id);
+      await cargarInventarios(ubicId);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No se pudo iniciar el inventario');
+    }
+  }
+
+  if (cargando) return <div className="page"><p className="muted">Cargando…</p></div>;
+
+  if (detalle) {
+    return <Editor detalle={detalle} onSalir={() => { setDetalle(null); void cargarInventarios(ubicId); }} onRecargar={() => abrir(detalle.id)} />;
+  }
+
+  const opciones: OpcionUbic[] = ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }));
+
+  return (
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1>Inventario</h1>
+          <p className="page-sub">Captura el inventario físico de tu ubicación.</p>
+        </div>
+      </header>
+      <FlujoStepper activo="conteo" />
+
+      {ubicaciones.length === 0 ? (
+        <p className="muted">No tienes ubicaciones asignadas. Pide a un administrador que te asigne una.</p>
+      ) : (
+        <>
+          <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
+          {error && <p className="error-msg">{error}</p>}
+
+          <button className="btn btn-primary btn-grande" onClick={() => void iniciar()}>
+            Iniciar / continuar inventario
+          </button>
+
+          <h3 className="seccion-title">Inventarios recientes</h3>
+          {inventarios.length === 0 ? (
+            <p className="muted">Aún no hay inventarios en esta ubicación.</p>
+          ) : (
+            <div className="lista-ubicaciones">
+              {inventarios.map((c) => (
+                <button key={c.id} className="card card-click" onClick={() => void abrir(c.id)}>
+                  <div className="ubic-row">
+                    <div>
+                      <strong>Inventario #{c.id}</strong>{' '}
+                      <EstadoChip estado={c.estado} />
+                      <div className="muted">
+                        {new Date(c.creado_at).toLocaleString('es-MX', { timeZone: 'America/Chicago' })}
+                        {' · '}{c.contadas}/{c.total_lineas} contados
+                      </div>
+                    </div>
+                    <span className="muted">›</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function EstadoChip({ estado }: { estado: string }) {
+  const map: Record<string, string> = {
+    cerrado: 'chip chip--ok', en_captura: 'chip chip--info', borrador: 'chip', reabierto: 'chip chip--warn',
+  };
+  const label: Record<string, string> = {
+    cerrado: 'Cerrado', en_captura: 'En captura', borrador: 'Borrador', reabierto: 'Reabierto',
+  };
+  return <span className={map[estado] ?? 'chip'}>{label[estado] ?? estado}</span>;
+}
+
+function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; onSalir: () => void; onRecargar: () => void }) {
+  const { usuario } = useAuth();
+  const [lineas, setLineas] = useState<LineaInventario[]>(detalle.lineas);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
+  const [q, setQ] = useState('');
+  const [colapsadas, setColapsadas] = useState<Set<string>>(new Set());
+  const editable = detalle.editable;
+
+  // Filtro por búsqueda (nombre / SKU) y agrupado por categoría.
+  const grupos = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const m = new Map<string, LineaInventario[]>();
+    for (const l of lineas) {
+      if (t && !l.nombre.toLowerCase().includes(t) && !l.sku.toLowerCase().includes(t)) continue;
+      const k = l.categoria ?? 'Sin categoría';
+      (m.get(k) ?? m.set(k, []).get(k)!).push(l);
+    }
+    return [...m.entries()];
+  }, [lineas, q]);
+
+  const pendientes = lineas.filter((l) => !l.contado).length;
+  const total = lineas.length;
+  const pct = total ? Math.round(((total - pendientes) / total) * 100) : 0;
+
+  function set(pid: number, campo: keyof LineaInventario, valor: number | boolean) {
+    setLineas((prev) => prev.map((l) => (l.product_id === pid ? { ...l, [campo]: valor } : l)));
+    setOk('');
+  }
+
+  function marcarGrupo(items: LineaInventario[], contado: boolean) {
+    const ids = new Set(items.map((i) => i.product_id));
+    setLineas((prev) => prev.map((l) => (ids.has(l.product_id) ? { ...l, contado } : l)));
+    setOk('');
+  }
+
+  function toggleColapsar(cat: string) {
+    setColapsadas((prev) => {
+      const n = new Set(prev);
+      n.has(cat) ? n.delete(cat) : n.add(cat);
+      return n;
+    });
+  }
+
+  const payload = () => ({ lineas: lineas.map((l) => ({ product_id: l.product_id, qty: l.qty, contado: l.contado })) });
+
+  async function guardar() {
+    setGuardando(true); setError(''); setOk('');
+    try {
+      await api(`/conteos/${detalle.id}/lineas`, { method: 'PATCH', body: payload() });
+      setOk('Avance guardado');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Error al guardar');
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function cerrar() {
+    if (pendientes > 0 && !window.confirm(`Quedan ${pendientes} productos sin marcar como contados. ¿Cerrar de todos modos?`)) return;
+    if (!window.confirm('Al cerrar, el inventario queda como la foto oficial de esta ubicación. ¿Continuar?')) return;
+    setGuardando(true); setError('');
+    try {
+      await api(`/conteos/${detalle.id}/lineas`, { method: 'PATCH', body: payload() });
+      await api(`/conteos/${detalle.id}/cerrar`, { method: 'POST' });
+      onRecargar();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Error al cerrar');
+      setGuardando(false);
+    }
+  }
+
+  async function reabrir() {
+    if (!window.confirm('¿Reabrir este inventario para editarlo?')) return;
+    try {
+      await api(`/conteos/${detalle.id}/reabrir`, { method: 'POST' });
+      onRecargar();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Error al reabrir');
+    }
+  }
+
+  return (
+    <div className="page conteo-page">
+      <header className="page-head">
+        <div>
+          <button className="link-btn" onClick={onSalir}>← Inventarios</button>
+          <h1>Inventario #{detalle.id} <EstadoChip estado={detalle.estado} /></h1>
+          <p className="page-sub">{detalle.ubicacion.nombre}</p>
+        </div>
+      </header>
+
+      {error && <p className="error-msg">{error}</p>}
+      {ok && <p className="ok-msg">{ok}</p>}
+
+      {editable && (
+        <div className="inv-progress">
+          <div className="inv-progress-bar"><div className="inv-progress-fill" style={{ width: `${pct}%` }} /></div>
+          <span className="inv-progress-num">{total - pendientes}/{total}</span>
+        </div>
+      )}
+
+      {total > 12 && (
+        <input className="inv-search" type="search" placeholder="Buscar producto o SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
+      )}
+
+      {grupos.map(([cat, items]) => {
+        const cerrada = colapsadas.has(cat);
+        const faltan = items.filter((i) => !i.contado).length;
+        return (
+          <div key={cat} className="conteo-grupo">
+            <div className="conteo-grupo-head">
+              <button type="button" className="conteo-grupo-toggle" onClick={() => toggleColapsar(cat)}>
+                <span className={`conteo-grupo-caret ${cerrada ? 'is-cerrada' : ''}`}>▾</span>
+                {cat} <span className="muted">({items.length}{faltan ? ` · faltan ${faltan}` : ''})</span>
+              </button>
+              {editable && (
+                <button type="button" className="link-btn" onClick={() => marcarGrupo(items, faltan > 0)}>
+                  {faltan > 0 ? 'Marcar todos' : 'Desmarcar'}
+                </button>
+              )}
+            </div>
+            {!cerrada && items.map((l) => (
+              <div key={l.product_id} className={`conteo-row2 ${l.contado ? 'conteo-row2--ok' : ''} ${l.atipico ? 'conteo-row2--atip' : ''}`}>
+                <div className="conteo-prod">
+                  <strong>{l.nombre}</strong>
+                  <small className="muted">{l.unidad}{l.stock_objetivo > 0 ? ` · objetivo ${l.stock_objetivo}` : ''}{l.atipico ? ' · atípico' : ''}</small>
+                </div>
+                <input
+                  className="conteo-input2"
+                  inputMode="decimal"
+                  value={l.qty}
+                  disabled={!editable}
+                  onChange={(e) => set(l.product_id, 'qty', Number(e.target.value) || 0)}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <button
+                  type="button"
+                  className={`chip ${l.contado ? 'chip--ok' : ''} conteo-check2`}
+                  disabled={!editable}
+                  onClick={() => set(l.product_id, 'contado', !l.contado)}
+                >
+                  {l.contado ? '✓' : '○'}
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {editable ? (
+        <div className="action-bar">
+          <button className="btn btn-secondary" onClick={() => void guardar()} disabled={guardando}>Guardar avance</button>
+          <button className="btn btn-primary" onClick={() => void cerrar()} disabled={guardando}>Cerrar inventario</button>
+        </div>
+      ) : (
+        usuario?.rol === 'admin' && (
+          <div className="action-bar">
+            <button className="btn btn-ghost" onClick={() => void reabrir()}>Reabrir inventario</button>
+          </div>
+        )
+      )}
+    </div>
+  );
+}

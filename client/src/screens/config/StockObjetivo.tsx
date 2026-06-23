@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import type { Ubicacion } from './Ubicaciones';
+import UbicacionPicker from '../../components/UbicacionPicker';
 
 interface Item {
   product_id: number;
@@ -83,14 +84,12 @@ export default function StockObjetivo() {
 
   return (
     <div>
-      <label className="so-ubic">
-        Ubicación
-        <select value={ubicId} onChange={(e) => setUbicId(e.target.value)}>
-          {ubicaciones.map((u) => (
-            <option key={u.id} value={u.id}>{u.nombre} ({u.tipo})</option>
-          ))}
-        </select>
-      </label>
+      <UbicacionPicker
+        label="Ubicación"
+        opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))}
+        value={ubicId}
+        onChange={setUbicId}
+      />
 
       {error && <p className="error-msg">{error}</p>}
       {ok && <p className="ok-msg">{ok}</p>}

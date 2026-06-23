@@ -33,11 +33,13 @@ interface Operacion {
   grupos: { ubicacion: { id: number; nombre: string }; items: OpItem[] }[];
 }
 
-const ESTADOS_BODEGA = ['aprobada', 'en_preparacion', 'preparada', 'verificada', 'en_carga', 'cargada', 'en_transito'];
+// Flujo v2: bodega trabaja distribuciones aprobadas (o verificadas si la verificación está activa).
+const ESTADOS_BODEGA = ['aprobada', 'verificada', 'en_transito', 'parcialmente_entregada'];
 
 export default function Bodega() {
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [op, setOp] = useState<Operacion | null>(null);
+  const [verificacionCarga, setVerificacionCarga] = useState(false);
   const [error, setError] = useState('');
 
   async function cargar() {
@@ -49,6 +51,9 @@ export default function Bodega() {
     }
   }
   useEffect(() => { void cargar(); }, []);
+  useEffect(() => {
+    api<{ verificacion_carga: boolean }>('/negocio').then((n) => setVerificacionCarga(n.verificacion_carga)).catch(() => {});
+  }, []);
 
   async function abrir(id: number) {
     setError('');
@@ -56,17 +61,17 @@ export default function Bodega() {
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); }
   }
 
-  if (op) return <OperacionView op={op} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
+  if (op) return <OperacionView op={op} verificacionCarga={verificacionCarga} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
 
   return (
     <div className="page">
       <header className="page-head">
-        <div><h1>Bodega 📦</h1><p className="page-sub">Surte, verifica y carga el camión.</p></div>
+        <div><h1>Bodega y reparto</h1><p className="page-sub">Surte la lista total y carga el camión.</p></div>
       </header>
       <FlujoStepper activo="bodega" />
       {error && <p className="error-msg">{error}</p>}
       {lista.length === 0 ? (
-        <p className="muted">No hay distribuciones aprobadas pendientes de preparar.</p>
+        <p className="muted">No hay pedidos aprobados por surtir.</p>
       ) : (
         <div className="lista-ubicaciones">
           {lista.map((d) => (
@@ -84,40 +89,41 @@ export default function Bodega() {
   );
 }
 
-function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: () => void; onRecargar: () => void }) {
+function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Operacion; verificacionCarga: boolean; onSalir: () => void; onRecargar: () => void }) {
   const [edits, setEdits] = useState<Record<number, string>>({});
   const [vista, setVista] = useState<'total' | 'sucursal'>('total');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Etapa activa según estado.
-  const etapa =
-    op.estado === 'en_preparacion' ? 'preparacion' :
-    op.estado === 'preparada' ? 'verificacion' :
-    op.estado === 'verificada' ? 'carga' : null;
+  // Editable mientras el pedido no haya salido a ruta.
+  const editable = op.estado === 'aprobada' || op.estado === 'verificada';
+  const enRuta = op.estado === 'en_transito' || op.estado === 'parcialmente_entregada';
+  const campoActual = (it: OpItem): number => it.cantidad_cargada ?? it.cantidad_aprobada;
 
-  const campoActual = (it: OpItem): number =>
-    etapa === 'preparacion' ? (it.cantidad_preparada ?? it.cantidad_aprobada)
-    : etapa === 'verificacion' ? (it.cantidad_verificada ?? it.cantidad_preparada ?? it.cantidad_aprobada)
-    : etapa === 'carga' ? (it.cantidad_cargada ?? it.cantidad_verificada ?? it.cantidad_aprobada)
-    : it.cantidad_aprobada;
+  function editsAItems() {
+    return Object.entries(edits)
+      .map(([linea_id, v]) => ({ linea_id: Number(linea_id), cantidad: Number(v) }))
+      .filter((i) => !Number.isNaN(i.cantidad));
+  }
 
-  async function accion(fn: () => Promise<unknown>) {
+  async function guardarSurtido(): Promise<boolean> {
+    const items = editsAItems();
+    if (items.length === 0) return true;
+    await api(`/distribuciones/${op.id}/carga`, { method: 'PATCH', body: { items } });
+    setEdits({});
+    return true;
+  }
+
+  // Guarda el surtido pendiente y luego ejecuta una acción (verificar o cargar).
+  async function guardarY(fn: () => Promise<unknown>) {
     setBusy(true); setError('');
-    try { await fn(); onRecargar(); }
+    try { await guardarSurtido(); await fn(); onRecargar(); }
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); setBusy(false); }
   }
 
-  async function guardar() {
-    const items = Object.entries(edits).map(([linea_id, v]) => ({ linea_id: Number(linea_id), cantidad: Number(v) }))
-      .filter((i) => !Number.isNaN(i.cantidad));
-    if (items.length === 0) return;
-    const url =
-      etapa === 'preparacion' ? `/distribuciones/${op.id}/preparacion`
-      : etapa === 'verificacion' ? `/distribuciones/${op.id}/verificacion`
-      : `/distribuciones/${op.id}/carga`;
+  async function soloGuardar() {
     setBusy(true); setError('');
-    try { await api(url, { method: 'PATCH', body: { items } }); setEdits({}); onRecargar(); }
+    try { await guardarSurtido(); onRecargar(); }
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); setBusy(false); }
   }
 
@@ -125,9 +131,9 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
     <div className="page conteo-page">
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← Bodega</button>
-          <h1>Distribución #{op.id} <EstadoDistChip estado={op.estado} /></h1>
-          {etapa === 'verificacion' && <p className="page-sub">Verificación: la hace una persona distinta a quien preparó.</p>}
+          <button className="link-btn" onClick={onSalir}>← Bodega y reparto</button>
+          <h1>Pedido #{op.id} <EstadoDistChip estado={op.estado} /></h1>
+          <p className="page-sub">Ajusta cantidades si algo cambió y confirma la carga.</p>
         </div>
       </header>
       {error && <p className="error-msg">{error}</p>}
@@ -146,7 +152,7 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
               <span className="carga-total-qty">{t.total_a_cargar} <small>{t.unidad}</small></span>
             </div>
           ))}
-          {etapa && <p className="muted" style={{ marginTop: '0.6rem' }}>Para capturar cantidades por etapa, usa la pestaña <strong>Por sucursal</strong>.</p>}
+          {editable && <p className="muted" style={{ marginTop: '0.6rem' }}>Para ajustar cantidades por sucursal, usa la pestaña <strong>Por sucursal</strong>.</p>}
         </div>
       ) : (
         op.grupos.map((g) => (
@@ -156,15 +162,12 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
               <div key={it.linea_id} className="dist-row">
                 <div className="conteo-prod">
                   <strong>{it.nombre}</strong>
-                  <small className="muted">
-                    {it.unidad} · pedido {it.cantidad_aprobada}
-                    {it.cantidad_preparada != null && ` · surtido ${it.cantidad_preparada}`}
-                    {it.cantidad_verificada != null && ` · verificado ${it.cantidad_verificada}`}
-                  </small>
+                  <small className="muted">{it.unidad} · pedido {it.cantidad_aprobada}</small>
                 </div>
-                {etapa ? (
+                {editable ? (
                   <input className="conteo-input2 dist-input" inputMode="decimal"
                     value={edits[it.linea_id] ?? String(campoActual(it))}
+                    onFocus={(e) => e.currentTarget.select()}
                     onChange={(e) => setEdits({ ...edits, [it.linea_id]: e.target.value })} />
                 ) : (
                   <span className="dist-aprob">{campoActual(it)}</span>
@@ -176,32 +179,18 @@ function OperacionView({ op, onSalir, onRecargar }: { op: Operacion; onSalir: ()
       )}
 
       <div className="action-bar">
-        {op.estado === 'aprobada' && (
-          <button className="btn btn-primary" disabled={busy} onClick={() => void accion(() => api(`/distribuciones/${op.id}/preparar`, { method: 'POST' }))}>
-            Iniciar preparación
+        {editable && <button className="btn btn-secondary" disabled={busy} onClick={() => void soloGuardar()}>Guardar surtido</button>}
+        {op.estado === 'aprobada' && verificacionCarga && (
+          <button className="btn btn-primary" disabled={busy} onClick={() => void guardarY(() => api(`/distribuciones/${op.id}/verificada`, { method: 'POST' }))}>
+            Revisar y verificar
           </button>
         )}
-        {op.estado === 'en_preparacion' && (
-          <>
-            <button className="btn btn-secondary" disabled={busy} onClick={() => void guardar()}>Guardar surtido</button>
-            <button className="btn btn-primary" disabled={busy} onClick={() => void accion(() => api(`/distribuciones/${op.id}/preparada`, { method: 'POST' }))}>Marcar preparada</button>
-          </>
+        {(op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && (
+          <button className="btn btn-primary" disabled={busy} onClick={() => void guardarY(() => api(`/distribuciones/${op.id}/cargar`, { method: 'POST' }))}>
+            Confirmar carga →
+          </button>
         )}
-        {op.estado === 'preparada' && (
-          <>
-            <button className="btn btn-secondary" disabled={busy} onClick={() => void guardar()}>Guardar verificación</button>
-            <button className="btn btn-primary" disabled={busy} onClick={() => void accion(() => api(`/distribuciones/${op.id}/verificada`, { method: 'POST' }))}>Marcar verificada</button>
-          </>
-        )}
-        {op.estado === 'verificada' && (
-          <>
-            <button className="btn btn-secondary" disabled={busy} onClick={() => void guardar()}>Guardar carga</button>
-            <button className="btn btn-primary" disabled={busy} onClick={() => void accion(() => api(`/distribuciones/${op.id}/cargar`, { method: 'POST' }))}>Confirmar carga</button>
-          </>
-        )}
-        {(op.estado === 'en_transito' || op.estado === 'parcialmente_entregada') && (
-          <span className="muted">En tránsito — pendiente de recepción en sucursal.</span>
-        )}
+        {enRuta && <span className="muted">En ruta — pendiente de entrega y recepción.</span>}
       </div>
     </div>
   );

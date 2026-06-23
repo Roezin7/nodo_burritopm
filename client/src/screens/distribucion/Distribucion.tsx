@@ -141,6 +141,8 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   const [prod, setProd] = useState<VistaProducto | null>(null);
   const [suc, setSuc] = useState<VistaSucursal | null>(null);
   const [edits, setEdits] = useState<Record<number, string>>({});
+  const [q, setQ] = useState('');
+  const [soloFaltante, setSoloFaltante] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -217,7 +219,20 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
             Valor total: <strong>{usd(prod.total_valor)}</strong>
             {prod.total_faltante_valor > 0 && <> · Faltante en bodega: <strong>{usd(prod.total_faltante_valor)}</strong></>}
           </p>
-          {prod.items.map((it) => (
+          {prod.items.length > 12 && (
+            <div className="dist-filtros">
+              <input className="inv-search" type="search" placeholder="Buscar producto…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <button type="button" className={`chip ${soloFaltante ? 'chip--danger' : 'chip--muted'}`} style={{ cursor: 'pointer', border: 0 }} onClick={() => setSoloFaltante((v) => !v)}>
+                Solo con faltante
+              </button>
+            </div>
+          )}
+          {prod.items
+            .filter((it) => !q || it.nombre.toLowerCase().includes(q.trim().toLowerCase()))
+            .filter((it) => !soloFaltante || it.faltante > 0)
+            .slice()
+            .sort((a, b) => (b.faltante > 0 ? 1 : 0) - (a.faltante > 0 ? 1 : 0))
+            .map((it) => (
             <div key={it.product_id} className={`card ${it.faltante > 0 ? 'card--falt' : ''}`}>
               <div className="ubic-row">
                 <div>
@@ -318,7 +333,7 @@ function RutaPlanner({ id }: { id: number }) {
       ]);
       const sucs = sucCons.grupos.map((g) => ({ id: g.ubicacion.id, nombre: g.ubicacion.nombre }));
       setSucursales(sucs);
-      setRepartidores(usuarios.filter((u) => u.rol === 'repartidor'));
+      setRepartidores(usuarios.filter((u) => u.rol === 'encargado_bodega'));
       setRuta(r);
       if (r) {
         setOrden(r.paradas.sort((a, b) => a.orden - b.orden).map((p) => ({ id: p.ubicacion.id, nombre: p.ubicacion.nombre })));
@@ -393,13 +408,13 @@ function RutaPlanner({ id }: { id: number }) {
       {info && <p className="muted">{info}</p>}
 
       <div className="card">
-        <label className="so-ubic">Repartidor
+        <label className="so-ubic">Repartidor (Bodega y reparto)
           <select value={repartidorId} onChange={(e) => setRepartidorId(e.target.value)}>
             <option value="">— Sin asignar —</option>
             {repartidores.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
           </select>
         </label>
-        {repartidores.length === 0 && <p className="muted">No hay usuarios con rol repartidor. Créalos en Configuración.</p>}
+        {repartidores.length === 0 && <p className="muted">No hay usuarios de Bodega y reparto. Créalos en Configuración.</p>}
       </div>
 
       <div className="card">

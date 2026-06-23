@@ -44,7 +44,7 @@ export const paradaLabel = (estado: string) => PARADA[estado]?.label ?? estado;
 // ── Stepper de 5 pasos ─────────────────────────────────────────────────────
 export type PasoFlujo = 'conteo' | 'plan' | 'bodega' | 'ruta' | 'recepcion';
 const PASOS: { clave: PasoFlujo; label: string }[] = [
-  { clave: 'conteo', label: 'Conteo' },
+  { clave: 'conteo', label: 'Inventario' },
   { clave: 'plan', label: 'Plan' },
   { clave: 'bodega', label: 'Bodega' },
   { clave: 'ruta', label: 'Ruta' },

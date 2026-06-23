@@ -1,7 +1,16 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, getToken, setToken } from './api';
 
-export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal' | 'repartidor';
+export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal';
+
+/** Etiqueta visible del rol. `encargado_bodega` cubre bodega + reparto (rol unificado). */
+export function rolLabel(rol: Rol): string {
+  switch (rol) {
+    case 'admin': return 'Admin';
+    case 'encargado_bodega': return 'Bodega y reparto';
+    case 'encargado_sucursal': return 'Sucursal';
+  }
+}
 
 export interface UbicacionAsignada {
   id: number;

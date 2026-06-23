@@ -277,28 +277,23 @@ export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuario
  */
 export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
-  if (dist.estado !== 'verificada') throw new HttpError(409, 'Solo se carga una distribución verificada');
+  // Flujo v2: se carga directo desde "aprobada" (o desde "verificada" si el admin activó
+  // la verificación opcional de 1 toque). Sin reservas ni etapas intermedias.
+  if (!['aprobada', 'verificada'].includes(dist.estado)) {
+    throw new HttpError(409, 'Solo se carga una distribución aprobada o verificada');
+  }
+  // Si la verificación está activa, no se carga sin haber verificado primero.
+  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { verificacion_carga: true } });
+  if (negocio?.verificacion_carga && dist.estado !== 'verificada') {
+    throw new HttpError(409, 'La verificación de carga está activa: verifica antes de cargar');
+  }
   const bodega = await bodegaDe(negocioId);
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
 
   await prisma.$transaction(async (tx) => {
     for (const l of lineas) {
       const cargada = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
-      const reservado = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
       const costo = num(l.costo_unitario);
-
-      // Libera la reserva de TODA línea (el pedido se cierra al cargar), aunque no se cargue.
-      if (reservado > 0) {
-        const ex = await tx.existencias.findUnique({
-          where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
-        });
-        if (ex) {
-          await tx.existencias.update({
-            where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
-            data: { cantidad_reservada: redondear3(Math.max(0, num0(ex.cantidad_reservada) - reservado)) },
-          });
-        }
-      }
 
       // Lo realmente cargado sale de disponible y entra a tránsito (movimiento idempotente).
       if (cargada > 0) {
@@ -455,7 +450,7 @@ const redondear2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const redondear3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 
 // ===========================================================================
-//  FASE 2 — operación de bodega: preparación, verificación, carga, recepción
+//  OPERACIÓN DE BODEGA v2 — surtir + carga en un paso (verificación opcional)
 // ===========================================================================
 
 /** Detalle operativo: líneas con todas las cantidades por etapa, agrupadas por sucursal. */
@@ -520,95 +515,39 @@ async function bodegaDe(negocioId: bigint) {
   return b;
 }
 
-/** Inicia la preparación: reserva en bodega la cantidad aprobada de cada línea. */
-export async function prepararDistribucion(negocioId: bigint, id: bigint, _usuarioId: bigint) {
+/**
+ * Surtido: guarda la cantidad que realmente se cargará por línea (campo cantidad_cargada).
+ * Disponible mientras la distribución no haya salido a ruta (aprobada o verificada).
+ */
+export async function guardarCarga(negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) {
   const dist = await cargarDistribucion(negocioId, id);
-  if (dist.estado !== 'aprobada') throw new HttpError(409, 'Solo se preparan distribuciones aprobadas');
-  const bodega = await bodegaDe(negocioId);
-  const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
-  await prisma.$transaction(async (tx) => {
-    for (const l of lineas) {
-      const aprob = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
-      if (aprob <= 0) continue;
-      const ex = await tx.existencias.findUnique({
-        where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
-      });
-      await tx.existencias.upsert({
-        where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
-        create: { negocio_id: negocioId, ubicacion_id: bodega.id, product_id: l.product_id, cantidad_reservada: aprob },
-        update: { cantidad_reservada: redondear3(num0(ex?.cantidad_reservada) + aprob) },
-      });
-    }
-    await tx.distribuciones.update({ where: { id }, data: { estado: 'en_preparacion' } });
-  });
-  return { ok: true };
-}
-
-const lineasDeDist = (id: bigint, ajustes: { linea_id: number }[]) =>
-  prisma.distribucion_lineas.findMany({ where: { id: { in: ajustes.map((a) => BigInt(a.linea_id)) }, distribucion_id: id } });
-
-/** Guarda cantidades de una etapa (preparada/verificada/cargada) sobre líneas de la distribución. */
-async function guardarEtapa(
-  negocioId: bigint,
-  id: bigint,
-  estadosValidos: string[],
-  campo: 'cantidad_preparada' | 'cantidad_verificada' | 'cantidad_cargada',
-  items: { linea_id: number; cantidad: number }[],
-) {
-  const dist = await cargarDistribucion(negocioId, id);
-  if (!estadosValidos.includes(dist.estado)) throw new HttpError(409, 'La distribución no está en la etapa correcta');
-  const validas = new Set((await lineasDeDist(id, items)).map((l) => l.id.toString()));
+  if (!['aprobada', 'verificada'].includes(dist.estado)) {
+    throw new HttpError(409, 'Solo se puede ajustar el surtido antes de salir a ruta');
+  }
+  const validas = new Set(
+    (await prisma.distribucion_lineas.findMany({
+      where: { id: { in: items.map((a) => BigInt(a.linea_id)) }, distribucion_id: id },
+      select: { id: true },
+    })).map((l) => l.id.toString()),
+  );
   await prisma.$transaction(
     items
       .filter((i) => validas.has(i.linea_id.toString()))
-      .map((i) => prisma.distribucion_lineas.update({ where: { id: BigInt(i.linea_id) }, data: { [campo]: i.cantidad } })),
+      .map((i) => prisma.distribucion_lineas.update({ where: { id: BigInt(i.linea_id) }, data: { cantidad_cargada: i.cantidad } })),
   );
   return { ok: true, guardadas: items.length };
 }
 
-export const guardarPreparacion = (negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) =>
-  guardarEtapa(negocioId, id, ['en_preparacion'], 'cantidad_preparada', items);
-
-export const guardarVerificacion = (negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) =>
-  guardarEtapa(negocioId, id, ['preparada'], 'cantidad_verificada', items);
-
-export const guardarCarga = (negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) =>
-  guardarEtapa(negocioId, id, ['verificada'], 'cantidad_cargada', items);
-
-/** Cierra la preparación: las líneas sin cantidad usan la aprobada. */
-export async function marcarPreparada(negocioId: bigint, id: bigint, usuarioId: bigint) {
-  const dist = await cargarDistribucion(negocioId, id);
-  if (dist.estado !== 'en_preparacion') throw new HttpError(409, 'La distribución no está en preparación');
-  const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
-  await prisma.$transaction([
-    ...lineas
-      .filter((l) => l.cantidad_preparada == null)
-      .map((l) =>
-        prisma.distribucion_lineas.update({
-          where: { id: l.id },
-          data: { cantidad_preparada: l.cantidad_aprobada ?? l.cantidad_sugerida },
-        }),
-      ),
-    prisma.distribuciones.update({ where: { id }, data: { estado: 'preparada', preparado_por: usuarioId, preparado_at: new Date() } }),
-  ]);
-  return { ok: true };
-}
-
-/** Cierra la verificación (doble chequeo): debe hacerla una persona distinta a quien preparó. */
+/**
+ * Verificación opcional de 1 toque (sin restricción de persona). Solo aplica cuando el admin la
+ * activó. Sella verificado_por/at y deja la distribución lista para confirmar carga.
+ */
 export async function marcarVerificada(negocioId: bigint, id: bigint, usuarioId: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
-  if (dist.estado !== 'preparada') throw new HttpError(409, 'La distribución no está preparada');
-  if (dist.preparado_por != null && dist.preparado_por === usuarioId) {
-    throw new HttpError(409, 'La verificación debe hacerla una persona distinta a quien preparó');
-  }
-  const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
-  await prisma.$transaction([
-    ...lineas
-      .filter((l) => l.cantidad_verificada == null)
-      .map((l) =>
-        prisma.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_verificada: l.cantidad_preparada } }),
-      ),
-    prisma.distribuciones.update({ where: { id }, data: { estado: 'verificada', verificado_por: usuarioId, verificado_at: new Date() } }),
-  ]);
+  if (dist.estado !== 'aprobada') throw new HttpError(409, 'Solo se verifica una distribución aprobada');
+  await prisma.distribuciones.update({
+    where: { id },
+    data: { estado: 'verificada', verificado_por: usuarioId, verificado_at: new Date() },
+  });
   return { ok: true };
 }

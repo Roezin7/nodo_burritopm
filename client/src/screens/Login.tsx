@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import { useAuth, type Usuario } from '../auth';
+import { useAuth, rolLabel, type Usuario } from '../auth';
 import BurritoLockup from '../brand/BurritoLockup';
 
 export default function Login() {
@@ -51,7 +51,7 @@ export default function Login() {
             <button key={u.id} className="user-card" onClick={() => setSel(u)}>
               <span className="avatar">{u.nombre[0]}</span>
               <span>{u.nombre}</span>
-              <small className="muted">{u.rol}</small>
+              <small className="muted">{rolLabel(u.rol)}</small>
             </button>
           ))}
         </div>

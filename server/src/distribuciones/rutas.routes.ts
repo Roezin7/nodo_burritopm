@@ -7,7 +7,8 @@ import * as rutas from './rutas.service.js';
 export const rutasRouter = Router();
 
 const idParam = z.coerce.number().int().positive();
-const repartidor = requireRole('repartidor', 'admin');
+// Rol unificado "Bodega y reparto": el encargado de bodega también ejecuta la ruta.
+const repartidor = requireRole('encargado_bodega', 'admin');
 
 rutasRouter.use(requireAuth);
 
