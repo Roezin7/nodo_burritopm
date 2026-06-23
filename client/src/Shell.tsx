@@ -21,6 +21,8 @@ const ITEMS: Item[] = [
   { ruta: '/conteo', label: 'Conteo', icono: 'package', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
   { ruta: '/bodega', label: 'Bodega', icono: 'package', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/recepcion', label: 'Recepción', icono: 'checks', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/incidencias', label: 'Incidencias', icono: 'wallet', soloAdmin: true },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
 ];
 

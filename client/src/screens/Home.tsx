@@ -16,6 +16,8 @@ const MODULOS: Modulo[] = [
   { clave: 'conteo', titulo: 'Conteo', emoji: '📋', desc: 'Inventario físico de tu ubicación', ruta: '/conteo' },
   { clave: 'distribucion', titulo: 'Distribución', emoji: '🚚', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
   { clave: 'bodega', titulo: 'Bodega', emoji: '📦', desc: 'Preparar, verificar y cargar', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'recepcion', titulo: 'Recepción', emoji: '📥', desc: 'Recibir lo que llega del camión', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'incidencias', titulo: 'Incidencias', emoji: '⚠️', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', emoji: '⚙️', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];
 

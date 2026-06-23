@@ -8,6 +8,7 @@ import { conteosRouter } from '../conteos/routes.js';
 import { distribucionesRouter } from '../distribuciones/routes.js';
 import { dashboardRouter } from '../dashboard/routes.js';
 import { existenciasRouter } from '../existencias/routes.js';
+import { incidenciasRouter } from '../incidencias/routes.js';
 
 export const apiRouter = Router();
 
@@ -29,3 +30,4 @@ apiRouter.use('/conteos', conteosRouter); // Bloque 5
 apiRouter.use('/distribuciones', distribucionesRouter); // Bloque 6
 apiRouter.use('/dashboard', dashboardRouter); // Bloque 7
 apiRouter.use('/existencias', existenciasRouter); // Bloque 8
+apiRouter.use('/incidencias', incidenciasRouter); // Bloque 11

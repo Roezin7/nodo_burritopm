@@ -324,6 +324,126 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   return { ok: true };
 }
 
+/** Distribuciones en tránsito con líneas destinadas a una sucursal (para recepción). */
+export async function recepcionesPendientes(negocioId: bigint, ubicacionId: bigint) {
+  const dists = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      estado: { in: ['en_transito', 'parcialmente_entregada'] },
+      lineas: { some: { ubicacion_destino_id: ubicacionId } },
+    },
+    include: {
+      lineas: {
+        where: { ubicacion_destino_id: ubicacionId },
+        include: { products: { include: { unidad_distribucion: true } } },
+      },
+    },
+    orderBy: { id: 'desc' },
+  });
+  return dists.map((d) => ({
+    id: Number(d.id),
+    estado: d.estado,
+    creado_at: d.creado_at.toISOString(),
+    lineas: d.lineas.map((l) => ({
+      linea_id: Number(l.id),
+      product_id: Number(l.product_id),
+      nombre: l.products.nombre,
+      unidad: l.products.unidad_distribucion.nombre,
+      esperado: num(l.cantidad_cargada) ?? 0,
+      recibida: num(l.cantidad_recibida),
+      estado_linea: l.estado_linea,
+    })),
+  }));
+}
+
+/**
+ * Recepción en sucursal: por cada línea suma lo recibido a las existencias de la sucursal,
+ * descuenta lo enviado del tránsito de bodega y genera una incidencia si hay diferencia.
+ * Idempotente por línea. Cierra la distribución cuando todas las líneas se recibieron.
+ */
+export async function recibirDistribucion(
+  negocioId: bigint,
+  id: bigint,
+  ubicacionId: bigint,
+  usuarioId: bigint,
+  items: { linea_id: number; cantidad: number }[],
+) {
+  const dist = await cargarDistribucion(negocioId, id);
+  if (!['en_transito', 'parcialmente_entregada'].includes(dist.estado)) {
+    throw new HttpError(409, 'Esta distribución no está en tránsito');
+  }
+  const bodega = await bodegaDe(negocioId);
+  const recibidaDe = new Map(items.map((i) => [i.linea_id, i.cantidad]));
+
+  const lineas = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: id, ubicacion_destino_id: ubicacionId },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    for (const l of lineas) {
+      if (l.cantidad_recibida != null) continue; // ya recibida (idempotencia a nivel línea)
+      if (!recibidaDe.has(Number(l.id))) continue;
+      const recibida = Math.max(0, recibidaDe.get(Number(l.id))!);
+      const enviada = num(l.cantidad_cargada) ?? 0;
+      const costo = num(l.costo_unitario);
+
+      if (enviada > 0 || recibida > 0) {
+        await aplicarMovimiento(tx, {
+          negocioId,
+          productId: l.product_id,
+          tipo: 'recepcion_parcial',
+          cantidad: recibida,
+          usuarioId,
+          origenId: bodega.id,
+          destinoId: ubicacionId,
+          costoUnitario: costo,
+          documentoTipo: 'distribucion',
+          documentoId: id,
+          comentario: 'Recepción en sucursal',
+          idempotencyKey: `recepcion:${l.id}`,
+          deltas: [
+            { ubicacionId, productId: l.product_id, disponible: recibida, costoUnitario: costo },
+            { ubicacionId: bodega.id, productId: l.product_id, transito: -enviada },
+          ],
+        });
+      }
+
+      const diff = redondear3(enviada - recibida);
+      let incidenciaId: bigint | null = null;
+      let estadoLinea = 'recibido';
+      if (diff !== 0) {
+        estadoLinea = recibida === 0 ? 'no_recibido' : 'incidencia';
+        const inc = await tx.incidencias.create({
+          data: {
+            negocio_id: negocioId,
+            tipo: diff > 0 ? 'faltante_recepcion' : 'sobrante_recepcion',
+            prioridad: 'media',
+            ubicacion_id: ubicacionId,
+            documento_tipo: 'distribucion',
+            documento_id: id,
+            distribucion_linea_id: l.id,
+            product_id: l.product_id,
+            responsable_id: usuarioId,
+            comentarios: `Enviado ${enviada}, recibido ${recibida} (diferencia ${diff}).`,
+          },
+        });
+        incidenciaId = inc.id;
+      }
+      await tx.distribucion_lineas.update({
+        where: { id: l.id },
+        data: { cantidad_recibida: recibida, estado_linea: estadoLinea, incidencia_id: incidenciaId },
+      });
+    }
+
+    // ¿Quedan líneas (de cualquier sucursal) sin recibir?
+    const pendientes = await tx.distribucion_lineas.count({ where: { distribucion_id: id, cantidad_recibida: null } });
+    const conIncidencia = await tx.distribucion_lineas.count({ where: { distribucion_id: id, incidencia_id: { not: null } } });
+    const nuevoEstado = pendientes > 0 ? 'parcialmente_entregada' : conIncidencia > 0 ? 'cerrada_con_incidencias' : 'cerrada';
+    await tx.distribuciones.update({ where: { id }, data: { estado: nuevoEstado } });
+  });
+  return { ok: true };
+}
+
 const redondear2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const redondear3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 

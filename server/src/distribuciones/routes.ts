@@ -1,18 +1,48 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { asyncHandler } from '../middleware/error.js';
-import { requireAuth, requireRole, soloAdmin } from '../auth/middleware.js';
+import { asyncHandler, HttpError } from '../middleware/error.js';
+import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../auth/middleware.js';
 import * as svc from './service.js';
 
 export const distribucionesRouter = Router();
 
 const idParam = z.coerce.number().int().positive();
+const sucursal = requireRole('admin', 'encargado_sucursal');
 
 // La planeación (calcular/aprobar) es del admin; la operación de bodega la hace
-// también el encargado de bodega. Cada ruta declara su guard.
+// también el encargado de bodega; la recepción la hace la sucursal. Cada ruta declara su guard.
 distribucionesRouter.use(requireAuth);
 const bodega = requireRole('admin', 'encargado_bodega');
 const etapaSchema = z.object({ items: z.array(z.object({ linea_id: z.coerce.number().int().positive(), cantidad: z.coerce.number().nonnegative() })) });
+
+/** GET /distribuciones/recepciones?ubicacion=ID — pendientes de recibir en una sucursal. */
+distribucionesRouter.get(
+  '/recepciones',
+  sucursal,
+  asyncHandler(async (req, res) => {
+    const ubicacionId = BigInt(idParam.parse(req.query.ubicacion));
+    if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
+    res.json(await svc.recepcionesPendientes(req.auth!.negocioId, ubicacionId));
+  }),
+);
+
+/** POST /distribuciones/:id/recibir { ubicacion_id, items } — recepción en sucursal. */
+distribucionesRouter.post(
+  '/:id/recibir',
+  sucursal,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const b = z
+      .object({
+        ubicacion_id: z.coerce.number().int().positive(),
+        items: z.array(z.object({ linea_id: z.coerce.number().int().positive(), cantidad: z.coerce.number().nonnegative() })),
+      })
+      .parse(req.body);
+    const ubicacionId = BigInt(b.ubicacion_id);
+    if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
+    res.json(await svc.recibirDistribucion(req.auth!.negocioId, id, ubicacionId, req.auth!.usuarioId, b.items));
+  }),
+);
 
 /** GET /distribuciones — lista (admin y bodega). */
 distribucionesRouter.get(

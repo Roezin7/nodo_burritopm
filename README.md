@@ -95,8 +95,20 @@ opcional `ANTHROPIC_API_KEY`. Healthcheck: `/api/health`. El contenedor aplica
 - [x] Bloque 6 — Abastecimiento + consolidado + aprobación
 - [x] Bloque 7 — Panel del administrador
 
-**Fase 2 (siguiente):** reserva de inventario, picking con doble verificación, carga del
-camión, entrega y recepción con incidencias, ledger de movimientos y existencias.
+### Fase 2 — operación de bodega y entregas
+
+- [x] Bloque 8 — Ledger de movimientos + existencias (conteo cerrado siembra existencias)
+- [x] Bloque 9 — Preparación (picking), reserva en bodega y doble verificación
+- [x] Bloque 10 — Carga del camión y tránsito
+- [x] Bloque 11 — Recepción en sucursal e incidencias por diferencias
+
+Cadena de trazabilidad: conteo → cálculo → aprobación → **reserva** → preparación →
+**verificación (2ª persona)** → carga → **tránsito** → recepción → **incidencia**. Cada paso
+físico escribe un movimiento idempotente y actualiza `existencias` (disponible / reservada /
+tránsito) con costo promedio ponderado al recibir.
+
+**Siguiente (Fase 3 — compras y costos):** proveedores, sugerencias y órdenes de compra,
+recepción en bodega, reportes financieros de inventario.
 
 ## Reglas de oro
 
