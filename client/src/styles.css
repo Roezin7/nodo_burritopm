@@ -1793,3 +1793,20 @@ select:disabled {
   background: linear-gradient(to top, var(--bg) 70%, transparent);
 }
 .action-bar .btn { flex: 1; padding: 0.85rem; }
+
+/* ── Distribución / consolidado (Bloque 6) ─────────────────────────────────── */
+.card--falt { border-color: color-mix(in srgb, #c0392b 45%, var(--border)); }
+.txt-danger { color: #c0392b; font-weight: 600; }
+.dist-valor { font-family: var(--font-mono, monospace); font-weight: 600; white-space: nowrap; }
+.dist-suc-mini { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; font-size: 0.8rem; color: var(--muted); }
+.dist-suc-mini span { background: var(--surface-2, rgba(127,127,127,0.12)); padding: 0.1rem 0.4rem; border-radius: 6px; }
+.dist-row {
+  display: grid;
+  grid-template-columns: 1fr 6rem;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.dist-input { text-align: right; }
+.dist-aprob { text-align: right; font-weight: 600; }

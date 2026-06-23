@@ -5,6 +5,7 @@ import { authRouter } from '../auth/routes.js';
 import { ubicacionesRouter } from '../ubicaciones/routes.js';
 import { catalogoRouter } from '../catalogo/routes.js';
 import { conteosRouter } from '../conteos/routes.js';
+import { distribucionesRouter } from '../distribuciones/routes.js';
 
 export const apiRouter = Router();
 
@@ -23,3 +24,4 @@ apiRouter.use('/auth', authRouter); // Bloque 0
 apiRouter.use('/ubicaciones', ubicacionesRouter); // Bloque 1
 apiRouter.use('/catalogo', catalogoRouter); // Bloque 3
 apiRouter.use('/conteos', conteosRouter); // Bloque 5
+apiRouter.use('/distribuciones', distribucionesRouter); // Bloque 6

@@ -12,7 +12,7 @@ interface Modulo {
 
 const MODULOS: Modulo[] = [
   { clave: 'conteo', titulo: 'Conteo', emoji: '📋', desc: 'Inventario físico de tu ubicación', ruta: '/conteo' },
-  { clave: 'distribucion', titulo: 'Distribución', emoji: '🚚', desc: 'Abastecimiento y pedido maestro', soloAdmin: true },
+  { clave: 'distribucion', titulo: 'Distribución', emoji: '🚚', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', emoji: '⚙️', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];
 
