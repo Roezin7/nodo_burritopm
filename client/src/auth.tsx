@@ -47,6 +47,8 @@ export interface Usuario {
 interface AuthCtx {
   usuario: Usuario | null;
   cargando: boolean;
+  recienEntro: boolean; // true tras un login explícito (para mandar a Inicio)
+  consumirRecienEntro: () => void;
   login: (usuario_id: number, pin: string) => Promise<void>;
   logout: () => void;
 }
@@ -56,6 +58,7 @@ const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [recienEntro, setRecienEntro] = useState(false);
 
   // Al montar: si hay token, validar con /me.
   useEffect(() => {
@@ -78,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(token);
     setUsuario(usuario);
     setUltimoUsuario(usuario.id);
+    setRecienEntro(true);
   }
 
   function logout() {
@@ -85,7 +89,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsuario(null);
   }
 
-  return <Ctx.Provider value={{ usuario, cargando, login, logout }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ usuario, cargando, recienEntro, consumirRecienEntro: () => setRecienEntro(false), login, logout }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export const useAuth = () => useContext(Ctx);

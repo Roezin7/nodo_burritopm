@@ -84,14 +84,68 @@ existenciasRouter.post(
   }),
 );
 
-/** GET /existencias/retiros — últimos retiros directos de bodega. */
-existenciasRouter.get(
-  '/retiros',
+/**
+ * POST /existencias/ingreso { product_id, cantidad, costo_unitario?, motivo? }
+ * Entrada de inventario a la bodega (compra/recepción de proveedor). Sube la disponibilidad
+ * de bodega y recalcula el costo promedio; si llega costo, actualiza el último costo del producto.
+ */
+existenciasRouter.post(
+  '/ingreso',
   requireAuth,
   bodegaCrew,
   asyncHandler(async (req, res) => {
+    const b = z
+      .object({
+        product_id: z.coerce.number().int().positive(),
+        cantidad: z.coerce.number().positive(),
+        costo_unitario: z.coerce.number().nonnegative().nullable().optional(),
+        motivo: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body);
+
+    const negocioId = req.auth!.negocioId;
+    const bodega = await bodegaCentral(negocioId);
+    const producto = await prisma.products.findFirst({
+      where: { id: BigInt(b.product_id), negocio_id: negocioId },
+      include: { existencias: { where: { ubicacion_id: bodega.id } } },
+    });
+    if (!producto) throw new HttpError(404, 'Producto no encontrado');
+
+    const costo = b.costo_unitario ?? num(producto.existencias[0]?.costo_promedio) ?? num(producto.ultimo_costo);
+    const key = `ingreso:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+
+    await prisma.$transaction(async (tx) => {
+      await aplicarMovimiento(tx, {
+        negocioId,
+        productId: producto.id,
+        tipo: 'compra_recibida',
+        cantidad: b.cantidad,
+        usuarioId: req.auth!.usuarioId,
+        destinoId: bodega.id,
+        costoUnitario: costo,
+        documentoTipo: 'ingreso',
+        comentario: b.motivo,
+        idempotencyKey: key,
+        deltas: [{ ubicacionId: bodega.id, productId: producto.id, disponible: b.cantidad, costoUnitario: costo }],
+      });
+      if (b.costo_unitario != null) {
+        await tx.products.update({ where: { id: producto.id }, data: { ultimo_costo: b.costo_unitario } });
+      }
+    });
+
+    res.status(201).json({ ok: true });
+  }),
+);
+
+/** GET /existencias/movimientos?tipo=ingreso|retiro — últimos movimientos directos de bodega. */
+existenciasRouter.get(
+  '/movimientos',
+  requireAuth,
+  bodegaCrew,
+  asyncHandler(async (req, res) => {
+    const tipo = z.enum(['ingreso', 'retiro']).catch('retiro').parse(req.query.tipo);
     const movs = await prisma.movimientos_inventario.findMany({
-      where: { negocio_id: req.auth!.negocioId, documento_tipo: 'retiro' },
+      where: { negocio_id: req.auth!.negocioId, documento_tipo: tipo },
       include: {
         products: { include: { unidad_distribucion: true } },
         ubicacion_destino: { select: { nombre: true } },
@@ -102,16 +156,18 @@ existenciasRouter.get(
     res.json(
       movs.map((m) => ({
         id: Number(m.id),
+        tipo,
         fecha: m.fecha.toISOString(),
         producto: m.products.nombre,
         unidad: m.products.unidad_distribucion.nombre,
         cantidad: num0(m.cantidad),
-        destino: m.ubicacion_destino?.nombre ?? null,
+        destino: tipo === 'retiro' ? (m.ubicacion_destino?.nombre ?? null) : null,
         motivo: m.comentario,
       })),
     );
   }),
 );
+
 
 /** GET /existencias?ubicacion=ID — saldo actual por producto en una ubicación. */
 existenciasRouter.get(

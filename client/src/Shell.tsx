@@ -22,7 +22,7 @@ const ITEMS: Item[] = [
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
   { ruta: '/bodega', label: 'Bodega', icono: 'package', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/ruta', label: 'Ruta', icono: 'truck', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/retiros', label: 'Retiros', icono: 'salida', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/almacen', label: 'Almacén', icono: 'salida', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/recepcion', label: 'Recepción', icono: 'checks', roles: ['admin', 'encargado_sucursal'] },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'wallet', soloAdmin: true },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },

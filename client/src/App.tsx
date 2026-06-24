@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth, type Rol } from './auth';
 import Login from './screens/Login';
 import Home from './screens/Home';
@@ -6,14 +6,14 @@ import Inventario from './screens/inventario/Inventario';
 import Distribucion from './screens/distribucion/Distribucion';
 import Bodega from './screens/bodega/Bodega';
 import Ruta from './screens/ruta/Ruta';
-import Retiros from './screens/retiros/Retiros';
+import Almacen from './screens/almacen/Almacen';
 import Recepcion from './screens/recepcion/Recepcion';
 import Incidencias from './screens/incidencias/Incidencias';
 import Configuracion from './screens/config/Configuracion';
 import OfflineBanner from './OfflineBanner';
 import Shell from './Shell';
 import SplashIntro from './brand/SplashIntro';
-import { useState, type JSX } from 'react';
+import { useState, useEffect, type JSX } from 'react';
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
   const { usuario } = useAuth();
@@ -22,7 +22,16 @@ function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
 }
 
 function AppBody() {
-  const { usuario, cargando } = useAuth();
+  const { usuario, cargando, recienEntro, consumirRecienEntro } = useAuth();
+  const navigate = useNavigate();
+
+  // Tras un login explícito, siempre al Inicio.
+  useEffect(() => {
+    if (recienEntro) {
+      navigate('/', { replace: true });
+      consumirRecienEntro();
+    }
+  }, [recienEntro, navigate, consumirRecienEntro]);
 
   if (cargando) {
     return (
@@ -42,7 +51,7 @@ function AppBody() {
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
         <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
         <Route path="/ruta" element={<SoloRol roles={['admin', 'encargado_bodega']}><Ruta /></SoloRol>} />
-        <Route path="/retiros" element={<SoloRol roles={['admin', 'encargado_bodega']}><Retiros /></SoloRol>} />
+        <Route path="/almacen" element={<SoloRol roles={['admin', 'encargado_bodega']}><Almacen /></SoloRol>} />
         <Route path="/recepcion" element={<SoloRol roles={['admin', 'encargado_sucursal']}><Recepcion /></SoloRol>} />
         <Route path="/incidencias" element={<SoloRol roles={['admin']}><Incidencias /></SoloRol>} />
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />
