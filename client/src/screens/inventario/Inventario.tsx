@@ -198,7 +198,7 @@ function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir }: { sesion: Sesion; 
         <p className="muted" style={{ margin: '0.2rem 0 0.8rem' }}>
           {cerrado ? 'Cerrado — es la foto oficial de hoy.' : `En captura · ${c.contadas}/${c.total_lineas} contados`}
         </p>
-        <button className="btn btn-primary btn-grande" style={{ margin: 0 }} onClick={() => onAbrir(c.id)}>
+        <button className="btn btn-primary" onClick={() => onAbrir(c.id)}>
           {cerrado ? 'Ver inventario' : 'Continuar inventario'}
         </button>
       </div>
@@ -213,7 +213,7 @@ function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir }: { sesion: Sesion; 
         <p className="muted" style={{ margin: '0.2rem 0 0.8rem' }}>
           {sesion.programado ? 'El espacio de hoy está habilitado.' : 'Hoy no es día programado, pero puedes abrir uno como admin.'}
         </p>
-        <button className="btn btn-primary btn-grande" style={{ margin: 0 }} disabled={busy} onClick={onTomar}>
+        <button className="btn btn-primary" disabled={busy} onClick={onTomar}>
           Tomar inventario de hoy
         </button>
       </div>
