@@ -2419,3 +2419,8 @@ a.flujo-paso { text-decoration: none; }
 .hoy-card--cerrado .hoy-card-fecha { color: var(--success); }
 .inv-fecha-grupo { margin-bottom: 0.4rem; }
 .inv-fecha-titulo { text-transform: capitalize; }
+
+/* Banner "tu tarea de hoy" */
+.tarea-hoy { display: flex; align-items: center; justify-content: space-between; gap: 1rem; text-decoration: none; color: var(--ink); }
+.tarea-hoy:active { transform: scale(0.995); }
+.tarea-hoy-cta { display: inline-flex; align-items: center; gap: 0.2rem; font-weight: 800; color: var(--brand); white-space: nowrap; }

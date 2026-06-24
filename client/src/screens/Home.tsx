@@ -1,8 +1,63 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '../api';
 import { useAuth, type Rol } from '../auth';
 import { Icono } from '../icons';
 import PanelAdmin from './PanelAdmin';
+
+interface Tarea { titulo: string; sub: string; ruta: string }
+
+/** Banner "tu tarea de hoy" según el rol: lo más importante por hacer, de un toque. */
+function TareaHoy() {
+  const { usuario } = useAuth();
+  const [tarea, setTarea] = useState<Tarea | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    async function calcular(): Promise<Tarea | null> {
+      if (!usuario) return null;
+      try {
+        if (usuario.rol === 'encargado_sucursal') {
+          const suc = usuario.ubicaciones?.find((u) => u.tipo === 'sucursal');
+          if (!suc) return null;
+          const recep = await api<{ lineas: { recibida: number | null }[] }[]>(`/distribuciones/recepciones?ubicacion=${suc.id}`);
+          if (recep.some((d) => d.lineas.some((l) => l.recibida == null))) {
+            return { titulo: 'Confirma tu recepción', sub: 'Llegó un pedido a tu sucursal', ruta: '/recepcion' };
+          }
+          const ses = await api<{ programado: boolean; conteo: { estado: string } | null }>(`/conteos/sesion?ubicacion=${suc.id}`);
+          if (ses.programado && ses.conteo?.estado !== 'cerrado') {
+            return { titulo: 'Hoy toca inventario', sub: ses.conteo ? 'Continúa el inventario de hoy' : 'Toma el inventario de hoy', ruta: '/inventario' };
+          }
+          return null;
+        }
+        if (usuario.rol === 'encargado_bodega') {
+          const ds = await api<{ estado: string }[]>('/distribuciones');
+          const porSurtir = ds.filter((d) => d.estado === 'aprobada' || d.estado === 'verificada').length;
+          if (porSurtir > 0) return { titulo: `${porSurtir} pedido${porSurtir > 1 ? 's' : ''} por surtir`, sub: 'Surte y carga el camión', ruta: '/bodega' };
+          const rutas = (await api<(unknown | null)[]>('/rutas/mias')).filter(Boolean);
+          if (rutas.length > 0) return { titulo: 'Tienes una ruta en curso', sub: 'Entrega parada por parada', ruta: '/ruta' };
+          return null;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    }
+    void calcular().then((t) => { if (vivo) setTarea(t); });
+    return () => { vivo = false; };
+  }, [usuario]);
+
+  if (!tarea) return null;
+  return (
+    <Link className="hoy-card tarea-hoy" to={tarea.ruta}>
+      <div>
+        <div className="hoy-card-fecha">{tarea.titulo}</div>
+        <p className="muted" style={{ margin: '0.2rem 0 0' }}>{tarea.sub}</p>
+      </div>
+      <span className="tarea-hoy-cta">Ir <Icono name="chevron" size={18} /></span>
+    </Link>
+  );
+}
 
 interface Modulo {
   clave: string;
@@ -52,6 +107,8 @@ export default function Home() {
           <p className="page-sub">¿Qué quieres revisar hoy?</p>
         </div>
       </header>
+
+      {!esAdmin && <TareaHoy />}
 
       {esAdmin && (
         <div className="tabs">
