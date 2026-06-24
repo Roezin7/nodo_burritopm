@@ -7,6 +7,7 @@ export default function Login() {
   const { login } = useAuth();
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [sel, setSel] = useState<Usuario | null>(null);
+  const [q, setQ] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
@@ -40,20 +41,33 @@ export default function Login() {
 
   // --- Paso 1: elegir usuario ---
   if (!sel) {
+    const t = q.trim().toLowerCase();
+    const lista = usuarios.filter((u) => !t || u.nombre.toLowerCase().includes(t) || rolLabel(u.rol).toLowerCase().includes(t));
     return (
       <div className="login">
         <div className="login__lockup">
           <BurritoLockup size={64} variante="full" glow />
         </div>
         <p className="subtitle">¿Quién eres?</p>
-        <div className="user-grid">
-          {usuarios.map((u) => (
-            <button key={u.id} className="user-card" onClick={() => setSel(u)}>
-              <span className="avatar">{u.nombre[0]}</span>
-              <span>{u.nombre}</span>
+        {usuarios.length > 6 && (
+          <input
+            className="login-search"
+            type="search"
+            autoFocus
+            placeholder="Busca tu nombre o sucursal…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        )}
+        <div className="user-list">
+          {lista.map((u) => (
+            <button key={u.id} className="user-row" onClick={() => setSel(u)}>
+              <span className="avatar-sm">{u.nombre[0]}</span>
+              <span className="user-row-name">{u.nombre}</span>
               <small className="muted">{rolLabel(u.rol)}</small>
             </button>
           ))}
+          {lista.length === 0 && <p className="muted">Sin coincidencias.</p>}
         </div>
         {error && <p className="error-msg">{error}</p>}
       </div>
