@@ -1280,6 +1280,28 @@ select:disabled {
   text-transform: capitalize;
 }
 
+/* Último usuario (acceso rápido por dispositivo) */
+.login-ultimo {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: min(100%, 420px);
+  text-align: left;
+  padding: 0.85rem 1rem;
+  border: 2px solid var(--brand);
+  border-radius: var(--r-card);
+  background: var(--brand-tint);
+  color: var(--ink);
+  box-shadow: var(--sh-sm);
+  cursor: pointer;
+  transition: transform 0.08s, box-shadow 0.15s;
+}
+.login-ultimo:hover { box-shadow: var(--sh-md); }
+.login-ultimo:active { transform: scale(0.99); }
+.login-ultimo-text { display: flex; flex-direction: column; line-height: 1.2; flex: 1; min-width: 0; }
+.login-ultimo-text strong { font-size: 1.1rem; }
+.login-otro { margin: 0.1rem 0 -0.2rem; font-size: 0.85rem; }
+
 /* Selección de usuario: buscador + lista compacta (escala a muchos usuarios) */
 .login-search {
   width: min(100%, 420px);
@@ -1879,7 +1901,7 @@ select:disabled {
 .dist-aprob { text-align: right; font-weight: 600; }
 
 /* ── Panel admin / dashboard (Bloque 7) ────────────────────────────────────── */
-.panel-admin { margin-bottom: 1.5rem; }
+.panel-admin { margin: 1.5rem 0; }
 .kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);

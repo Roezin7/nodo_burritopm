@@ -3,6 +3,24 @@ import { api, getToken, setToken } from './api';
 
 export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal';
 
+// Último usuario que inició sesión en ESTE dispositivo (para ofrecerlo de un toque).
+const ULTIMO_KEY = 'bpm_ultimo_usuario';
+export function getUltimoUsuario(): number | null {
+  try {
+    const v = localStorage.getItem(ULTIMO_KEY);
+    return v ? Number(v) : null;
+  } catch {
+    return null;
+  }
+}
+function setUltimoUsuario(id: number) {
+  try {
+    localStorage.setItem(ULTIMO_KEY, String(id));
+  } catch {
+    /* almacenamiento no disponible */
+  }
+}
+
 /** Etiqueta visible del rol. `encargado_bodega` cubre bodega + reparto (rol unificado). */
 export function rolLabel(rol: Rol): string {
   switch (rol) {
@@ -59,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     setToken(token);
     setUsuario(usuario);
+    setUltimoUsuario(usuario.id);
   }
 
   function logout() {

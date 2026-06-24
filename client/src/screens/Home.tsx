@@ -49,8 +49,6 @@ export default function Home() {
         </div>
       </header>
 
-      {usuario.rol === 'admin' && <PanelAdmin />}
-
       <div className="module-grid">
         {visibles.map((m) =>
           m.ruta ? (
@@ -69,6 +67,8 @@ export default function Home() {
           ),
         )}
       </div>
+
+      {usuario.rol === 'admin' && <PanelAdmin />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
-import { useAuth, rolLabel, type Usuario } from '../auth';
+import { useAuth, rolLabel, getUltimoUsuario, type Usuario } from '../auth';
 import BurritoLockup from '../brand/BurritoLockup';
 
 export default function Login() {
@@ -42,13 +42,30 @@ export default function Login() {
   // --- Paso 1: elegir usuario ---
   if (!sel) {
     const t = q.trim().toLowerCase();
-    const lista = usuarios.filter((u) => !t || u.nombre.toLowerCase().includes(t) || rolLabel(u.rol).toLowerCase().includes(t));
+    const ultimoId = getUltimoUsuario();
+    const ultimo = !t ? usuarios.find((u) => u.id === ultimoId) : undefined;
+    const lista = usuarios
+      .filter((u) => !t || u.nombre.toLowerCase().includes(t) || rolLabel(u.rol).toLowerCase().includes(t))
+      .filter((u) => !ultimo || u.id !== ultimo.id);
     return (
       <div className="login">
         <div className="login__lockup">
           <BurritoLockup size={64} variante="full" glow />
         </div>
         <p className="subtitle">¿Quién eres?</p>
+
+        {ultimo && (
+          <button className="login-ultimo" onClick={() => setSel(ultimo)}>
+            <span className="avatar-sm">{ultimo.nombre[0]}</span>
+            <span className="login-ultimo-text">
+              <small className="muted">Continuar como</small>
+              <strong>{ultimo.nombre}</strong>
+            </span>
+            <span className="muted">›</span>
+          </button>
+        )}
+        {ultimo && <p className="muted login-otro">o elige otro</p>}
+
         {usuarios.length > 6 && (
           <input
             className="login-search"
