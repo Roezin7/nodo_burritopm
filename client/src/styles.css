@@ -15,7 +15,8 @@
   --border: #e6e0d7;
   --border-strong: #d5ccbf;
 
-  /* Marca Burrito Parrilla — verde del logo real */
+  /* Marca Burrito Parrilla — verde del logo real (idéntico en claro y oscuro) */
+  --logo-verde: #5ea531;
   --brand: #5ea531;
   --brand-strong: #4c8a26;
   --brand-tint: #e9f4dc;
@@ -78,16 +79,11 @@
   --border: #342e26;
   --border-strong: #463e33;
 
-  --brand: #7ec24a;
-  --brand-strong: #6aad3c;
+  /* El verde de marca es el MISMO que en claro (consistencia); solo cambia el wash de fondo. */
   --brand-tint: #1c3315;
 
   --accent: #ef5b4f;
   --accent-tint: #3a1c19;
-
-  --primary: #7ec24a;
-  --primary-hover: #6aad3c;
-  --on-primary: #10240f;
 
   --success: #4fb87e;
   --success-bg: #16331f;
@@ -1908,11 +1904,17 @@ select:disabled {
 .bpm-wm-burrito {
   font-family: var(--font-script);
   font-weight: 400;
-  font-size: 1.85rem;
+  font-size: 1.95rem;
   line-height: 0.8;
-  color: var(--brand);
-  text-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.28);
-  padding-right: 0.1em; /* la cola de la 'o' del script */
+  color: var(--logo-verde);
+  /* Borde oscuro + sombra como en el logo real (idéntico en ambos modos). */
+  text-shadow:
+    -0.5px -0.5px 0 #23310f,
+     0.5px -0.5px 0 #23310f,
+    -0.5px  0.5px 0 #23310f,
+     0.5px  0.5px 0 #23310f,
+     1.5px 2px 2.5px rgba(0, 0, 0, 0.35);
+  padding-right: 0.12em; /* la cola de la 'o' del script */
 }
 .bpm-wm-sub {
   font-family: var(--font-ui);

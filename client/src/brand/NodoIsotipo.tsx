@@ -2,7 +2,7 @@
 // un cuadrado con una diagonal. Sirve estático (nav/login) y animado (intro).
 
 export const NODO_COLORS = {
-  verde: '#21A645',
+  verde: '#5ea531', // verde del logo Burrito (consistente con --brand)
   rojo: '#FF3B21',
   ambar: '#FBA61A',
   azul: '#1F8EF1',
