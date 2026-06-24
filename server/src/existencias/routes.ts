@@ -3,9 +3,115 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
-import { requireAuth, usuarioPuedeUbicacion } from '../auth/middleware.js';
+import { requireAuth, requireRole, usuarioPuedeUbicacion } from '../auth/middleware.js';
+import { aplicarMovimiento } from '../ledger/service.js';
 
 export const existenciasRouter = Router();
+
+// Retiros directos de bodega: admin + Bodega y reparto.
+const bodegaCrew = requireRole('admin', 'encargado_bodega');
+
+async function bodegaCentral(negocioId: bigint) {
+  const b = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, tipo: 'bodega', activo: true }, orderBy: { id: 'asc' } });
+  if (!b) throw new HttpError(400, 'No hay una bodega central activa');
+  return b;
+}
+
+/**
+ * POST /existencias/retiro { product_id, cantidad, destino_ubicacion_id?, motivo? }
+ * Retiro directo de la bodega fuera del flujo normal (emergencias). Si va a una sucursal es
+ * transferencia (baja bodega, sube sucursal); si no, salida directa (consumo). Mueve el ledger
+ * para que el inventario no se descuadre.
+ */
+existenciasRouter.post(
+  '/retiro',
+  requireAuth,
+  bodegaCrew,
+  asyncHandler(async (req, res) => {
+    const b = z
+      .object({
+        product_id: z.coerce.number().int().positive(),
+        cantidad: z.coerce.number().positive(),
+        destino_ubicacion_id: z.coerce.number().int().positive().nullable().optional(),
+        motivo: z.string().trim().max(300).optional(),
+      })
+      .parse(req.body);
+
+    const negocioId = req.auth!.negocioId;
+    const bodega = await bodegaCentral(negocioId);
+    const producto = await prisma.products.findFirst({
+      where: { id: BigInt(b.product_id), negocio_id: negocioId },
+      include: { existencias: { where: { ubicacion_id: bodega.id } } },
+    });
+    if (!producto) throw new HttpError(404, 'Producto no encontrado');
+
+    let destino: { id: bigint; nombre: string } | null = null;
+    if (b.destino_ubicacion_id != null) {
+      const d = await prisma.ubicaciones.findFirst({
+        where: { id: BigInt(b.destino_ubicacion_id), negocio_id: negocioId, tipo: 'sucursal', activo: true },
+        select: { id: true, nombre: true },
+      });
+      if (!d) throw new HttpError(400, 'La sucursal destino no es válida');
+      destino = d;
+    }
+
+    const costo = num(producto.existencias[0]?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+    const key = `retiro:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+
+    await prisma.$transaction((tx) =>
+      aplicarMovimiento(tx, {
+        negocioId,
+        productId: producto.id,
+        tipo: destino ? 'transferencia' : 'consumo',
+        cantidad: b.cantidad,
+        usuarioId: req.auth!.usuarioId,
+        origenId: bodega.id,
+        destinoId: destino?.id ?? null,
+        costoUnitario: costo,
+        documentoTipo: 'retiro',
+        comentario: b.motivo,
+        idempotencyKey: key,
+        deltas: destino
+          ? [
+              { ubicacionId: bodega.id, productId: producto.id, disponible: -b.cantidad },
+              { ubicacionId: destino.id, productId: producto.id, disponible: b.cantidad, costoUnitario: costo },
+            ]
+          : [{ ubicacionId: bodega.id, productId: producto.id, disponible: -b.cantidad }],
+      }),
+    );
+
+    res.status(201).json({ ok: true, destino: destino?.nombre ?? null });
+  }),
+);
+
+/** GET /existencias/retiros — últimos retiros directos de bodega. */
+existenciasRouter.get(
+  '/retiros',
+  requireAuth,
+  bodegaCrew,
+  asyncHandler(async (req, res) => {
+    const movs = await prisma.movimientos_inventario.findMany({
+      where: { negocio_id: req.auth!.negocioId, documento_tipo: 'retiro' },
+      include: {
+        products: { include: { unidad_distribucion: true } },
+        ubicacion_destino: { select: { nombre: true } },
+      },
+      orderBy: { id: 'desc' },
+      take: 50,
+    });
+    res.json(
+      movs.map((m) => ({
+        id: Number(m.id),
+        fecha: m.fecha.toISOString(),
+        producto: m.products.nombre,
+        unidad: m.products.unidad_distribucion.nombre,
+        cantidad: num0(m.cantidad),
+        destino: m.ubicacion_destino?.nombre ?? null,
+        motivo: m.comentario,
+      })),
+    );
+  }),
+);
 
 /** GET /existencias?ubicacion=ID — saldo actual por producto en una ubicación. */
 existenciasRouter.get(

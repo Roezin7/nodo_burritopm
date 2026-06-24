@@ -97,6 +97,14 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M12 10v4M12 17h.01" />
     </>
   ),
+  salida: (
+    <>
+      <path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" />
+      <path d="M3 8l9 5 9-5" />
+      <path d="M12 13v8" />
+      <path d="M9 17l3 3 3-3" />
+    </>
+  ),
   truck: (
     <>
       <path d="M2 6.5A1.5 1.5 0 0 1 3.5 5H14a1 1 0 0 1 1 1v9H3a1 1 0 0 1-1-1V6.5Z" />

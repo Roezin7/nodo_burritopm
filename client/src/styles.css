@@ -2300,6 +2300,14 @@ a.flujo-paso { text-decoration: none; }
 .usuario-acciones { display: flex; gap: 0.25rem; flex: 0 0 auto; }
 .btn-sm { padding: 0.35rem 0.6rem; font-size: 0.82rem; }
 
+/* Retiro de bodega (formulario por pasos) */
+.retiro-label { display: block; font-weight: 700; font-size: 0.85rem; margin: 0.9rem 0 0.35rem; color: var(--ink-2); }
+.retiro-label:first-child { margin-top: 0; }
+.retiro-sel { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.6rem 0.8rem; border: 2px solid var(--brand); border-radius: var(--r-input); background: var(--brand-tint); }
+.retiro-resultados { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; }
+.retiro-resultado { text-align: left; padding: 0.55rem 0.7rem; border: 1px solid var(--border); border-radius: var(--r-input); background: var(--surface); color: var(--ink); cursor: pointer; transition: border-color 0.12s; }
+.retiro-resultado:hover { border-color: var(--brand); }
+
 /* Selector de días de inventario */
 .dias-selector { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .dia-pill {

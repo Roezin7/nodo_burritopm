@@ -18,6 +18,7 @@ const MODULOS: Modulo[] = [
   { clave: 'distribucion', titulo: 'Distribución', icono: 'trending', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
   { clave: 'bodega', titulo: 'Bodega', icono: 'package', desc: 'Surtir y cargar el camión', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Ruta', icono: 'truck', desc: 'Entregar parada por parada', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'retiros', titulo: 'Retiros', icono: 'salida', desc: 'Salidas de emergencia de bodega', ruta: '/retiros', roles: ['admin', 'encargado_bodega'] },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
