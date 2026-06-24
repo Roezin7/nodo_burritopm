@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { estadoRutaDesdeParadas, estadoTrasEntrega, normalizarOrden, type EstadoParada } from './rutas.logic.js';
+import { avisarConfirmarRecepcion } from '../push/service.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -326,6 +327,8 @@ export async function entregarParada(
     await recomputarRuta(tx, rutaId);
   });
 
+  // Aviso best-effort a la sucursal: llegó, confirma tu recepción.
+  void avisarConfirmarRecepcion(parada.ubicacion_id).catch(() => {});
   return { ok: true, estado_parada: nuevoEstado, incidencias: faltantes.length };
 }
 

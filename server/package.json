@@ -21,6 +21,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
     "@prisma/client": "^6.2.1",
+    "@types/web-push": "^3.6.4",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
@@ -29,6 +30,7 @@
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "web-push": "^3.6.7",
     "zod": "^3.24.1"
   },
   "devDependencies": {

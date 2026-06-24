@@ -4,6 +4,7 @@ import { HttpError } from '../middleware/error.js';
 import { sugerirEnvio, valor } from './logic.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.js';
+import { avisarPedidoEnCamino } from '../push/service.js';
 
 /** Último conteo CERRADO de la ubicación: mapa product_id(string) → disponible, y su id. */
 async function disponibleConteo(ubicacionId: bigint) {
@@ -332,6 +333,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
     // El camión cargado pone la ruta en curso (la crea si no se planeó una).
     await asegurarRutaEnCurso(tx, negocioId, id, usuarioId);
   });
+  void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
   return { ok: true };
 }
 

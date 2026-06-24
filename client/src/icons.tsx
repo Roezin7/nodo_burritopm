@@ -97,6 +97,12 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M12 10v4M12 17h.01" />
     </>
   ),
+  bell: (
+    <>
+      <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" />
+      <path d="M10.5 20a2 2 0 0 0 3 0" />
+    </>
+  ),
   salida: (
     <>
       <path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" />

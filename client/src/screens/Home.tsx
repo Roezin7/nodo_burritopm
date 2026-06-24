@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, type Rol } from '../auth';
 import { Icono } from '../icons';
+import ActivarAvisos from '../components/ActivarAvisos';
 import PanelAdmin from './PanelAdmin';
 
 interface Tarea { titulo: string; sub: string; ruta: string }
@@ -108,6 +109,7 @@ export default function Home() {
         </div>
       </header>
 
+      <ActivarAvisos />
       {!esAdmin && <TareaHoy />}
 
       {esAdmin && (

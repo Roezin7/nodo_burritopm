@@ -10,6 +10,10 @@ const schema = z.object({
   // Orígenes permitidos para CORS, separados por coma. Vacío = solo mismo origen
   // (lo normal en el despliegue de un solo servicio).
   ALLOWED_ORIGINS: z.string().optional().default(''),
+  // Web Push (VAPID). Si faltan, los avisos quedan deshabilitados (no rompe nada).
+  VAPID_PUBLIC_KEY: z.string().optional().default(''),
+  VAPID_PRIVATE_KEY: z.string().optional().default(''),
+  VAPID_SUBJECT: z.string().optional().default('mailto:avisos@burritoparrilla.com'),
 });
 
 const parsed = schema.safeParse(process.env);

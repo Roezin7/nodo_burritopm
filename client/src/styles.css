@@ -2420,6 +2420,20 @@ a.flujo-paso { text-decoration: none; }
 .inv-fecha-grupo { margin-bottom: 0.4rem; }
 .inv-fecha-titulo { text-transform: capitalize; }
 
+/* Tarjeta "activar avisos" */
+.avisos-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  margin-bottom: 1rem;
+}
+.avisos-icono { display: inline-grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: 50%; background: var(--brand-tint); color: var(--brand); flex: 0 0 auto; }
+.avisos-text { display: flex; flex-direction: column; line-height: 1.2; flex: 1; min-width: 0; }
+
 /* Banner "tu tarea de hoy" */
 .tarea-hoy { display: flex; align-items: center; justify-content: space-between; gap: 1rem; text-decoration: none; color: var(--ink); }
 .tarea-hoy:active { transform: scale(0.995); }

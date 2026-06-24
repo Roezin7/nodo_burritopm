@@ -466,6 +466,19 @@ model rutas {
   @@index([repartidor_id])
 }
 
+// Suscripciones de Web Push por dispositivo (PWA). Una por endpoint del navegador.
+model push_subscriptions {
+  id         BigInt   @id @default(autoincrement())
+  negocio_id BigInt
+  usuario_id BigInt
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  creado_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([usuario_id])
+}
+
 model ruta_paradas {
   id            BigInt       @id @default(autoincrement())
   ruta_id       BigInt

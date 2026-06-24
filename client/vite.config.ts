@@ -9,7 +9,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       includeAssets: ['favicon.svg'],
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+      },
       manifest: {
         name: 'NODO · Burrito Parrilla',
         short_name: 'NODO',
@@ -24,18 +30,6 @@ export default defineConfig({
           { src: 'pwa-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512.png', sizes: '512x512', type: 'image/png' },
           { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-        ],
-      },
-      workbox: {
-        navigateFallback: '/index.html',
-        // No cachear la API: las escrituras se manejan con cola propia en IndexedDB (Fase 6).
-        navigateFallbackDenylist: [/^\/api/],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
-            handler: 'NetworkOnly',
-            method: 'GET',
-          },
         ],
       },
     }),
