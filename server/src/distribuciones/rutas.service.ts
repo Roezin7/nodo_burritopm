@@ -147,13 +147,85 @@ export async function rutaDetalle(negocioId: bigint, distId: bigint) {
   };
 }
 
-/** Monitor del admin: TODAS las rutas activas (en curso) con sus paradas e items. */
+/**
+ * Monitor del admin: TODO lo que está en la calle. Se basa en las distribuciones en tránsito
+ * (no solo en rutas formalmente planeadas): si la distribución tiene ruta, usa su detalle; si no,
+ * sintetiza las paradas desde las sucursales destino y su estado de recepción.
+ */
 export async function rutasActivas(negocioId: bigint) {
-  const rutas = await prisma.rutas.findMany({
-    where: { negocio_id: negocioId, estado: 'en_curso' },
-    orderBy: [{ despachada_at: 'desc' }, { id: 'desc' }],
+  const dists = await prisma.distribuciones.findMany({
+    where: { negocio_id: negocioId, estado: { in: ['en_transito', 'parcialmente_entregada'] } },
+    orderBy: { id: 'desc' },
+    select: { id: true },
   });
-  return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
+  const out = [];
+  for (const d of dists) {
+    const ruta = await rutaDeDist(negocioId, d.id);
+    out.push(ruta ? await rutaDetalle(negocioId, d.id) : await rutaSintetica(negocioId, d.id));
+  }
+  return out;
+}
+
+/** Ruta "sintética" para una distribución en tránsito que se cargó sin ruta planeada. */
+async function rutaSintetica(negocioId: bigint, distId: bigint) {
+  const dist = await prisma.distribuciones.findFirst({ where: { id: distId, negocio_id: negocioId } });
+  const lineas = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: distId },
+    include: {
+      products: { include: { unidad_distribucion: true } },
+      ubicaciones: { select: { id: true, nombre: true, direccion: true } },
+    },
+  });
+
+  const porUbic = new Map<string, { ubic: { id: number; nombre: string; direccion: string | null }; items: unknown[]; lineas: typeof lineas }>();
+  for (const l of lineas) {
+    const k = l.ubicacion_destino_id.toString();
+    if (!porUbic.has(k)) {
+      porUbic.set(k, {
+        ubic: { id: Number(l.ubicaciones.id), nombre: l.ubicaciones.nombre, direccion: l.ubicaciones.direccion },
+        items: [],
+        lineas: [] as typeof lineas,
+      });
+    }
+    const g = porUbic.get(k)!;
+    g.items.push({
+      linea_id: Number(l.id),
+      product_id: Number(l.product_id),
+      nombre: l.products.nombre,
+      unidad: l.products.unidad_distribucion.nombre,
+      esperado: cantidadACargar(l),
+      recibida: num(l.cantidad_recibida),
+    });
+    g.lineas.push(l);
+  }
+
+  const paradas = [...porUbic.values()]
+    .sort((a, b) => a.ubic.nombre.localeCompare(b.ubic.nombre, 'es'))
+    .map((g, i) => {
+      const todasRecibidas = g.lineas.every((l) => l.cantidad_recibida != null);
+      const conIncidencia = g.lineas.some((l) => l.incidencia_id != null);
+      const estado: EstadoParada = todasRecibidas ? (conIncidencia ? 'con_incidencia' : 'confirmada') : 'pendiente';
+      return {
+        parada_id: g.ubic.id, // sintético: id de la sucursal
+        ubicacion: g.ubic,
+        orden: i + 1,
+        estado,
+        entregada_at: null,
+        confirmada_at: null,
+        notas: null,
+        items: g.items,
+      };
+    });
+
+  return {
+    ruta_id: -Number(distId), // sintético (negativo) para distinguir de rutas reales
+    distribucion_id: Number(distId),
+    nombre: `Pedido #${distId}`,
+    estado: 'en_curso',
+    repartidor: null,
+    despachada_at: dist?.cargado_at?.toISOString() ?? null,
+    paradas,
+  };
 }
 
 /** Rutas en curso asignadas a un repartidor (su tablero del día). */
