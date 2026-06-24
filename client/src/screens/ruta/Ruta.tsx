@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
+import { Icono } from '../../icons';
 import { ParadaChip, FlujoStepper, paradaLabel } from '../../flujo';
 
 interface ParadaItem {
@@ -165,6 +166,16 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
           {parada.ubicacion.direccion && <p className="page-sub">{parada.ubicacion.direccion}</p>}
         </div>
       </header>
+
+      <a
+        className="btn btn-secondary btn-maps"
+        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parada.ubicacion.direccion || parada.ubicacion.nombre)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <Icono name="pin" size={18} /> Abrir en Maps
+      </a>
+
       {error && <p className="error-msg">{error}</p>}
 
       <div className="card">

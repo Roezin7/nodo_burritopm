@@ -272,6 +272,17 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
     setOk('');
   }
 
+  // +/− y captura directa: cualquier cambio marca el producto como contado (menos toques).
+  function inc(pid: number, delta: number) {
+    setLineas((prev) => prev.map((l) => (l.product_id === pid ? { ...l, qty: Math.max(0, Math.round((l.qty + delta) * 1000) / 1000), contado: true } : l)));
+    setOk('');
+  }
+  function setQty(pid: number, raw: string) {
+    const v = Math.max(0, Number(raw) || 0);
+    setLineas((prev) => prev.map((l) => (l.product_id === pid ? { ...l, qty: v, contado: true } : l)));
+    setOk('');
+  }
+
   function marcarGrupo(items: LineaInventario[], contado: boolean) {
     const ids = new Set(items.map((i) => i.product_id));
     setLineas((prev) => prev.map((l) => (ids.has(l.product_id) ? { ...l, contado } : l)));
@@ -370,14 +381,18 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
                   <strong>{l.nombre}</strong>
                   <small className="muted">{l.unidad}{l.stock_objetivo > 0 ? ` · objetivo ${l.stock_objetivo}` : ''}{l.atipico ? ' · atípico' : ''}</small>
                 </div>
-                <input
-                  className="conteo-input2"
-                  inputMode="decimal"
-                  value={l.qty}
-                  disabled={!editable}
-                  onChange={(e) => set(l.product_id, 'qty', Number(e.target.value) || 0)}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
+                <div className="qty-stepper">
+                  <button type="button" className="qty-btn" disabled={!editable} aria-label="menos" onClick={() => inc(l.product_id, -1)}>−</button>
+                  <input
+                    className="qty-input"
+                    inputMode="decimal"
+                    value={l.qty}
+                    disabled={!editable}
+                    onChange={(e) => setQty(l.product_id, e.target.value)}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <button type="button" className="qty-btn" disabled={!editable} aria-label="más" onClick={() => inc(l.product_id, 1)}>+</button>
+                </div>
                 <button
                   type="button"
                   className={`chip ${l.contado ? 'chip--ok' : ''} conteo-check2`}

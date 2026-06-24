@@ -22,7 +22,9 @@ export default function Recepcion() {
   const [ubicId, setUbicId] = useState('');
   const [dists, setDists] = useState<DistRec[]>([]);
   const [recibido, setRecibido] = useState<Record<number, string>>({});
+  const [problema, setProblema] = useState<Set<number>>(new Set()); // dist ids en modo "hubo un problema"
   const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -49,22 +51,25 @@ export default function Recepcion() {
   }
   useEffect(() => { void cargar(); }, [ubicId]);
 
-  async function recibir(d: DistRec) {
-    if (!window.confirm('Confirmar la recepción. Las diferencias generarán una incidencia. ¿Continuar?')) return;
-    setBusy(true); setError('');
+  // modoProblema=false → confirma todo tal cual lo esperado (un toque). true → usa lo ajustado.
+  async function recibir(d: DistRec, modoProblema: boolean) {
+    setBusy(true); setError(''); setOk('');
     try {
       const items = d.lineas
         .filter((l) => l.recibida == null)
-        .map((l) => ({ linea_id: l.linea_id, cantidad: Number(recibido[l.linea_id] ?? l.esperado) || 0 }));
+        .map((l) => ({ linea_id: l.linea_id, cantidad: modoProblema ? (Number(recibido[l.linea_id] ?? l.esperado) || 0) : l.esperado }));
       await api(`/distribuciones/${d.id}/recibir`, { method: 'POST', body: { ubicacion_id: Number(ubicId), items } });
       setRecibido({});
+      setProblema((p) => { const n = new Set(p); n.delete(d.id); return n; });
+      setOk('Recepción confirmada.');
       await cargar();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al recibir');
+      setError(e instanceof ApiError ? e.message : 'No se pudo confirmar. Reintenta; si sigue, avisa al admin.');
     } finally {
       setBusy(false);
     }
   }
+  const toggleProblema = (id: number) => setProblema((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
     <div className="page conteo-page">
@@ -79,34 +84,49 @@ export default function Recepcion() {
         <>
           <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
+          {ok && <p className="ok-msg">{ok}</p>}
           {dists.length === 0 ? (
             <p className="muted">No hay entregas en tránsito para esta sucursal.</p>
           ) : (
-            dists.map((d) => (
-              <div key={d.id} className="card">
-                <div className="card-head"><strong>Distribución #{d.id}</strong> <EstadoDistChip estado={d.estado} /></div>
-                {d.lineas.map((l) => (
-                  <div key={l.linea_id} className="dist-row">
-                    <div className="conteo-prod">
-                      <strong>{l.nombre}</strong>
-                      <small className="muted">{l.unidad} · esperado {l.esperado}{l.recibida != null ? ` · recibido ${l.recibida}` : ''}</small>
+            dists.map((d) => {
+              const pendiente = d.lineas.some((l) => l.recibida == null);
+              const enProblema = problema.has(d.id);
+              return (
+                <div key={d.id} className="card">
+                  <div className="card-head"><strong>Pedido #{d.id}</strong> <EstadoDistChip estado={d.estado} /></div>
+                  {d.lineas.map((l) => (
+                    <div key={l.linea_id} className="dist-row">
+                      <div className="conteo-prod">
+                        <strong>{l.nombre}</strong>
+                        <small className="muted">{l.unidad} · esperado {l.esperado}{l.recibida != null ? ` · recibido ${l.recibida}` : ''}</small>
+                      </div>
+                      {l.recibida != null ? (
+                        <span className="dist-aprob">{l.recibida}</span>
+                      ) : enProblema ? (
+                        <input className="conteo-input2 dist-input" inputMode="decimal"
+                          value={recibido[l.linea_id] ?? String(l.esperado)}
+                          onChange={(e) => setRecibido({ ...recibido, [l.linea_id]: e.target.value })} />
+                      ) : (
+                        <span className="dist-aprob">{l.esperado}</span>
+                      )}
                     </div>
-                    {l.recibida == null ? (
-                      <input className="conteo-input2 dist-input" inputMode="decimal"
-                        value={recibido[l.linea_id] ?? String(l.esperado)}
-                        onChange={(e) => setRecibido({ ...recibido, [l.linea_id]: e.target.value })} />
+                  ))}
+                  {pendiente && (
+                    enProblema ? (
+                      <div className="form-actions">
+                        <button className="btn btn-secondary" disabled={busy} onClick={() => toggleProblema(d.id)}>Cancelar</button>
+                        <button className="btn btn-primary" disabled={busy} onClick={() => void recibir(d, true)}>Confirmar con ajustes</button>
+                      </div>
                     ) : (
-                      <span className="dist-aprob">{l.recibida}</span>
-                    )}
-                  </div>
-                ))}
-                {d.lineas.some((l) => l.recibida == null) && (
-                  <div className="form-actions">
-                    <button className="btn btn-primary" disabled={busy} onClick={() => void recibir(d)}>Confirmar recepción</button>
-                  </div>
-                )}
-              </div>
-            ))
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.6rem' }}>
+                        <button className="btn btn-primary btn-entregar" disabled={busy} onClick={() => void recibir(d, false)}>✓ Todo llegó bien</button>
+                        <button className="btn-problema" disabled={busy} onClick={() => toggleProblema(d.id)}>Hubo un problema</button>
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })
           )}
         </>
       )}
