@@ -228,10 +228,18 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
   };
 }
 
-/** Rutas en curso asignadas a un repartidor (su tablero del día). */
+/**
+ * Tablero del repartidor ("Bodega y reparto"): rutas en curso que puede entregar —
+ * las sin asignar (autocreadas al cargar) o asignadas a él. Rol unificado: la cuadrilla
+ * de reparto ve lo que está en la calle sin depender de una asignación explícita.
+ */
 export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint) {
   const rutas = await prisma.rutas.findMany({
-    where: { negocio_id: negocioId, repartidor_id: repartidorId, estado: { in: ['en_curso', 'completada'] } },
+    where: {
+      negocio_id: negocioId,
+      estado: 'en_curso',
+      OR: [{ repartidor_id: null }, { repartidor_id: repartidorId }],
+    },
     orderBy: { id: 'desc' },
   });
   return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
@@ -322,16 +330,45 @@ export async function entregarParada(
 }
 
 /**
- * Despacha la ruta de una distribución (la pasa a en_curso) cuando el camión se carga.
- * Se invoca dentro de la transacción de confirmarCarga. Sin ruta planificada, no hace nada.
+ * Asegura que la distribución tenga una ruta EN CURSO cuando el camión se carga.
+ * - Si el admin ya planeó una ruta, la despacha (planificada → en_curso).
+ * - Si no hay ruta, crea una automáticamente con todas las sucursales destino como paradas
+ *   (orden alfabético), sin repartidor asignado, para que la cuadrilla de reparto la entregue.
+ * Se invoca dentro de la transacción de confirmarCarga.
  */
-export async function despacharRutaDeDist(tx: Tx, negocioId: bigint, distId: bigint) {
-  const ruta = await tx.rutas.findFirst({
-    where: { negocio_id: negocioId, distribucion_id: distId, estado: 'planificada' },
+export async function asegurarRutaEnCurso(tx: Tx, negocioId: bigint, distId: bigint, usuarioId: bigint) {
+  const existente = await tx.rutas.findFirst({
+    where: { negocio_id: negocioId, distribucion_id: distId },
     orderBy: { id: 'desc' },
   });
-  if (!ruta) return;
-  await tx.rutas.update({ where: { id: ruta.id }, data: { estado: 'en_curso', despachada_at: new Date() } });
+  if (existente) {
+    if (existente.estado === 'planificada') {
+      await tx.rutas.update({ where: { id: existente.id }, data: { estado: 'en_curso', despachada_at: new Date() } });
+    }
+    return;
+  }
+  const lineas = await tx.distribucion_lineas.findMany({
+    where: { distribucion_id: distId },
+    select: { ubicacion_destino_id: true, ubicaciones: { select: { nombre: true } } },
+  });
+  const sucursales = new Map<string, { id: bigint; nombre: string }>();
+  for (const l of lineas) sucursales.set(l.ubicacion_destino_id.toString(), { id: l.ubicacion_destino_id, nombre: l.ubicaciones.nombre });
+  const ordenadas = [...sucursales.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  if (ordenadas.length === 0) return;
+
+  const ruta = await tx.rutas.create({
+    data: {
+      negocio_id: negocioId,
+      distribucion_id: distId,
+      creado_por: usuarioId,
+      estado: 'en_curso',
+      despachada_at: new Date(),
+      nombre: `Ruta dist #${distId}`,
+    },
+  });
+  await tx.ruta_paradas.createMany({
+    data: ordenadas.map((s, i) => ({ ruta_id: ruta.id, ubicacion_id: s.id, orden: i + 1 })),
+  });
 }
 
 /**

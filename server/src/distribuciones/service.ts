@@ -3,7 +3,7 @@ import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { sugerirEnvio, valor } from './logic.js';
 import { aplicarMovimiento } from '../ledger/service.js';
-import { despacharRutaDeDist, sellarParadaPorRecepcion } from './rutas.service.js';
+import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.js';
 
 /** Último conteo CERRADO de la ubicación: mapa product_id(string) → disponible, y su id. */
 async function disponibleConteo(ubicacionId: bigint) {
@@ -316,8 +316,8 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_cargada: cargada } });
     }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
-    // Si el admin ya planeó la ruta, el camión cargado la pone en curso.
-    await despacharRutaDeDist(tx, negocioId, id);
+    // El camión cargado pone la ruta en curso (la crea si no se planeó una).
+    await asegurarRutaEnCurso(tx, negocioId, id, usuarioId);
   });
   return { ok: true };
 }
