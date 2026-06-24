@@ -1925,6 +1925,15 @@ select:disabled {
 .flujo-paso--done .flujo-num { background: var(--success); color: #fff; }
 .flujo-sep { color: var(--ink-3); flex: 0 0 auto; }
 
+/* Interactivo: pasos navegables vs. deshabilitados por rol */
+a.flujo-paso { text-decoration: none; }
+.flujo-paso--link { cursor: pointer; transition: background 0.15s, color 0.15s, box-shadow 0.15s; }
+.flujo-paso--link:hover { background: var(--brand-tint); color: var(--brand); }
+.flujo-paso--link:hover .flujo-num { background: var(--brand); color: var(--on-primary); }
+.flujo-paso--link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.flujo-paso--on.flujo-paso--link { box-shadow: inset 0 0 0 2px var(--brand); }
+.flujo-paso--off { opacity: 0.4; cursor: not-allowed; }
+
 /* ── Lista de carga total (bodega) ─────────────────────────────────────────── */
 .carga-total-item {
   display: grid;

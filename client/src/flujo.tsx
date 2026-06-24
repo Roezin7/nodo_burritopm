@@ -1,5 +1,7 @@
 // Lenguaje visual compartido del flujo de abastecimiento: chips de estado consistentes
-// y el stepper de 5 pasos (Conteo → Plan → Bodega → Ruta → Recepción).
+// y el stepper de 5 pasos (Inventario → Plan → Bodega → Ruta → Recepción), interactivo.
+import { NavLink } from 'react-router-dom';
+import { useAuth, type Rol } from './auth';
 
 // ── Estado de la distribución ──────────────────────────────────────────────
 const DIST: Record<string, { label: string; cls: string }> = {
@@ -41,33 +43,48 @@ export function ParadaChip({ estado }: { estado: string }) {
 
 export const paradaLabel = (estado: string) => PARADA[estado]?.label ?? estado;
 
-// ── Stepper de 5 pasos ─────────────────────────────────────────────────────
+// ── Stepper de 5 pasos (menú interactivo) ──────────────────────────────────
 export type PasoFlujo = 'conteo' | 'plan' | 'bodega' | 'ruta' | 'recepcion';
-const PASOS: { clave: PasoFlujo; label: string }[] = [
-  { clave: 'conteo', label: 'Inventario' },
-  { clave: 'plan', label: 'Plan' },
-  { clave: 'bodega', label: 'Bodega' },
-  { clave: 'ruta', label: 'Ruta' },
-  { clave: 'recepcion', label: 'Recepción' },
+const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] = [
+  { clave: 'conteo', label: 'Inventario', ruta: '/inventario', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
+  { clave: 'plan', label: 'Plan', ruta: '/distribucion', roles: ['admin'] },
+  { clave: 'bodega', label: 'Bodega', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'ruta', label: 'Ruta', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'recepcion', label: 'Recepción', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
 ];
 
-/** Barra de pasos: marca el paso activo y los anteriores como completados. */
+/**
+ * Barra de pasos interactiva: marca el paso activo y los previos como completados; cada paso
+ * navega a su pantalla. Los pasos que el rol no puede abrir quedan deshabilitados (solo contexto).
+ */
 export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
+  const { usuario } = useAuth();
   const idxActivo = PASOS.findIndex((p) => p.clave === activo);
   return (
-    <div className="flujo-stepper" role="list" aria-label="Etapas del abastecimiento">
+    <nav className="flujo-stepper" aria-label="Etapas del abastecimiento">
       {PASOS.map((p, i) => {
         const estado = i < idxActivo ? 'done' : i === idxActivo ? 'on' : 'todo';
+        const accesible = !!usuario && p.roles.includes(usuario.rol);
+        const cls = `flujo-paso ${estado === 'on' ? 'flujo-paso--on' : ''} ${estado === 'done' ? 'flujo-paso--done' : ''} ${accesible ? 'flujo-paso--link' : 'flujo-paso--off'}`;
+        const contenido = (
+          <>
+            <span className="flujo-num">{estado === 'done' ? '✓' : i + 1}</span>
+            {p.label}
+          </>
+        );
         return (
-          <div key={p.clave} className="flujo-stepper-grupo" style={{ display: 'contents' }}>
-            <span className={`flujo-paso ${estado === 'on' ? 'flujo-paso--on' : ''} ${estado === 'done' ? 'flujo-paso--done' : ''}`} role="listitem">
-              <span className="flujo-num">{estado === 'done' ? '✓' : i + 1}</span>
-              {p.label}
-            </span>
+          <div key={p.clave} style={{ display: 'contents' }}>
+            {accesible ? (
+              <NavLink to={p.ruta} end className={cls} aria-current={estado === 'on' ? 'page' : undefined}>
+                {contenido}
+              </NavLink>
+            ) : (
+              <span className={cls} aria-disabled="true" title="No disponible para tu rol">{contenido}</span>
+            )}
             {i < PASOS.length - 1 && <span className="flujo-sep">›</span>}
           </div>
         );
       })}
-    </div>
+    </nav>
   );
 }
