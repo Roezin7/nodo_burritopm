@@ -7,10 +7,26 @@ import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPick
 interface InventarioResumen {
   id: number;
   estado: string;
+  fecha: string | null;
   creado_at: string;
   cerrado_at: string | null;
   total_lineas: number;
   contadas: number;
+}
+interface Sesion {
+  fecha: string;
+  programado: boolean;
+  dias: number[];
+  proximo: string | null;
+  conteo: { id: number; estado: string; total_lineas: number; contadas: number } | null;
+}
+
+/** 'YYYY-MM-DD' → "sáb, 22 jun" (zona del negocio, sin desfase). */
+function fechaLarga(iso: string | null): string {
+  if (!iso) return 'Inventario';
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', {
+    weekday: 'short', day: '2-digit', month: 'short', timeZone: 'America/Chicago',
+  });
 }
 interface LineaInventario {
   product_id: number;
@@ -28,6 +44,7 @@ interface InventarioDetalle {
   id: number;
   estado: string;
   editable: boolean;
+  fecha: string | null;
   ubicacion: { id: number; nombre: string; tipo: string };
   creado_at: string;
   cerrado_at: string | null;
@@ -40,10 +57,13 @@ export default function Inventario() {
 
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
   const [ubicId, setUbicId] = useState<string>('');
+  const [sesion, setSesion] = useState<Sesion | null>(null);
   const [inventarios, setInventarios] = useState<InventarioResumen[]>([]);
   const [detalle, setDetalle] = useState<InventarioDetalle | null>(null);
+  const [q, setQ] = useState('');
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   // Cargar ubicaciones disponibles según rol.
   useEffect(() => {
@@ -68,15 +88,21 @@ export default function Inventario() {
     void cargarUbic();
   }, [esAdmin, usuario]);
 
-  async function cargarInventarios(uid: string) {
+  async function cargarUbicacion(uid: string) {
     if (!uid) return;
+    setError('');
     try {
-      setInventarios(await api<InventarioResumen[]>(`/conteos?ubicacion=${uid}`));
+      const [ses, lista] = await Promise.all([
+        api<Sesion>(`/conteos/sesion?ubicacion=${uid}`),
+        api<InventarioResumen[]>(`/conteos?ubicacion=${uid}`),
+      ]);
+      setSesion(ses);
+      setInventarios(lista);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al cargar inventarios');
+      setError(e instanceof ApiError ? e.message : 'Error al cargar el inventario');
     }
   }
-  useEffect(() => { setDetalle(null); void cargarInventarios(ubicId); }, [ubicId]);
+  useEffect(() => { setDetalle(null); void cargarUbicacion(ubicId); }, [ubicId]);
 
   async function abrir(id: number) {
     setError('');
@@ -87,24 +113,29 @@ export default function Inventario() {
     }
   }
 
-  async function iniciar() {
-    setError('');
+  // Abre/continúa el inventario de hoy (se crea solo en días programados).
+  async function tomarHoy() {
+    setBusy(true); setError('');
     try {
-      const r = await api<{ id: number }>('/conteos', { method: 'POST', body: { ubicacion_id: Number(ubicId) } });
+      const r = await api<{ id: number }>('/conteos/abrir', { method: 'POST', body: { ubicacion_id: Number(ubicId) } });
       await abrir(r.id);
-      await cargarInventarios(ubicId);
+      await cargarUbicacion(ubicId);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudo iniciar el inventario');
+      setError(e instanceof ApiError ? e.message : 'No se pudo abrir el inventario');
+    } finally {
+      setBusy(false);
     }
   }
 
   if (cargando) return <div className="page"><p className="muted">Cargando…</p></div>;
 
   if (detalle) {
-    return <Editor detalle={detalle} onSalir={() => { setDetalle(null); void cargarInventarios(ubicId); }} onRecargar={() => abrir(detalle.id)} />;
+    return <Editor detalle={detalle} onSalir={() => { setDetalle(null); void cargarUbicacion(ubicId); }} onRecargar={() => abrir(detalle.id)} />;
   }
 
   const opciones: OpcionUbic[] = ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }));
+  const t = q.trim().toLowerCase();
+  const histFiltrado = inventarios.filter((c) => !t || fechaLarga(c.fecha).toLowerCase().includes(t) || c.estado.toLowerCase().includes(t));
 
   return (
     <div className="page">
@@ -123,25 +154,24 @@ export default function Inventario() {
           <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
 
-          <button className="btn btn-primary btn-grande" onClick={() => void iniciar()}>
-            Iniciar / continuar inventario
-          </button>
+          {/* Tarjeta de la sesión de hoy */}
+          {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
 
-          <h3 className="seccion-title">Inventarios recientes</h3>
-          {inventarios.length === 0 ? (
-            <p className="muted">Aún no hay inventarios en esta ubicación.</p>
+          <h3 className="seccion-title">Historial de inventarios</h3>
+          {inventarios.length > 8 && (
+            <input className="inv-search" type="search" placeholder="Buscar por fecha…" value={q} onChange={(e) => setQ(e.target.value)} />
+          )}
+          {histFiltrado.length === 0 ? (
+            <p className="muted">{inventarios.length === 0 ? 'Aún no hay inventarios en esta ubicación.' : 'Sin coincidencias.'}</p>
           ) : (
             <div className="lista-ubicaciones">
-              {inventarios.map((c) => (
+              {histFiltrado.map((c) => (
                 <button key={c.id} className="card card-click" onClick={() => void abrir(c.id)}>
                   <div className="ubic-row">
                     <div>
-                      <strong>Inventario #{c.id}</strong>{' '}
+                      <strong className="inv-fecha-titulo">Inventario {fechaLarga(c.fecha)}</strong>{' '}
                       <EstadoChip estado={c.estado} />
-                      <div className="muted">
-                        {new Date(c.creado_at).toLocaleString('es-MX', { timeZone: 'America/Chicago' })}
-                        {' · '}{c.contadas}/{c.total_lineas} contados
-                      </div>
+                      <div className="muted">{c.contadas}/{c.total_lineas} contados</div>
                     </div>
                     <span className="muted">›</span>
                   </div>
@@ -151,6 +181,52 @@ export default function Inventario() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** Tarjeta de la sesión de inventario de hoy. */
+function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir }: { sesion: Sesion; esAdmin: boolean; busy: boolean; onTomar: () => void; onAbrir: (id: number) => void }) {
+  const c = sesion.conteo;
+  const cerrado = c?.estado === 'cerrado';
+
+  // Ya existe el inventario de hoy.
+  if (c) {
+    return (
+      <div className={`hoy-card ${cerrado ? 'hoy-card--cerrado' : ''}`}>
+        <div className="hoy-card-fecha">Inventario de hoy · {fechaLarga(sesion.fecha)}</div>
+        <p className="muted" style={{ margin: '0.2rem 0 0.8rem' }}>
+          {cerrado ? 'Cerrado — es la foto oficial de hoy.' : `En captura · ${c.contadas}/${c.total_lineas} contados`}
+        </p>
+        <button className="btn btn-primary btn-grande" style={{ margin: 0 }} onClick={() => onAbrir(c.id)}>
+          {cerrado ? 'Ver inventario' : 'Continuar inventario'}
+        </button>
+      </div>
+    );
+  }
+
+  // No existe aún: se ofrece si hoy es día programado (o si es admin, que puede abrir cuando sea).
+  if (sesion.programado || esAdmin) {
+    return (
+      <div className="hoy-card">
+        <div className="hoy-card-fecha">{sesion.programado ? 'Hoy toca inventario' : 'Abrir inventario'} · {fechaLarga(sesion.fecha)}</div>
+        <p className="muted" style={{ margin: '0.2rem 0 0.8rem' }}>
+          {sesion.programado ? 'El espacio de hoy está habilitado.' : 'Hoy no es día programado, pero puedes abrir uno como admin.'}
+        </p>
+        <button className="btn btn-primary btn-grande" style={{ margin: 0 }} disabled={busy} onClick={onTomar}>
+          Tomar inventario de hoy
+        </button>
+      </div>
+    );
+  }
+
+  // No programado y no admin: solo informativo.
+  return (
+    <div className="card">
+      <strong>Hoy no es día de inventario</strong>
+      <p className="muted" style={{ margin: '0.3rem 0 0' }}>
+        {sesion.proximo ? <>Próximo inventario: <strong className="inv-fecha-titulo">{fechaLarga(sesion.proximo)}</strong>.</> : 'Aún no hay días de inventario configurados.'}
+      </p>
     </div>
   );
 }
@@ -253,7 +329,7 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
       <header className="page-head">
         <div>
           <button className="link-btn" onClick={onSalir}>← Inventarios</button>
-          <h1>Inventario #{detalle.id} <EstadoChip estado={detalle.estado} /></h1>
+          <h1 className="inv-fecha-titulo">Inventario {fechaLarga(detalle.fecha)} <EstadoChip estado={detalle.estado} /></h1>
           <p className="page-sub">{detalle.ubicacion.nombre}</p>
         </div>
       </header>

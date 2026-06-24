@@ -27,6 +27,8 @@ model negocios {
   zona_horaria       String   @default("America/Chicago")
   // Operación: si está activo, la carga exige una verificación de 1 toque antes de salir a ruta.
   verificacion_carga Boolean  @default(false)
+  // Días de la semana (0=Dom … 6=Sáb) en que se habilita el inventario para todas las ubicaciones.
+  inventario_dias    Int[]    @default([])
   creado_at          DateTime @default(now()) @db.Timestamptz(6)
 
   usuarios    usuarios[]
@@ -227,6 +229,8 @@ model conteos {
   negocio_id   BigInt
   ubicacion_id BigInt
   estado       EstadoConteo    @default(en_captura)
+  // Día de inventario al que pertenece (sesión por fecha). Una sesión por ubicación por día.
+  fecha        DateTime?       @db.Date
   creado_por   BigInt
   creado_at    DateTime        @default(now()) @db.Timestamptz(6)
   cerrado_por  BigInt?
@@ -237,6 +241,7 @@ model conteos {
 
   @@index([negocio_id, ubicacion_id])
   @@index([ubicacion_id, estado])
+  @@index([ubicacion_id, fecha])
 }
 
 model conteo_lineas {

@@ -2203,3 +2203,33 @@ a.flujo-paso { text-decoration: none; }
 /* Botón de acción destructiva (texto rojo) */
 .btn-peligro { color: var(--danger); }
 .btn-peligro:hover { background: var(--danger-bg); }
+
+/* Selector de días de inventario */
+.dias-selector { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.dia-pill {
+  min-width: 3.1rem;
+  padding: 0.55rem 0.7rem;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.dia-pill:hover { border-color: var(--brand); }
+.dia-pill--on { background: var(--brand); border-color: var(--brand); color: var(--on-primary); }
+
+/* Tarjeta de inventario de hoy (sesión programada) */
+.hoy-card {
+  border: 2px solid var(--brand);
+  border-radius: var(--r-card);
+  background: var(--brand-tint);
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1rem;
+}
+.hoy-card-fecha { font-size: 1.25rem; font-weight: 800; color: var(--brand); text-transform: capitalize; }
+.hoy-card--cerrado { border-color: var(--success); background: var(--success-bg); }
+.hoy-card--cerrado .hoy-card-fecha { color: var(--success); }
+.inv-fecha-grupo { margin-bottom: 0.4rem; }
+.inv-fecha-titulo { text-transform: capitalize; }

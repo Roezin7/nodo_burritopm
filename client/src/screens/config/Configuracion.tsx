@@ -20,21 +20,33 @@ const TABS: { clave: Tab; label: string }[] = [
   { clave: 'operacion', label: 'Operación' },
 ];
 
-/** Ajustes de operación: por ahora, la verificación opcional de carga. */
+const DIAS = [
+  { n: 1, label: 'Lun' },
+  { n: 2, label: 'Mar' },
+  { n: 3, label: 'Mié' },
+  { n: 4, label: 'Jue' },
+  { n: 5, label: 'Vie' },
+  { n: 6, label: 'Sáb' },
+  { n: 0, label: 'Dom' },
+];
+
+/** Ajustes de operación: verificación de carga y días de inventario. */
 function Operacion() {
   const [verif, setVerif] = useState<boolean | null>(null);
+  const [dias, setDias] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api<{ verificacion_carga: boolean }>('/negocio').then((n) => setVerif(n.verificacion_carga)).catch(() => setError('No se pudo cargar la configuración'));
+    api<{ verificacion_carga: boolean; inventario_dias: number[] }>('/negocio')
+      .then((n) => { setVerif(n.verificacion_carga); setDias(n.inventario_dias ?? []); })
+      .catch(() => setError('No se pudo cargar la configuración'));
   }, []);
 
-  async function alternar(valor: boolean) {
+  async function guardar(body: Record<string, unknown>) {
     setBusy(true); setError('');
     try {
-      await api('/negocio', { method: 'PATCH', body: { verificacion_carga: valor } });
-      setVerif(valor);
+      await api('/negocio', { method: 'PATCH', body });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo guardar');
     } finally {
@@ -42,28 +54,63 @@ function Operacion() {
     }
   }
 
+  async function alternarVerif(valor: boolean) {
+    setVerif(valor);
+    await guardar({ verificacion_carga: valor });
+  }
+
+  async function alternarDia(n: number) {
+    const next = dias.includes(n) ? dias.filter((d) => d !== n) : [...dias, n];
+    setDias(next);
+    await guardar({ inventario_dias: next });
+  }
+
   if (verif === null) return <p className="muted">Cargando…</p>;
   return (
-    <div className="card">
-      <div className="cfg-switch">
-        <div>
-          <strong>Verificación de carga</strong>
-          <p className="muted" style={{ margin: '0.2rem 0 0' }}>
-            Si está activa, Bodega y reparto confirma una revisión de 1 toque antes de que el camión salga a ruta.
-          </p>
+    <>
+      <div className="card">
+        <strong>Días de inventario</strong>
+        <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
+          En los días marcados se habilita el inventario para todas las ubicaciones. La sucursal solo lo abre y captura.
+        </p>
+        <div className="dias-selector">
+          {DIAS.map((d) => (
+            <button
+              key={d.n}
+              type="button"
+              className={`dia-pill ${dias.includes(d.n) ? 'dia-pill--on' : ''}`}
+              disabled={busy}
+              aria-pressed={dias.includes(d.n)}
+              onClick={() => void alternarDia(d.n)}
+            >
+              {d.label}
+            </button>
+          ))}
         </div>
-        <button
-          type="button"
-          className={`switch ${verif ? 'switch--on' : ''}`}
-          disabled={busy}
-          aria-pressed={verif}
-          onClick={() => void alternar(!verif)}
-        >
-          <span className="switch-knob" />
-        </button>
+        {dias.length === 0 && <p className="muted" style={{ marginTop: '0.6rem' }}>Sin días: el inventario no se habilita solo (el admin puede abrirlo cuando quiera).</p>}
+      </div>
+
+      <div className="card">
+        <div className="cfg-switch">
+          <div>
+            <strong>Verificación de carga</strong>
+            <p className="muted" style={{ margin: '0.2rem 0 0' }}>
+              Si está activa, Bodega y reparto confirma una revisión de 1 toque antes de que el camión salga a ruta.
+            </p>
+          </div>
+          <button
+            type="button"
+            className={`switch ${verif ? 'switch--on' : ''}`}
+            disabled={busy}
+            aria-pressed={verif}
+            onClick={() => void alternarVerif(!verif)}
+          >
+            <span className="switch-knob" />
+          </button>
+        </div>
       </div>
       {error && <p className="error-msg">{error}</p>}
-    </div>
+    </>
   );
 }
 

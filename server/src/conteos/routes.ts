@@ -42,16 +42,28 @@ conteosRouter.get(
   }),
 );
 
-/** POST /conteos { ubicacion_id } — inicia (o reutiliza) el conteo abierto de la ubicación. */
+/** GET /conteos/sesion?ubicacion=ID — estado de la sesión de inventario de hoy. */
+conteosRouter.get(
+  '/sesion',
+  requireAuth,
+  puedeContar,
+  asyncHandler(async (req, res) => {
+    const ubicacionId = BigInt(idParam.parse(req.query.ubicacion));
+    await exigirUbicacion(req, ubicacionId);
+    res.json(await svc.sesionDeHoy(req.auth!.negocioId, ubicacionId));
+  }),
+);
+
+/** POST /conteos/abrir { ubicacion_id } — abre/continúa el inventario de HOY de la ubicación. */
 conteosRouter.post(
-  '/',
+  '/abrir',
   requireAuth,
   puedeContar,
   asyncHandler(async (req, res) => {
     const { ubicacion_id } = z.object({ ubicacion_id: z.coerce.number().int().positive() }).parse(req.body);
     const ubicacionId = BigInt(ubicacion_id);
     await exigirUbicacion(req, ubicacionId);
-    res.status(201).json(await svc.crearConteo(req.auth!.negocioId, ubicacionId, req.auth!.usuarioId));
+    res.status(201).json(await svc.abrirConteoDeHoy(req.auth!.negocioId, ubicacionId, req.auth!.usuarioId));
   }),
 );
 

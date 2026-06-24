@@ -7,16 +7,44 @@ const EDITABLES = ['borrador', 'en_captura', 'reabierto'] as const;
 type EstadoEditable = (typeof EDITABLES)[number];
 const esEditable = (estado: string): estado is EstadoEditable => (EDITABLES as readonly string[]).includes(estado);
 
-/** Lista de conteos de una ubicación, con un pequeño resumen de avance. */
+// ── Programación de inventario (fecha/día en la zona horaria del negocio) ────
+/** Fecha 'YYYY-MM-DD' del instante dado en la zona horaria indicada. */
+function fechaISOEnTz(d: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+/** Día de la semana (0=Dom … 6=Sáb) del instante dado en la zona horaria indicada. */
+function diaSemanaEnTz(d: Date, tz: string): number {
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(d);
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(wd);
+}
+/** Próxima fecha (dentro de 14 días) cuyo día de semana esté en `dias`, o null. */
+function proximaFechaProgramada(dias: number[], tz: string): string | null {
+  if (!dias.length) return null;
+  for (let i = 1; i <= 14; i++) {
+    const d = new Date(Date.now() + i * 86400000);
+    if (dias.includes(diaSemanaEnTz(d, tz))) return fechaISOEnTz(d, tz);
+  }
+  return null;
+}
+/** Convierte 'YYYY-MM-DD' a Date (medianoche UTC) para columnas @db.Date. */
+const aFecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+
+async function negocioProg(negocioId: bigint) {
+  const n = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true, inventario_dias: true } });
+  return { tz: n?.zona_horaria ?? 'America/Chicago', dias: n?.inventario_dias ?? [] };
+}
+
+/** Lista de conteos de una ubicación, con un pequeño resumen de avance (ordenada por fecha). */
 export async function listarConteos(negocioId: bigint, ubicacionId: bigint) {
   const conteos = await prisma.conteos.findMany({
     where: { negocio_id: negocioId, ubicacion_id: ubicacionId },
-    orderBy: { id: 'desc' },
+    orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     include: { _count: { select: { lineas: true } }, lineas: { select: { contado: true } } },
   });
   return conteos.map((c) => ({
     id: Number(c.id),
     estado: c.estado,
+    fecha: c.fecha ? c.fecha.toISOString().slice(0, 10) : null,
     creado_at: c.creado_at.toISOString(),
     cerrado_at: c.cerrado_at?.toISOString() ?? null,
     total_lineas: c._count.lineas,
@@ -25,16 +53,51 @@ export async function listarConteos(negocioId: bigint, ubicacionId: bigint) {
 }
 
 /**
- * Crea un conteo nuevo (estado en_captura) prellenado con una línea por cada producto
- * habilitado en la ubicación. Si ya hay un conteo editable abierto, lo devuelve en vez
- * de crear otro (un solo conteo abierto por ubicación).
+ * Estado de la sesión de inventario de HOY para una ubicación: si hoy es día programado,
+ * la fecha de hoy, el próximo día programado y el conteo de hoy (si existe) con su avance.
  */
-export async function crearConteo(negocioId: bigint, ubicacionId: bigint, usuarioId: bigint) {
-  const abierto = await prisma.conteos.findFirst({
-    where: { negocio_id: negocioId, ubicacion_id: ubicacionId, estado: { in: ['borrador', 'en_captura', 'reabierto'] } },
+export async function sesionDeHoy(negocioId: bigint, ubicacionId: bigint) {
+  const { tz, dias } = await negocioProg(negocioId);
+  const ahora = new Date();
+  const hoy = fechaISOEnTz(ahora, tz);
+  const programado = dias.includes(diaSemanaEnTz(ahora, tz));
+
+  const conteo = await prisma.conteos.findFirst({
+    where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: aFecha(hoy) },
+    orderBy: { id: 'desc' },
+    include: { _count: { select: { lineas: true } }, lineas: { select: { contado: true } } },
+  });
+
+  return {
+    fecha: hoy,
+    programado,
+    dias,
+    proximo: proximaFechaProgramada(dias, tz),
+    conteo: conteo
+      ? {
+          id: Number(conteo.id),
+          estado: conteo.estado,
+          total_lineas: conteo._count.lineas,
+          contadas: conteo.lineas.filter((l) => l.contado).length,
+        }
+      : null,
+  };
+}
+
+/**
+ * Abre (o continúa) el inventario de HOY para la ubicación: una sesión por ubicación por día.
+ * Si ya existe el de hoy lo devuelve; si no, lo crea prellenado con una línea por producto
+ * habilitado. Reemplaza la creación manual: el "espacio" del día se habilita solo.
+ */
+export async function abrirConteoDeHoy(negocioId: bigint, ubicacionId: bigint, usuarioId: bigint) {
+  const { tz } = await negocioProg(negocioId);
+  const hoy = aFecha(fechaISOEnTz(new Date(), tz));
+
+  const existente = await prisma.conteos.findFirst({
+    where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: hoy },
     orderBy: { id: 'desc' },
   });
-  if (abierto) return { id: Number(abierto.id), reusado: true };
+  if (existente) return { id: Number(existente.id), reusado: true };
 
   const habilitados = await prisma.producto_ubicacion.findMany({
     where: { ubicacion_id: ubicacionId, habilitado: true, products: { activo: true } },
@@ -46,7 +109,7 @@ export async function crearConteo(negocioId: bigint, ubicacionId: bigint, usuari
 
   const conteo = await prisma.$transaction(async (tx) => {
     const c = await tx.conteos.create({
-      data: { negocio_id: negocioId, ubicacion_id: ubicacionId, estado: 'en_captura', creado_por: usuarioId },
+      data: { negocio_id: negocioId, ubicacion_id: ubicacionId, estado: 'en_captura', creado_por: usuarioId, fecha: hoy },
     });
     await tx.conteo_lineas.createMany({
       data: habilitados.map((h) => ({
@@ -87,6 +150,7 @@ export async function detalleConteo(negocioId: bigint, conteoId: bigint) {
     id: Number(conteo.id),
     estado: conteo.estado,
     editable: esEditable(conteo.estado),
+    fecha: conteo.fecha ? conteo.fecha.toISOString().slice(0, 10) : null,
     ubicacion: { id: Number(conteo.ubicaciones.id), nombre: conteo.ubicaciones.nombre, tipo: conteo.ubicaciones.tipo },
     creado_at: conteo.creado_at.toISOString(),
     cerrado_at: conteo.cerrado_at?.toISOString() ?? null,
