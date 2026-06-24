@@ -293,6 +293,65 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
           <button className="btn btn-primary" onClick={() => void aprobar()} disabled={busy}>Aprobar distribución</button>
         </div>
       )}
+
+      {estado && <ControlEstado id={id} estado={estado} onCambiado={() => void cargar()} />}
+    </div>
+  );
+}
+
+// ── Control total del admin: forzar el estado de la distribución ─────────────
+const ESTADOS_DIST: { v: string; label: string }[] = [
+  { v: 'calculada', label: 'Calculada' },
+  { v: 'en_revision', label: 'En revisión' },
+  { v: 'aprobada', label: 'Aprobada' },
+  { v: 'verificada', label: 'Verificada' },
+  { v: 'en_transito', label: 'En ruta' },
+  { v: 'parcialmente_entregada', label: 'Entrega parcial' },
+  { v: 'entregada', label: 'Entregada' },
+  { v: 'cerrada', label: 'Cerrada' },
+  { v: 'cerrada_con_incidencias', label: 'Cerrada c/ incidencias' },
+  { v: 'cancelada', label: 'Cancelada' },
+];
+
+function ControlEstado({ id, estado, onCambiado }: { id: number; estado: string; onCambiado: () => void }) {
+  const [abierto, setAbierto] = useState(false);
+  const [sel, setSel] = useState(estado);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setSel(estado); }, [estado]);
+
+  async function aplicar() {
+    if (sel === estado) return;
+    if (!window.confirm(`Forzar el estado a "${ESTADOS_DIST.find((e) => e.v === sel)?.label ?? sel}"? Es un override manual; no recalcula inventario.`)) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/distribuciones/${id}/estado`, { method: 'PATCH', body: { estado: sel } });
+      onCambiado();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'No se pudo cambiar el estado');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card control-admin">
+      <button type="button" className="control-admin-head" onClick={() => setAbierto((v) => !v)}>
+        <span><strong>Control total (admin)</strong> <small className="muted">cambiar estado manualmente</small></span>
+        <span className="muted">{abierto ? '▾' : '▸'}</span>
+      </button>
+      {abierto && (
+        <div className="control-admin-body">
+          <p className="muted">Mueve la distribución a cualquier etapa del flujo. Úsalo para corregir o desbloquear; es un override directo.</p>
+          <div className="control-admin-row">
+            <select value={sel} onChange={(e) => setSel(e.target.value)}>
+              {ESTADOS_DIST.map((e) => <option key={e.v} value={e.v}>{e.label}</option>)}
+            </select>
+            <button className="btn btn-primary" disabled={busy || sel === estado} onClick={() => void aplicar()}>Aplicar</button>
+          </div>
+          {error && <p className="error-msg">{error}</p>}
+        </div>
+      )}
     </div>
   );
 }

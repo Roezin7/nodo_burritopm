@@ -2204,6 +2204,32 @@ a.flujo-paso { text-decoration: none; }
 .btn-peligro { color: var(--danger); }
 .btn-peligro:hover { background: var(--danger-bg); }
 
+/* Control total del admin (override de estado) */
+.control-admin { margin-top: 1rem; }
+.control-admin-head { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; color: var(--ink); }
+.control-admin-body { margin-top: 0.7rem; }
+.control-admin-row { display: flex; gap: 0.6rem; align-items: center; }
+.control-admin-row select { flex: 1; padding: 0.55rem; border: 1px solid var(--border-strong); border-radius: var(--r-input); background: var(--surface); color: var(--ink); }
+
+/* Gestión de usuarios: búsqueda, grupos y filas compactas */
+.usuarios-grupo-titulo { margin: 1rem 0 0.4rem; font-size: 0.8rem; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.usuario-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--surface);
+  margin-bottom: 0.4rem;
+}
+.usuario-fila.card--off { opacity: 0.6; }
+.usuario-fila-info { min-width: 0; }
+.usuario-fila-info strong { display: block; }
+.usuario-acciones { display: flex; gap: 0.25rem; flex: 0 0 auto; }
+.btn-sm { padding: 0.35rem 0.6rem; font-size: 0.82rem; }
+
 /* Selector de días de inventario */
 .dias-selector { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .dia-pill {

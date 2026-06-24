@@ -103,6 +103,19 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
   return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinConteo };
 }
 
+/** Control total del admin: fija el estado de la distribución a cualquier valor (override). */
+export async function cambiarEstadoAdmin(negocioId: bigint, id: bigint, estado: EstadoDistribucionValor) {
+  await cargarDistribucion(negocioId, id);
+  await prisma.distribuciones.update({ where: { id }, data: { estado } });
+  return { ok: true, estado };
+}
+
+export type EstadoDistribucionValor =
+  | 'borrador' | 'esperando_conteos' | 'calculada' | 'en_revision' | 'aprobada'
+  | 'en_preparacion' | 'preparada' | 'verificada' | 'en_carga' | 'cargada'
+  | 'en_transito' | 'parcialmente_entregada' | 'entregada' | 'cerrada'
+  | 'cerrada_con_incidencias' | 'cancelada';
+
 export async function listarDistribuciones(negocioId: bigint) {
   const ds = await prisma.distribuciones.findMany({
     where: { negocio_id: negocioId },

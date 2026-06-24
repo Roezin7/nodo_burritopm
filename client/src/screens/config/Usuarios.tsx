@@ -138,6 +138,15 @@ export default function Usuarios() {
   const ubicActivas = ubicaciones.filter((u) => u.activo || form.ubicacion_ids.includes(u.id));
   const nombreUbic = (id: number) => ubicaciones.find((u) => u.id === id)?.nombre ?? `#${id}`;
 
+  const [q, setQ] = useState('');
+  const t = q.trim().toLowerCase();
+  const filtrados = usuarios.filter((u) => !t || u.nombre.toLowerCase().includes(t) || ROL_LABEL[u.rol].toLowerCase().includes(t));
+  const GRUPOS: { rol: Rol; titulo: string }[] = [
+    { rol: 'admin', titulo: 'Administradores' },
+    { rol: 'encargado_bodega', titulo: 'Bodega y reparto' },
+    { rol: 'encargado_sucursal', titulo: 'Sucursales' },
+  ];
+
   return (
     <div>
       <form className="card" onSubmit={guardar}>
@@ -200,36 +209,44 @@ export default function Usuarios() {
       {cargando ? (
         <p className="muted">Cargando…</p>
       ) : (
-        <div className="lista-ubicaciones">
-          {usuarios.map((u) => (
-            <div key={u.id} className={`card ${u.activo ? '' : 'card--off'}`}>
-              <div className="ubic-row">
-                <div>
-                  <strong>{u.nombre}</strong>{' '}
-                  <span className="chip chip--info">{ROL_LABEL[u.rol]}</span>
-                  {!u.activo && <span className="chip chip--warn">Inactivo</span>}
-                  {u.rol !== 'admin' && (
-                    <div className="muted">
-                      {u.ubicacion_ids.length === 0
-                        ? 'Sin ubicaciones asignadas'
-                        : u.ubicacion_ids.map(nombreUbic).join(', ')}
+        <>
+          {usuarios.length > 6 && (
+            <input className="inv-search" type="search" placeholder="Buscar usuario o rol…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginTop: '0.5rem' }} />
+          )}
+          {filtrados.length === 0 && <p className="muted">Sin coincidencias.</p>}
+          {GRUPOS.map(({ rol, titulo }) => {
+            const delGrupo = filtrados.filter((u) => u.rol === rol);
+            if (delGrupo.length === 0) return null;
+            return (
+              <div key={rol}>
+                <div className="usuarios-grupo-titulo">{titulo} · {delGrupo.length}</div>
+                {delGrupo.map((u) => (
+                  <div key={u.id} className={`usuario-fila ${u.activo ? '' : 'card--off'}`}>
+                    <div className="usuario-fila-info">
+                      <strong>
+                        {u.nombre}{' '}
+                        {!u.activo && <span className="chip chip--warn">Inactivo</span>}
+                      </strong>
+                      {u.rol !== 'admin' && (
+                        <small className="muted">
+                          {u.ubicacion_ids.length === 0 ? 'Sin ubicación' : u.ubicacion_ids.map(nombreUbic).join(', ')}
+                        </small>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className="form-actions">
-                  <button className="btn btn-secondary" onClick={() => editar(u)}>Editar</button>
-                  <button className="btn btn-ghost" onClick={() => void resetPin(u)}>PIN</button>
-                  <button className="btn btn-ghost" onClick={() => void alternarActivo(u)}>
-                    {u.activo ? 'Desactivar' : 'Activar'}
-                  </button>
-                  {u.id !== usuario?.id && (
-                    <button className="btn btn-ghost btn-peligro" onClick={() => void eliminar(u)}>Eliminar</button>
-                  )}
-                </div>
+                    <div className="usuario-acciones">
+                      <button className="btn btn-secondary btn-sm" onClick={() => editar(u)}>Editar</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => void resetPin(u)}>PIN</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => void alternarActivo(u)}>{u.activo ? 'Desactivar' : 'Activar'}</button>
+                      {u.id !== usuario?.id && (
+                        <button className="btn btn-ghost btn-sm btn-peligro" onClick={() => void eliminar(u)}>Eliminar</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
-          ))}
-        </div>
+            );
+          })}
+        </>
       )}
     </div>
   );
