@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
+import { useToast, mensajeError } from '../../toast';
 import { FlujoStepper } from '../../flujo';
 import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPicker';
 
@@ -243,13 +244,16 @@ function EstadoChip({ estado }: { estado: string }) {
 
 function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; onSalir: () => void; onRecargar: () => void }) {
   const { usuario } = useAuth();
+  const toast = useToast();
   const [lineas, setLineas] = useState<LineaInventario[]>(detalle.lineas);
   const [guardando, setGuardando] = useState(false);
+  const [armado, setArmado] = useState(false); // confirmar cierre en 2 toques (sin diálogo)
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [q, setQ] = useState('');
   const [colapsadas, setColapsadas] = useState<Set<string>>(new Set());
   const editable = detalle.editable;
+  const esAdmin = usuario?.rol === 'admin';
 
   // Filtro por búsqueda (nombre / SKU) y agrupado por categoría.
   const grupos = useMemo(() => {
@@ -312,26 +316,27 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
   }
 
   async function cerrar() {
-    if (pendientes > 0 && !window.confirm(`Quedan ${pendientes} productos sin marcar como contados. ¿Cerrar de todos modos?`)) return;
-    if (!window.confirm('Al cerrar, el inventario queda como la foto oficial de esta ubicación. ¿Continuar?')) return;
     setGuardando(true); setError('');
     try {
       await api(`/conteos/${detalle.id}/lineas`, { method: 'PATCH', body: payload() });
       await api(`/conteos/${detalle.id}/cerrar`, { method: 'POST' });
+      setArmado(false);
+      // El admin puede deshacer (reabrir); la sucursal pide al admin si se equivocó.
+      toast.ok('Inventario cerrado.', esAdmin ? { label: 'Deshacer', onClick: () => void reabrir() } : undefined);
       onRecargar();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al cerrar');
+      setError(mensajeError(e, 'No se pudo cerrar el inventario. Reintenta.'));
       setGuardando(false);
     }
   }
 
   async function reabrir() {
-    if (!window.confirm('¿Reabrir este inventario para editarlo?')) return;
     try {
       await api(`/conteos/${detalle.id}/reabrir`, { method: 'POST' });
+      toast.ok('Inventario reabierto.');
       onRecargar();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al reabrir');
+      toast.error(mensajeError(e, 'No se pudo reabrir.'));
     }
   }
 
@@ -408,12 +413,19 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
       })}
 
       {editable ? (
-        <div className="action-bar">
-          <button className="btn btn-secondary" onClick={() => void guardar()} disabled={guardando}>Guardar avance</button>
-          <button className="btn btn-primary" onClick={() => void cerrar()} disabled={guardando}>Cerrar inventario</button>
+        <div className="action-bar action-bar--col">
+          {armado && <p className="armar-aviso">Queda como la foto oficial de hoy{pendientes > 0 ? ` · ${pendientes} sin contar` : ''}. Toca de nuevo para confirmar.</p>}
+          <div className="action-bar-row">
+            <button className="btn btn-secondary" onClick={() => void guardar()} disabled={guardando}>Guardar avance</button>
+            {armado ? (
+              <button className="btn btn-primary" onClick={() => void cerrar()} disabled={guardando}>Confirmar cierre</button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => { setArmado(true); setTimeout(() => setArmado(false), 5000); }} disabled={guardando}>Cerrar inventario</button>
+            )}
+          </div>
         </div>
       ) : (
-        usuario?.rol === 'admin' && (
+        esAdmin && (
           <div className="action-bar">
             <button className="btn btn-ghost" onClick={() => void reabrir()}>Reabrir inventario</button>
           </div>

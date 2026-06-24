@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import { useToast, mensajeError } from '../../toast';
 import { EstadoDistChip, ParadaChip, FlujoStepper } from '../../flujo';
 
 interface DistResumen {
@@ -137,6 +138,7 @@ interface VistaProducto {
 }
 
 function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
+  const toast = useToast();
   const [vista, setVista] = useState<'producto' | 'sucursal' | 'ruta'>('producto');
   const [prod, setProd] = useState<VistaProducto | null>(null);
   const [suc, setSuc] = useState<VistaSucursal | null>(null);
@@ -181,14 +183,20 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   }
 
   async function aprobar() {
-    if (!window.confirm('Al aprobar, la distribución queda lista para preparación en bodega. ¿Continuar?')) return;
     setBusy(true); setError('');
     try {
       if (Object.keys(edits).length) await guardarAjustes();
       await api(`/distribuciones/${id}/aprobar`, { method: 'POST' });
+      toast.ok('Distribución aprobada · lista para bodega.', {
+        label: 'Deshacer',
+        onClick: async () => {
+          try { await api(`/distribuciones/${id}/estado`, { method: 'PATCH', body: { estado: 'en_revision' } }); await cargar(); }
+          catch (e) { toast.error(mensajeError(e, 'No se pudo deshacer.')); }
+        },
+      });
       await cargar();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al aprobar');
+      setError(mensajeError(e, 'No se pudo aprobar. Reintenta.'));
     } finally {
       setBusy(false);
     }

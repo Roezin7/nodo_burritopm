@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth, type Rol } from './auth';
+import { ToastProvider } from './toast';
 import Login from './screens/Login';
 import Home from './screens/Home';
 import Inventario from './screens/inventario/Inventario';
@@ -73,11 +74,13 @@ export default function App() {
           }}
         />
       )}
-      <AuthProvider>
-        <BrowserRouter>
-          <AppBody />
-        </BrowserRouter>
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <AppBody />
+          </BrowserRouter>
+        </AuthProvider>
+      </ToastProvider>
     </>
   );
 }

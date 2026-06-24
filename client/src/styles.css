@@ -1916,6 +1916,9 @@ select:disabled {
   background: linear-gradient(to top, var(--bg) 70%, transparent);
 }
 .action-bar .btn { flex: 1; padding: 0.85rem; }
+.action-bar--col { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+.action-bar-row { display: flex; gap: 0.6rem; }
+.armar-aviso { margin: 0; font-size: 0.85rem; color: var(--warning); font-weight: 600; text-align: center; }
 
 /* ── Distribución / consolidado (Bloque 6) ─────────────────────────────────── */
 .card--falt { border-color: color-mix(in srgb, #c0392b 45%, var(--border)); }
@@ -2305,6 +2308,49 @@ a.flujo-paso { text-decoration: none; }
 .ruta-parada-fila--actual { background: var(--brand-tint); border-radius: 10px; padding-left: 0.5rem; padding-right: 0.5rem; }
 
 .btn-maps { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; margin-bottom: 0.9rem; text-decoration: none; }
+
+/* Toasts (avisos no bloqueantes, con Deshacer) */
+.toaster {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(92vw, 460px);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--r-card);
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: var(--sh-lg);
+  animation: toast-in 0.18s ease;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.toast--error { background: var(--danger); color: #fff; }
+.toast-texto { flex: 1; font-weight: 600; font-size: 0.95rem; }
+.toast-accion {
+  flex: 0 0 auto;
+  background: none;
+  border: 0;
+  color: var(--brand);
+  font: inherit;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.toast--error .toast-accion { color: #fff; text-decoration: underline; }
+.toast-x { flex: 0 0 auto; background: none; border: 0; color: inherit; opacity: 0.7; font-size: 1.2rem; line-height: 1; cursor: pointer; }
 
 /* Botón de acción destructiva (texto rojo) */
 .btn-peligro { color: var(--danger); }
