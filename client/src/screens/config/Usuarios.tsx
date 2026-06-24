@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
-import type { Rol } from '../../auth';
+import { useAuth, type Rol } from '../../auth';
 import type { Ubicacion } from './Ubicaciones';
 
 interface UsuarioAdmin {
@@ -29,6 +29,7 @@ interface FormState {
 const VACIO: FormState = { id: null, nombre: '', rol: 'encargado_sucursal', pin: '', ubicacion_ids: [] };
 
 export default function Usuarios() {
+  const { usuario } = useAuth();
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [form, setForm] = useState<FormState>(VACIO);
@@ -123,6 +124,17 @@ export default function Usuarios() {
     }
   }
 
+  async function eliminar(u: UsuarioAdmin) {
+    if (!window.confirm(`Eliminar a ${u.nombre}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api(`/auth/admin/usuarios/${u.id}`, { method: 'DELETE' });
+      setError('');
+      await cargar();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Error al eliminar');
+    }
+  }
+
   const ubicActivas = ubicaciones.filter((u) => u.activo || form.ubicacion_ids.includes(u.id));
   const nombreUbic = (id: number) => ubicaciones.find((u) => u.id === id)?.nombre ?? `#${id}`;
 
@@ -210,6 +222,9 @@ export default function Usuarios() {
                   <button className="btn btn-ghost" onClick={() => void alternarActivo(u)}>
                     {u.activo ? 'Desactivar' : 'Activar'}
                   </button>
+                  {u.id !== usuario?.id && (
+                    <button className="btn btn-ghost btn-peligro" onClick={() => void eliminar(u)}>Eliminar</button>
+                  )}
                 </div>
               </div>
             </div>

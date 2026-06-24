@@ -2190,3 +2190,7 @@ select:disabled {
 }
 .monitor-actual { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; }
 .ruta-parada-fila--actual { background: var(--brand-tint); border-radius: 10px; padding-left: 0.5rem; padding-right: 0.5rem; }
+
+/* Botón de acción destructiva (texto rojo) */
+.btn-peligro { color: var(--danger); }
+.btn-peligro:hover { background: var(--danger-bg); }

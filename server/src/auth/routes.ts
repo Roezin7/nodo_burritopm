@@ -241,6 +241,25 @@ authRouter.patch(
   }),
 );
 
+/** DELETE /auth/admin/usuarios/:id — elimina un usuario (no a sí mismo ni al último admin). */
+authRouter.delete(
+  '/admin/usuarios/:id',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    if (id === req.auth!.usuarioId) throw new HttpError(409, 'No puedes eliminar tu propio usuario.');
+    const usuario = await prisma.usuarios.findFirst({ where: { id, negocio_id: req.auth!.negocioId } });
+    if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
+    if (usuario.rol === 'admin' && !(await quedaAlgunAdmin(req.auth!.negocioId, id))) {
+      throw new HttpError(409, 'No puedes eliminar al último administrador.');
+    }
+    // usuario_ubicaciones se borra en cascada; las referencias históricas son sueltas.
+    await prisma.usuarios.delete({ where: { id } });
+    res.json({ ok: true });
+  }),
+);
+
 /** POST /auth/admin/usuarios/:id/reset-pin { pin_nuevo } — el admin restablece el PIN. */
 authRouter.post(
   '/admin/usuarios/:id/reset-pin',
