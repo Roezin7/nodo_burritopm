@@ -15,18 +15,18 @@
   --border: #e6e0d7;
   --border-strong: #d5ccbf;
 
-  /* Marca Burrito Parrilla — verde protagonista */
-  --brand: #1e8a3c;
-  --brand-strong: #15722f;
-  --brand-tint: #e3f3e6;
+  /* Marca Burrito Parrilla — verde del logo real */
+  --brand: #5ea531;
+  --brand-strong: #4c8a26;
+  --brand-tint: #e9f4dc;
 
   /* Acento rojo Burrito — energía/llamadas de atención (no es peligro) */
   --accent: #e5392b;
   --accent-tint: #fde6e3;
 
-  /* Acción primaria = verde de marca (estilo fast-food, alegre y claro) */
-  --primary: #1e8a3c;
-  --primary-hover: #15722f;
+  /* Acción primaria = verde un punto más oscuro (legible con texto blanco) */
+  --primary: #4c8a26;
+  --primary-hover: #3f761f;
   --on-primary: #ffffff;
 
   /* Semánticos */
@@ -50,6 +50,7 @@
   --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
   --font-brand: 'Cormorant Garamond', Georgia, serif;
+  --font-script: 'Yellowtail', 'Brush Script MT', cursive;
 
   /* Radios */
   --r-input: 10px;
@@ -77,15 +78,15 @@
   --border: #342e26;
   --border-strong: #463e33;
 
-  --brand: #4cc16a;
-  --brand-strong: #3da856;
-  --brand-tint: #16331f;
+  --brand: #7ec24a;
+  --brand-strong: #6aad3c;
+  --brand-tint: #1c3315;
 
   --accent: #ef5b4f;
   --accent-tint: #3a1c19;
 
-  --primary: #4cc16a;
-  --primary-hover: #3da856;
+  --primary: #7ec24a;
+  --primary-hover: #6aad3c;
   --on-primary: #10240f;
 
   --success: #4fb87e;
@@ -1849,37 +1850,30 @@ select:disabled {
    Bloque 12 — Marca BurritoPM, flujo visual, carga total y rutas de entrega
    ========================================================================== */
 
-/* ── Lockup co-branded NODO · BurritoPM ────────────────────────────────────── */
-.bpm-lockup { display: flex; align-items: center; gap: 0.55rem; }
+/* ── Lockup de marca: "burrito" script + PARRILLA MEXICANA (fiel al logo) ────── */
+.bpm-lockup { display: flex; align-items: center; gap: 0.6rem; }
 .bpm-lockup-text { display: flex; flex-direction: column; line-height: 1; }
-.bpm-lockup-nodo {
-  font-family: var(--font-ui);
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  font-size: 1.1rem;
-  color: var(--ink);
-}
-.bpm-lockup-burrito {
-  font-family: var(--font-brand);
-  font-style: italic;
-  font-weight: 600;
-  font-size: 1.15rem;
+.bpm-wm-burrito {
+  font-family: var(--font-script);
+  font-weight: 400;
+  font-size: 1.85rem;
+  line-height: 0.8;
   color: var(--brand);
-  margin-top: 0.05rem;
+  text-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.28);
+  padding-right: 0.1em; /* la cola de la 'o' del script */
 }
-.bpm-lockup-pm {
+.bpm-wm-sub {
   font-family: var(--font-ui);
-  font-style: normal;
-  font-weight: 700;
-  font-size: 0.62rem;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-  vertical-align: super;
-  margin-left: 0.12rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.5rem;
+  color: var(--ink-2);
+  margin-top: 0.18rem;
 }
-.bpm-lockup--full .bpm-lockup-nodo { font-size: 1.7rem; }
-.bpm-lockup--full .bpm-lockup-burrito { font-size: 1.85rem; }
-.bpm-lockup--full .bpm-lockup-pm { font-size: 0.85rem; }
+.bpm-wm-sub sup { font-size: 0.7em; }
+.bpm-lockup--full .bpm-wm-burrito { font-size: 3.1rem; }
+.bpm-lockup--full .bpm-wm-sub { font-size: 0.8rem; letter-spacing: 0.22em; margin-top: 0.3rem; }
 
 /* ── Chips de estado de ruta/parada (color fuerte, fast-food) ──────────────── */
 .chip--accent { background: var(--accent-tint); color: var(--accent); }
