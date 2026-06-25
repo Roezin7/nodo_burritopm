@@ -1972,8 +1972,10 @@ select:disabled {
 .bpm-logo--dark { display: none; }
 :root[data-tema='dark'] .bpm-logo--light { display: none; }
 :root[data-tema='dark'] .bpm-logo--dark { display: block; }
+/* Ambas imágenes salen de la misma fuente (mismo tamaño/forma), solo cambia el color
+   del subtítulo → una sola altura para los dos modos. */
 .bpm-lockup--rail .bpm-lockup-word { font-size: 1.15rem; }
-.bpm-logo--rail { height: 34px; }
+.bpm-logo--rail { height: 38px; }
 .bpm-lockup--full .bpm-lockup-word { font-size: 1.7rem; }
 .bpm-logo--full { height: 58px; }
 
