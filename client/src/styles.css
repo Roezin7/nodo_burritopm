@@ -330,7 +330,7 @@ table th {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.4rem 0.6rem 1rem;
+  padding: 0.4rem 0.6rem 0.5rem;
 }
 .nav-brand .boar {
   font-size: 1.4rem;
@@ -1222,7 +1222,7 @@ select:disabled {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.1rem;
   margin-top: 0.5rem;
 }
 .login__wordmark {
@@ -1958,7 +1958,7 @@ select:disabled {
    ========================================================================== */
 
 /* ── Lockup co-branded: NODO arriba, logo de Burrito (imagen transparente) abajo. */
-.bpm-lockup { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.bpm-lockup { display: flex; flex-direction: column; align-items: center; gap: 0; }
 .bpm-lockup-nodo { display: flex; align-items: center; gap: 0.5rem; }
 .bpm-lockup-word {
   font-family: var(--font-ui);
@@ -1968,11 +1968,15 @@ select:disabled {
   line-height: 1;
 }
 .bpm-logo { display: block; width: auto; object-fit: contain; user-select: none; }
-.bpm-lockup--rail { gap: 0.3rem; }
+/* Logo según tema: subtítulo negro en claro, blanco en oscuro. */
+.bpm-logo--dark { display: none; }
+:root[data-tema='dark'] .bpm-logo--light { display: none; }
+:root[data-tema='dark'] .bpm-logo--dark { display: block; }
+/* Margen negativo: el PNG trae aire arriba; así pega el "burrito" al NODO. */
 .bpm-lockup--rail .bpm-lockup-word { font-size: 1.2rem; }
-.bpm-logo--rail { height: 30px; }
-.bpm-lockup--full .bpm-lockup-word { font-size: 1.8rem; }
-.bpm-logo--full { height: 88px; }
+.bpm-logo--rail { height: 48px; margin-top: -10px; }
+.bpm-lockup--full .bpm-lockup-word { font-size: 1.85rem; }
+.bpm-logo--full { height: 124px; margin-top: -16px; }
 
 /* ── Chips de estado de ruta/parada (color fuerte, fast-food) ──────────────── */
 .chip--accent { background: var(--accent-tint); color: var(--accent); }
