@@ -27,6 +27,17 @@ distribucionesRouter.get(
   }),
 );
 
+/** GET /distribuciones/recepciones/historial?ubicacion=ID — recepciones ya cerradas. */
+distribucionesRouter.get(
+  '/recepciones/historial',
+  sucursal,
+  asyncHandler(async (req, res) => {
+    const ubicacionId = BigInt(idParam.parse(req.query.ubicacion));
+    if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
+    res.json(await svc.recepcionesHistorial(req.auth!.negocioId, ubicacionId));
+  }),
+);
+
 /** POST /distribuciones/:id/recibir { ubicacion_id, items } — recepción en sucursal. */
 distribucionesRouter.post(
   '/:id/recibir',

@@ -23,6 +23,8 @@ interface TotalCarga {
   categoria: string | null;
   total_aprobada: number;
   total_a_cargar: number;
+  bodega_disponible: number;
+  faltante: number;
 }
 interface Operacion {
   id: number;
@@ -35,17 +37,18 @@ interface Operacion {
 
 // Flujo v2: bodega trabaja distribuciones aprobadas (o verificadas si la verificación está activa).
 const ESTADOS_BODEGA = ['aprobada', 'verificada', 'en_transito', 'parcialmente_entregada'];
+const ESTADOS_HIST = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'];
 
 export default function Bodega() {
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [op, setOp] = useState<Operacion | null>(null);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
+  const [tab, setTab] = useState<'activos' | 'historial'>('activos');
   const [error, setError] = useState('');
 
   async function cargar() {
     try {
-      const ds = await api<DistResumen[]>('/distribuciones');
-      setLista(ds.filter((d) => ESTADOS_BODEGA.includes(d.estado)));
+      setLista(await api<DistResumen[]>('/distribuciones'));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Error al cargar');
     }
@@ -63,6 +66,10 @@ export default function Bodega() {
 
   if (op) return <OperacionView op={op} verificacionCarga={verificacionCarga} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
 
+  const activos = lista.filter((d) => ESTADOS_BODEGA.includes(d.estado));
+  const historial = lista.filter((d) => ESTADOS_HIST.includes(d.estado));
+  const mostradas = tab === 'activos' ? activos : historial;
+
   return (
     <div className="page">
       <header className="page-head">
@@ -70,15 +77,21 @@ export default function Bodega() {
       </header>
       <FlujoStepper activo="bodega" />
       {error && <p className="error-msg">{error}</p>}
-      {lista.length === 0 ? (
-        <p className="muted">No hay pedidos aprobados por surtir.</p>
+
+      <div className="tabs">
+        <button className={tab === 'activos' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activos')}>Por surtir ({activos.length})</button>
+        <button className={tab === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setTab('historial')}>Historial ({historial.length})</button>
+      </div>
+
+      {mostradas.length === 0 ? (
+        <p className="muted">{tab === 'activos' ? 'No hay pedidos aprobados por surtir.' : 'Aún no hay pedidos en el historial.'}</p>
       ) : (
         <div className="lista-ubicaciones">
-          {lista.map((d) => (
+          {mostradas.map((d) => (
             <button key={d.id} className="card card-click" onClick={() => void abrir(d.id)}>
               <div className="ubic-row">
                 <div><strong>Distribución #{d.id}</strong> <EstadoDistChip estado={d.estado} />
-                  <div className="muted">{d.total_lineas} líneas</div></div>
+                  <div className="muted">{new Date(d.creado_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' })} · {d.total_lineas} líneas</div></div>
                 <span className="muted">›</span>
               </div>
             </button>
@@ -99,6 +112,7 @@ function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Ope
   const editable = op.estado === 'aprobada' || op.estado === 'verificada';
   const enRuta = op.estado === 'en_transito' || op.estado === 'parcialmente_entregada';
   const campoActual = (it: OpItem): number => it.cantidad_cargada ?? it.cantidad_aprobada;
+  const totalFaltante = op.total_carga.filter((t) => t.faltante > 0).length;
 
   function editsAItems() {
     return Object.entries(edits)
@@ -144,16 +158,25 @@ function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Ope
       </div>
 
       {vista === 'total' ? (
-        <div className="card">
-          <div className="card-head"><strong>Todo lo que sube al camión</strong><span className="muted">{op.total_carga.length} productos</span></div>
-          {op.total_carga.map((t) => (
-            <div key={t.product_id} className="carga-total-item">
-              <span><strong>{t.nombre}</strong> {t.categoria && <small className="muted"> · {t.categoria}</small>}</span>
-              <span className="carga-total-qty">{t.total_a_cargar} <small>{t.unidad}</small></span>
-            </div>
-          ))}
-          {editable && <p className="muted" style={{ marginTop: '0.6rem' }}>Para ajustar cantidades por sucursal, usa la pestaña <strong>Por sucursal</strong>.</p>}
-        </div>
+        <>
+          {totalFaltante > 0 && (
+            <p className="aviso-falt">⚠ Bodega no alcanza para {totalFaltante} producto{totalFaltante > 1 ? 's' : ''}. Solo se cargará lo disponible; el resto no sale (no se descuadra el inventario).</p>
+          )}
+          <div className="card">
+            <div className="card-head"><strong>Todo lo que sube al camión</strong><span className="muted">{op.total_carga.length} productos</span></div>
+            {op.total_carga.map((t) => (
+              <div key={t.product_id} className={`carga-total-item ${t.faltante > 0 ? 'carga-total-item--falt' : ''}`}>
+                <span>
+                  <strong>{t.nombre}</strong> {t.categoria && <small className="muted"> · {t.categoria}</small>}
+                  <small className="muted carga-bodega"> · en bodega {t.bodega_disponible}</small>
+                  {t.faltante > 0 && <small className="txt-danger"> · faltan {t.faltante}</small>}
+                </span>
+                <span className="carga-total-qty">{t.total_a_cargar} <small>{t.unidad}</small></span>
+              </div>
+            ))}
+            {editable && <p className="muted" style={{ marginTop: '0.6rem' }}>Para ajustar cantidades por sucursal, usa la pestaña <strong>Por sucursal</strong>.</p>}
+          </div>
+        </>
       ) : (
         op.grupos.map((g) => (
           <div key={g.ubicacion.id} className="card">

@@ -138,11 +138,22 @@ async function cargarDistribucion(negocioId: bigint, id: bigint) {
   return dist;
 }
 
-/** Disponibilidad de la bodega central (último conteo cerrado de la bodega). */
+/**
+ * Disponibilidad EN VIVO de la bodega central: existencias.cantidad_disponible.
+ * Es la verdad operativa (refleja ingresos, retiros, cargas y recepciones), no el último
+ * conteo. Con esto el "faltante" del consolidado y el tope de carga son reales y el
+ * inventario nunca se descuadra (no se puede cargar lo que no hay).
+ */
 async function disponibleBodega(negocioId: bigint): Promise<Map<string, number>> {
   const bodega = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, tipo: 'bodega', activo: true } });
   if (!bodega) return new Map();
-  return (await disponibleConteo(bodega.id)).map;
+  const filas = await prisma.existencias.findMany({
+    where: { ubicacion_id: bodega.id },
+    select: { product_id: true, cantidad_disponible: true },
+  });
+  const map = new Map<string, number>();
+  for (const f of filas) map.set(f.product_id.toString(), num0(f.cantidad_disponible));
+  return map;
 }
 
 /** Consolidado por producto o por sucursal, con disponibilidad de bodega y faltante. */
@@ -304,9 +315,18 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   const bodega = await bodegaDe(negocioId);
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
 
+  // Tope por producto: la bodega no puede cargar más de lo que tiene en existencias. Vamos
+  // descontando del "restante" línea por línea (orden estable por id) para que la suma cargada
+  // de cada producto nunca exceda lo disponible → el inventario no se descuadra (sin negativos).
+  const restante = await disponibleBodega(negocioId);
+
   await prisma.$transaction(async (tx) => {
-    for (const l of lineas) {
-      const cargada = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+    for (const l of [...lineas].sort((a, b) => Number(a.id - b.id))) {
+      const pedida = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+      const pk = l.product_id.toString();
+      const disp = redondear3(restante.get(pk) ?? 0);
+      const cargada = Math.max(0, Math.min(pedida, disp)); // nunca más de lo disponible
+      restante.set(pk, redondear3(disp - cargada));
       const costo = num(l.costo_unitario);
 
       // Lo realmente cargado sale de disponible y entra a tránsito (movimiento idempotente).
@@ -327,6 +347,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }],
         });
       }
+      // Persistimos lo realmente cargado (clamp): es lo que viaja y lo que la sucursal recibirá.
       await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_cargada: cargada } });
     }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
@@ -367,6 +388,43 @@ export async function recepcionesPendientes(negocioId: bigint, ubicacionId: bigi
       estado_linea: l.estado_linea,
     })),
   }));
+}
+
+/** Historial de recepciones de una sucursal: distribuciones ya recibidas/cerradas que la tocaron. */
+export async function recepcionesHistorial(negocioId: bigint, ubicacionId: bigint) {
+  const dists = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      estado: { in: ['entregada', 'cerrada', 'cerrada_con_incidencias'] },
+      lineas: { some: { ubicacion_destino_id: ubicacionId, cantidad_recibida: { not: null } } },
+    },
+    include: {
+      lineas: {
+        where: { ubicacion_destino_id: ubicacionId },
+        include: { products: { include: { unidad_distribucion: true } } },
+      },
+    },
+    orderBy: { id: 'desc' },
+    take: 40,
+  });
+  return dists.map((d) => {
+    const conIncidencia = d.lineas.some((l) => l.incidencia_id != null);
+    return {
+      id: Number(d.id),
+      estado: d.estado,
+      recibido_at: d.creado_at.toISOString(),
+      con_incidencia: conIncidencia,
+      total_lineas: d.lineas.length,
+      lineas: d.lineas.map((l) => ({
+        linea_id: Number(l.id),
+        nombre: l.products.nombre,
+        unidad: l.products.unidad_distribucion.nombre,
+        esperado: num(l.cantidad_cargada) ?? 0,
+        recibida: num(l.cantidad_recibida),
+        estado_linea: l.estado_linea,
+      })),
+    };
+  });
 }
 
 /**
@@ -471,16 +529,19 @@ const redondear3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000
 /** Detalle operativo: líneas con todas las cantidades por etapa, agrupadas por sucursal. */
 export async function operacionDetalle(negocioId: bigint, id: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
-  const lineas = await prisma.distribucion_lineas.findMany({
-    where: { distribucion_id: id },
-    include: {
-      products: { include: { unidad_distribucion: true, categorias: true } },
-      ubicaciones: { select: { id: true, nombre: true } },
-    },
-  });
+  const [lineas, bodega] = await Promise.all([
+    prisma.distribucion_lineas.findMany({
+      where: { distribucion_id: id },
+      include: {
+        products: { include: { unidad_distribucion: true, categorias: true } },
+        ubicaciones: { select: { id: true, nombre: true } },
+      },
+    }),
+    disponibleBodega(negocioId),
+  ]);
   const grupos = new Map<string, { ubicacion: { id: number; nombre: string }; items: unknown[] }>();
   // Carga total: suma por producto de la cantidad que va al camión, entre todas las sucursales.
-  const total = new Map<string, { product_id: number; nombre: string; unidad: string; categoria: string | null; total_aprobada: number; total_a_cargar: number }>();
+  const total = new Map<string, { product_id: number; nombre: string; unidad: string; categoria: string | null; total_aprobada: number; total_a_cargar: number; bodega_disponible: number }>();
   for (const l of lineas) {
     const k = l.ubicacion_destino_id.toString();
     if (!grupos.has(k)) grupos.set(k, { ubicacion: { id: Number(l.ubicaciones.id), nombre: l.ubicaciones.nombre }, items: [] });
@@ -508,18 +569,23 @@ export async function operacionDetalle(negocioId: bigint, id: bigint) {
         categoria: l.products.categorias?.nombre ?? null,
         total_aprobada: 0,
         total_a_cargar: 0,
+        bodega_disponible: bodega.get(pk) ?? 0,
       });
     }
     const t = total.get(pk)!;
     t.total_aprobada = redondear3(t.total_aprobada + aprobada);
     t.total_a_cargar = redondear3(t.total_a_cargar + aCargar);
   }
+  // Lo que la bodega NO puede surtir (pide más de lo que hay): se marca como faltante.
+  const totalCarga = [...total.values()]
+    .map((t) => ({ ...t, faltante: redondear3(Math.max(0, t.total_a_cargar - t.bodega_disponible)) }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   return {
     id: Number(dist.id),
     estado: dist.estado,
     preparado_por: dist.preparado_por ? Number(dist.preparado_por) : null,
     verificado_por: dist.verificado_por ? Number(dist.verificado_por) : null,
-    total_carga: [...total.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
+    total_carga: totalCarga,
     grupos: [...grupos.values()].sort((a, b) => a.ubicacion.nombre.localeCompare(b.ubicacion.nombre, 'es')),
   };
 }

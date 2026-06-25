@@ -169,6 +169,36 @@ existenciasRouter.get(
 );
 
 
+/**
+ * GET /existencias/valuacion — valor del inventario EN VIVO por ubicación (admin).
+ * Cuánto dinero hay parado en cada sucursal y en la bodega, según existencias actuales.
+ */
+existenciasRouter.get(
+  '/valuacion',
+  requireAuth,
+  requireRole('admin'),
+  asyncHandler(async (req, res) => {
+    const negocioId = req.auth!.negocioId;
+    const ubicaciones = await prisma.ubicaciones.findMany({
+      where: { negocio_id: negocioId, activo: true },
+      orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
+      include: { existencias: { select: { cantidad_disponible: true, costo_promedio: true } } },
+    });
+    const filas = ubicaciones.map((u) => {
+      let valor = 0;
+      let skus = 0;
+      for (const e of u.existencias) {
+        const disp = num0(e.cantidad_disponible);
+        if (disp > 0) skus++;
+        const costo = num(e.costo_promedio);
+        if (costo != null) valor += disp * costo;
+      }
+      return { id: Number(u.id), nombre: u.nombre, tipo: u.tipo, skus, valor: Math.round(valor * 100) / 100 };
+    });
+    res.json({ ubicaciones: filas, valor_total: Math.round(filas.reduce((a, f) => a + f.valor, 0) * 100) / 100 });
+  }),
+);
+
 /** GET /existencias?ubicacion=ID — saldo actual por producto en una ubicación. */
 existenciasRouter.get(
   '/',

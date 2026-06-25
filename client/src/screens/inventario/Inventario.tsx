@@ -152,8 +152,12 @@ export default function Inventario() {
         <p className="muted">No tienes ubicaciones asignadas. Pide a un administrador que te asigne una.</p>
       ) : (
         <>
+          {esAdmin && <ValuacionAdmin onElegir={setUbicId} />}
           <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
+
+          {/* Valor e inventario actual de la ubicación seleccionada */}
+          {ubicId && <StockActual ubicId={ubicId} nombre={ubicaciones.find((u) => String(u.id) === ubicId)?.nombre ?? ''} />}
 
           {/* Tarjeta de la sesión de hoy */}
           {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
@@ -228,6 +232,101 @@ function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir }: { sesion: Sesion; 
       <p className="muted" style={{ margin: '0.3rem 0 0' }}>
         {sesion.proximo ? <>Próximo inventario: <strong className="inv-fecha-titulo">{fechaLarga(sesion.proximo)}</strong>.</> : 'Aún no hay días de inventario configurados.'}
       </p>
+    </div>
+  );
+}
+
+const usd = (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+interface ExistItem { product_id: number; nombre: string; unidad: string; disponible: number; costo_promedio: number | null; valor: number }
+interface ExistResp { items: ExistItem[]; valor_total: number }
+
+/** Valor del inventario y stock actual de la ubicación seleccionada (en vivo, desde existencias). */
+function StockActual({ ubicId, nombre }: { ubicId: string; nombre: string }) {
+  const [data, setData] = useState<ExistResp | null>(null);
+  const [abierto, setAbierto] = useState(false);
+  const [q, setQ] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let vivo = true;
+    setData(null); setError(''); setAbierto(false);
+    api<ExistResp>(`/existencias?ubicacion=${ubicId}`)
+      .then((r) => { if (vivo) setData(r); })
+      .catch(() => { if (vivo) setError('No se pudo cargar el inventario actual'); });
+    return () => { vivo = false; };
+  }, [ubicId]);
+
+  if (error) return null;
+  const conStock = data?.items.filter((i) => i.disponible > 0) ?? [];
+  const t = q.trim().toLowerCase();
+  const vis = conStock.filter((i) => !t || i.nombre.toLowerCase().includes(t));
+
+  return (
+    <div className="stock-card">
+      <div className="stock-card-top">
+        <div>
+          <span className="stock-card-label">Valor del inventario · {nombre}</span>
+          <div className="stock-card-valor">{data ? usd(data.valor_total) : '—'}</div>
+        </div>
+        <span className="stock-card-skus">{conStock.length} productos con stock</span>
+      </div>
+      <button type="button" className="stock-card-toggle" onClick={() => setAbierto((v) => !v)}>
+        {abierto ? 'Ocultar inventario actual' : 'Ver inventario actual'} <span className={abierto ? 'is-open' : ''}>▾</span>
+      </button>
+      {abierto && (
+        <div className="stock-card-body">
+          {conStock.length > 10 && (
+            <input className="inv-search" type="search" placeholder="Buscar producto…" value={q} onChange={(e) => setQ(e.target.value)} />
+          )}
+          {vis.length === 0 ? (
+            <p className="muted">{conStock.length === 0 ? 'Sin existencias registradas todavía.' : 'Sin coincidencias.'}</p>
+          ) : (
+            vis.map((i) => (
+              <div key={i.product_id} className="stock-row">
+                <span className="stock-row-name">{i.nombre} <small className="muted">{i.unidad}</small></span>
+                <span className="stock-row-qty">{i.disponible}</span>
+                <span className="stock-row-val">{usd(i.valor)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ValuacionResp { ubicaciones: { id: number; nombre: string; tipo: string; skus: number; valor: number }[]; valor_total: number }
+
+/** Panorama del admin: dinero en inventario en cada ubicación (bodega + sucursales). */
+function ValuacionAdmin({ onElegir }: { onElegir: (id: string) => void }) {
+  const [data, setData] = useState<ValuacionResp | null>(null);
+  const [abierto, setAbierto] = useState(false);
+  useEffect(() => { api<ValuacionResp>('/existencias/valuacion').then(setData).catch(() => {}); }, []);
+  if (!data) return null;
+  const orden = [...data.ubicaciones].sort((a, b) => b.valor - a.valor);
+  return (
+    <div className="valuacion-card">
+      <button type="button" className="valuacion-head" onClick={() => setAbierto((v) => !v)}>
+        <span>
+          <span className="valuacion-label">Dinero en inventario (todas las ubicaciones)</span>
+          <strong className="valuacion-total">{usd(data.valor_total)}</strong>
+        </span>
+        <span className={`valuacion-caret ${abierto ? 'is-open' : ''}`}>▾</span>
+      </button>
+      {abierto && (
+        <div className="valuacion-body">
+          {orden.map((u) => (
+            <button key={u.id} type="button" className="valuacion-row" onClick={() => onElegir(String(u.id))}>
+              <span className="valuacion-row-name">
+                {u.tipo === 'bodega' && <span className="ubic-pill-tag">Bodega</span>}{u.nombre}
+              </span>
+              <span className="muted">{u.skus} prod.</span>
+              <span className="valuacion-row-val">{usd(u.valor)}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

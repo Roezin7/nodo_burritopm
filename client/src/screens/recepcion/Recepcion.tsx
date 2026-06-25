@@ -14,6 +14,7 @@ interface LineaRec {
   estado_linea: string | null;
 }
 interface DistRec { id: number; estado: string; creado_at: string; lineas: LineaRec[] }
+interface DistHist { id: number; estado: string; recibido_at: string; con_incidencia: boolean; total_lineas: number; lineas: LineaRec[] }
 
 export default function Recepcion() {
   const { usuario } = useAuth();
@@ -21,6 +22,8 @@ export default function Recepcion() {
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
   const [ubicId, setUbicId] = useState('');
   const [dists, setDists] = useState<DistRec[]>([]);
+  const [historial, setHistorial] = useState<DistHist[]>([]);
+  const [tab, setTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [recibido, setRecibido] = useState<Record<number, string>>({});
   const [problema, setProblema] = useState<Set<number>>(new Set()); // dist ids en modo "hubo un problema"
   const [error, setError] = useState('');
@@ -49,7 +52,11 @@ export default function Recepcion() {
     try { setDists(await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}`)); }
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error al cargar'); }
   }
-  useEffect(() => { void cargar(); }, [ubicId]);
+  useEffect(() => { setHistorial([]); void cargar(); }, [ubicId]);
+  useEffect(() => {
+    if (tab !== 'historial' || !ubicId || historial.length) return;
+    api<DistHist[]>(`/distribuciones/recepciones/historial?ubicacion=${ubicId}`).then(setHistorial).catch(() => {});
+  }, [tab, ubicId, historial.length]);
 
   // modoProblema=false → confirma todo tal cual lo esperado (un toque). true → usa lo ajustado.
   async function recibir(d: DistRec, modoProblema: boolean) {
@@ -83,9 +90,39 @@ export default function Recepcion() {
       ) : (
         <>
           <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={setUbicId} />
+
+          <div className="tabs">
+            <button className={tab === 'pendientes' ? 'tab tab--on' : 'tab'} onClick={() => setTab('pendientes')}>Por recibir ({dists.length})</button>
+            <button className={tab === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setTab('historial')}>Historial</button>
+          </div>
+
           {error && <p className="error-msg">{error}</p>}
           {ok && <p className="ok-msg">{ok}</p>}
-          {dists.length === 0 ? (
+
+          {tab === 'historial' ? (
+            historial.length === 0 ? (
+              <p className="muted">Aún no hay recepciones registradas.</p>
+            ) : (
+              historial.map((d) => (
+                <div key={d.id} className="card">
+                  <div className="card-head">
+                    <strong>Pedido #{d.id}</strong>
+                    <span className="muted">{new Date(d.recibido_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' })}</span>
+                  </div>
+                  {d.con_incidencia && <p className="txt-danger" style={{ margin: '0 0 0.4rem' }}>Se recibió con diferencias.</p>}
+                  {d.lineas.map((l) => (
+                    <div key={l.linea_id} className="dist-row">
+                      <div className="conteo-prod">
+                        <strong>{l.nombre}</strong>
+                        <small className="muted">{l.unidad} · esperado {l.esperado}</small>
+                      </div>
+                      <span className="dist-aprob">{l.recibida ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )
+          ) : dists.length === 0 ? (
             <p className="muted">No hay entregas en tránsito para esta sucursal.</p>
           ) : (
             dists.map((d) => {

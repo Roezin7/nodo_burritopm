@@ -1,14 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#faf8f4"/>
-  <g stroke="#1b2735" stroke-width="4" stroke-linecap="round">
-    <line x1="22" y1="24" x2="42" y2="24"/>
-    <line x1="42" y1="24" x2="42" y2="44"/>
-    <line x1="42" y1="44" x2="22" y2="44"/>
-    <line x1="22" y1="44" x2="22" y2="24"/>
-    <line x1="22" y1="24" x2="42" y2="44"/>
+  <rect width="64" height="64" rx="15" fill="#faf8f4"/>
+  <g stroke="#1b2735" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M20 22 H44 V46 H20 Z"/>
+    <line x1="20" y1="22" x2="44" y2="46"/>
   </g>
-  <circle cx="22" cy="24" r="7" fill="#21A645"/>
-  <circle cx="42" cy="24" r="7" fill="#FF3B21"/>
-  <circle cx="22" cy="44" r="7" fill="#FBA61A"/>
-  <circle cx="42" cy="44" r="7" fill="#1F8EF1"/>
+  <circle cx="20" cy="22" r="7.5" fill="#5ea531"/>
+  <circle cx="44" cy="22" r="7.5" fill="#FF3B21"/>
+  <circle cx="20" cy="46" r="7.5" fill="#FBA61A"/>
+  <circle cx="44" cy="46" r="7.5" fill="#1F8EF1"/>
 </svg>

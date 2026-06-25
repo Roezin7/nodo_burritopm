@@ -2439,3 +2439,106 @@ a.flujo-paso { text-decoration: none; }
 .tarea-hoy { display: flex; align-items: center; justify-content: space-between; gap: 1rem; text-decoration: none; color: var(--ink); }
 .tarea-hoy:active { transform: scale(0.995); }
 .tarea-hoy-cta { display: inline-flex; align-items: center; gap: 0.2rem; font-weight: 800; color: var(--brand); white-space: nowrap; }
+
+/* ============================================================================
+   v3 — selector compacto, valor de inventario, faltante de bodega y ruta inmersiva
+   ============================================================================ */
+
+/* Selector de ubicación: dropdown compacto cuando hay muchas */
+.ubic-dropdown { position: relative; }
+.ubic-dropdown-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  width: 100%; padding: 0.7rem 0.9rem; border: 1px solid var(--border-strong);
+  border-radius: var(--r-input); background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 600; cursor: pointer; transition: border-color 0.14s;
+}
+.ubic-dropdown-trigger:hover { border-color: var(--brand); }
+.ubic-dropdown-current { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ubic-dropdown-caret { color: var(--ink-3); transition: transform 0.16s; flex: 0 0 auto; }
+.ubic-dropdown-caret.is-open { transform: rotate(180deg); }
+.ubic-dropdown-panel {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18); overflow: hidden;
+  animation: dropIn 0.14s ease-out;
+}
+@keyframes dropIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.ubic-dropdown-search { width: 100%; border: 0; border-bottom: 1px solid var(--border); padding: 0.7rem 0.9rem; background: var(--surface-2); color: var(--ink); font: inherit; }
+.ubic-dropdown-search:focus { outline: none; }
+.ubic-dropdown-list { max-height: 260px; overflow-y: auto; }
+.ubic-dropdown-opt {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left;
+  padding: 0.7rem 0.9rem; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.ubic-dropdown-opt:last-child { border-bottom: 0; }
+.ubic-dropdown-opt:hover { background: var(--surface-2); }
+.ubic-dropdown-opt.is-sel { background: var(--brand-tint); font-weight: 700; }
+.ubic-dropdown-opt-name { flex: 1; min-width: 0; }
+.ubic-dropdown-check { color: var(--brand); font-weight: 800; }
+.ubic-dropdown-empty { display: block; padding: 0.8rem 0.9rem; }
+
+/* Valor del inventario y stock actual (Inventario) */
+.stock-card { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); padding: 1rem; margin: 0.9rem 0; }
+.stock-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.stock-card-label { font-size: 0.8rem; color: var(--ink-3); text-transform: capitalize; }
+.stock-card-valor { font-size: 1.6rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; }
+.stock-card-skus { font-size: 0.8rem; color: var(--ink-3); text-align: right; }
+.stock-card-toggle { margin-top: 0.6rem; background: none; border: 0; padding: 0; color: var(--brand); font: inherit; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem; }
+.stock-card-toggle span { transition: transform 0.15s; }
+.stock-card-toggle span.is-open { transform: rotate(180deg); }
+.stock-card-body { margin-top: 0.7rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.stock-row { display: grid; grid-template-columns: 1fr auto auto; gap: 0.7rem; align-items: center; padding: 0.45rem 0; border-bottom: 1px solid var(--border); }
+.stock-row:last-child { border-bottom: 0; }
+.stock-row-name { min-width: 0; }
+.stock-row-qty { font-variant-numeric: tabular-nums; font-weight: 700; }
+.stock-row-val { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 4.5rem; text-align: right; }
+
+/* Panorama de valuación (admin) */
+.valuacion-card { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); margin-bottom: 0.9rem; overflow: hidden; }
+.valuacion-head { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0.9rem 1rem; background: none; border: 0; font: inherit; color: var(--ink); cursor: pointer; }
+.valuacion-label { display: block; font-size: 0.8rem; color: var(--ink-3); }
+.valuacion-total { font-size: 1.35rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; }
+.valuacion-caret { color: var(--ink-3); transition: transform 0.16s; }
+.valuacion-caret.is-open { transform: rotate(180deg); }
+.valuacion-body { border-top: 1px solid var(--border); }
+.valuacion-row { display: grid; grid-template-columns: 1fr auto auto; gap: 0.7rem; align-items: center; width: 100%; text-align: left; padding: 0.6rem 1rem; background: none; border: 0; border-bottom: 1px solid var(--border); font: inherit; color: var(--ink); cursor: pointer; }
+.valuacion-row:last-child { border-bottom: 0; }
+.valuacion-row:hover { background: var(--surface-2); }
+.valuacion-row-name { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; font-weight: 600; }
+.valuacion-row-val { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 5rem; text-align: right; }
+
+/* Bodega: faltante (no alcanza el inventario de bodega) */
+.aviso-falt { background: var(--warning-bg); color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent); border-radius: var(--r-input); padding: 0.7rem 0.9rem; margin: 0 0 0.8rem; font-weight: 600; }
+.carga-total-item--falt { background: color-mix(in srgb, var(--danger) 7%, transparent); border-radius: 8px; }
+.carga-bodega { white-space: nowrap; }
+
+/* Ruta inmersiva + animación de éxito */
+.ruta-page .parada-card { animation: paradaIn 0.32s ease-out both; }
+.ruta-page .parada-card:nth-child(2) { animation-delay: 0.04s; }
+.ruta-page .parada-card:nth-child(3) { animation-delay: 0.08s; }
+.ruta-page .parada-card:nth-child(4) { animation-delay: 0.12s; }
+.ruta-page .parada-card:nth-child(5) { animation-delay: 0.16s; }
+@keyframes paradaIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.parada-card--actual { animation: paradaPulse 2.4s ease-in-out infinite !important; }
+@keyframes paradaPulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 40%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 0%, transparent); } }
+
+.exito-overlay {
+  position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 0.6rem;
+  background: color-mix(in srgb, var(--brand) 92%, black); color: #fff;
+  animation: exitoFade 1.1s ease forwards;
+}
+@keyframes exitoFade { 0% { opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+.exito-check { width: 96px; height: 96px; }
+.exito-svg { width: 100%; height: 100%; }
+.exito-circ { fill: none; stroke: rgba(255, 255, 255, 0.9); stroke-width: 3; stroke-dasharray: 151; stroke-dashoffset: 151; animation: exitoCirc 0.5s ease-out 0.05s forwards; }
+.exito-tick { fill: none; stroke: #fff; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 48; stroke-dashoffset: 48; animation: exitoTick 0.35s ease-out 0.45s forwards; }
+@keyframes exitoCirc { to { stroke-dashoffset: 0; } }
+@keyframes exitoTick { to { stroke-dashoffset: 0; } }
+.exito-texto { font-size: 1.7rem; font-weight: 800; }
+.exito-sub { font-size: 1rem; opacity: 0.9; }
+@media (prefers-reduced-motion: reduce) {
+  .ruta-page .parada-card, .parada-card--actual, .exito-circ, .exito-tick { animation: none !important; }
+  .exito-circ, .exito-tick { stroke-dashoffset: 0; }
+}

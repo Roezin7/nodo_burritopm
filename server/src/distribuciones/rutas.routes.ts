@@ -30,6 +30,15 @@ rutasRouter.get(
   }),
 );
 
+/** GET /rutas/historial — rutas ya completadas (Bodega y reparto + admin). */
+rutasRouter.get(
+  '/historial',
+  repartidor,
+  asyncHandler(async (req, res) => {
+    res.json(await rutas.rutasHistorial(req.auth!.negocioId));
+  }),
+);
+
 /** POST /rutas/:rid/paradas/:pid/entregar { items?, omitir?, notas? } — cierra una parada. */
 rutasRouter.post(
   '/:rid/paradas/:pid/entregar',

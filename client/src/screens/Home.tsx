@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, type Rol } from '../auth';
 import { Icono } from '../icons';
@@ -90,7 +90,26 @@ function saludo() {
 
 export default function Home() {
   const { usuario } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<'inicio' | 'dashboard'>('inicio');
+
+  // Si "Bodega y reparto" tiene una ruta en curso, lo llevamos directo a entregarla (una vez por
+  // sesión, para que pueda volver al inicio si quiere). Cero fricción: abre la app y a repartir.
+  useEffect(() => {
+    if (usuario?.rol !== 'encargado_bodega') return;
+    if (sessionStorage.getItem('bpm-ruta-auto')) return;
+    let vivo = true;
+    api<(unknown | null)[]>('/rutas/mias')
+      .then((rs) => {
+        if (vivo && rs.filter(Boolean).length > 0) {
+          sessionStorage.setItem('bpm-ruta-auto', '1');
+          navigate('/ruta');
+        }
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [usuario, navigate]);
+
   if (!usuario) return null;
   const esAdmin = usuario.rol === 'admin';
 

@@ -246,6 +246,16 @@ export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint
   return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
 }
 
+/** Historial de rutas ya completadas (las últimas), para "Bodega y reparto" y el admin. */
+export async function rutasHistorial(negocioId: bigint, limite = 30) {
+  const rutas = await prisma.rutas.findMany({
+    where: { negocio_id: negocioId, estado: 'completada' },
+    orderBy: { id: 'desc' },
+    take: limite,
+  });
+  return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
+}
+
 /** Recalcula el estado de la ruta a partir de sus paradas (dentro de una transacción). */
 async function recomputarRuta(tx: Tx, rutaId: bigint) {
   const ruta = await tx.rutas.findUnique({ where: { id: rutaId } });

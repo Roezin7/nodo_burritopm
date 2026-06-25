@@ -43,7 +43,10 @@ export default function Ruta() {
 
 function RutaRepartidor() {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
+  const [historial, setHistorial] = useState<RutaDetalle[]>([]);
+  const [tab, setTab] = useState<'activas' | 'historial'>('activas');
   const [parada, setParada] = useState<{ ruta: RutaDetalle; parada: Parada } | null>(null);
+  const [exito, setExito] = useState<string | null>(null); // overlay de "entregado"
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
 
@@ -59,33 +62,96 @@ function RutaRepartidor() {
     }
   }
   useEffect(() => { void cargar(); }, []);
+  useEffect(() => {
+    if (tab !== 'historial' || historial.length) return;
+    api<(RutaDetalle | null)[]>('/rutas/historial').then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
+  }, [tab, historial.length]);
+
+  // Celebración breve tras entregar, luego de vuelta a la lista.
+  function celebrar(nombre: string) {
+    setExito(nombre);
+    setTimeout(() => setExito(null), 1100);
+  }
 
   if (parada) {
     return (
-      <ParadaView
-        ruta={parada.ruta}
-        parada={parada.parada}
-        onSalir={() => setParada(null)}
-        onHecho={async () => { setParada(null); await cargar(); }}
-      />
+      <>
+        {exito && <ExitoOverlay nombre={exito} />}
+        <ParadaView
+          ruta={parada.ruta}
+          parada={parada.parada}
+          onSalir={() => setParada(null)}
+          onHecho={async () => { const n = parada.parada.ubicacion.nombre; setParada(null); celebrar(n); await cargar(); }}
+        />
+      </>
     );
   }
 
+  const totalParadas = rutas.reduce((a, r) => a + r.paradas.length, 0);
+  const hechasTotal = rutas.reduce((a, r) => a + r.paradas.filter((p) => cerrada(p.estado)).length, 0);
+
   return (
-    <div className="page conteo-page">
+    <div className="page conteo-page ruta-page">
+      {exito && <ExitoOverlay nombre={exito} />}
       <header className="page-head">
-        <div><h1>Mi ruta</h1><p className="page-sub">Entrega parada por parada. Toca una parada para empezar.</p></div>
+        <div><h1>Mi ruta</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
       </header>
       <FlujoStepper activo="ruta" />
       {error && <p className="error-msg">{error}</p>}
 
-      {cargando ? (
-        <p className="muted">Cargando…</p>
-      ) : rutas.length === 0 ? (
-        <div className="card"><p className="muted">No tienes rutas asignadas por ahora. Aparecerán aquí cuando el camión salga de bodega.</p></div>
+      <div className="tabs">
+        <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>Hoy{rutas.length ? ` · ${hechasTotal}/${totalParadas}` : ''}</button>
+        <button className={tab === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setTab('historial')}>Historial</button>
+      </div>
+
+      {tab === 'activas' ? (
+        cargando ? (
+          <p className="muted">Cargando…</p>
+        ) : rutas.length === 0 ? (
+          <div className="card"><p className="muted">No tienes rutas asignadas por ahora. Aparecerán aquí cuando el camión salga de bodega.</p></div>
+        ) : (
+          rutas.map((r) => <RutaCard key={r.ruta_id} ruta={r} onAbrir={(p) => setParada({ ruta: r, parada: p })} />)
+        )
+      ) : historial.length === 0 ? (
+        <div className="card"><p className="muted">Aún no hay rutas completadas.</p></div>
       ) : (
-        rutas.map((r) => <RutaCard key={r.ruta_id} ruta={r} onAbrir={(p) => setParada({ ruta: r, parada: p })} />)
+        historial.map((r) => <HistorialRutaCard key={r.ruta_id} ruta={r} />)
       )}
+    </div>
+  );
+}
+
+/** Overlay de éxito tras entregar: check animado a pantalla completa. */
+function ExitoOverlay({ nombre }: { nombre: string }) {
+  return (
+    <div className="exito-overlay" role="status" aria-live="polite">
+      <div className="exito-check">
+        <svg viewBox="0 0 52 52" className="exito-svg"><circle cx="26" cy="26" r="24" className="exito-circ" /><path d="M14 27 l8 8 l16 -18" className="exito-tick" /></svg>
+      </div>
+      <strong className="exito-texto">¡Entregado!</strong>
+      <span className="exito-sub">{nombre}</span>
+    </div>
+  );
+}
+
+/** Tarjeta de una ruta ya completada (solo lectura). */
+function HistorialRutaCard({ ruta }: { ruta: RutaDetalle }) {
+  const paradas = [...ruta.paradas].sort((a, b) => a.orden - b.orden);
+  return (
+    <div className="card monitor-ruta">
+      <div className="card-head">
+        <strong>{ruta.nombre ?? `Ruta #${ruta.ruta_id}`}</strong>
+        <span className="muted">{ruta.despachada_at ? new Date(ruta.despachada_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' }) : ''}</span>
+      </div>
+      <div className="ruta-tablero">
+        {paradas.map((p) => (
+          <div key={p.parada_id} className="ruta-parada-fila">
+            <span className={`ruta-dot ruta-dot--${p.estado}`} />
+            <span><strong>{p.orden}. {p.ubicacion.nombre}</strong>{p.confirmada_at && <small className="muted"> · {hora(p.confirmada_at)}</small>}</span>
+            <ParadaChip estado={p.estado} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
