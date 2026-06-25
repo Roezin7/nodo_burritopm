@@ -5,18 +5,18 @@
 import { prisma } from '../src/db.js';
 import bcrypt from 'bcryptjs';
 
-const SUCURSALES = [
-  'Naperville on 59th',
-  'Carol Stream',
-  'Lombard',
-  'Lisle',
-  'Glendale Heights',
-  'West Chicago',
-  'Batavia',
-  'Algonquin',
-  'Naperville on Ogden',
-  'Rolling Meadows',
-  'Schaumburg',
+const SUCURSALES: { nombre: string; direccion: string }[] = [
+  { nombre: 'Naperville on 59th', direccion: '5059 Ace Ln, Naperville, IL 60564' },
+  { nombre: 'Carol Stream', direccion: '415 S Schmale Rd, Carol Stream, IL 60188' },
+  { nombre: 'Lombard', direccion: '2770 S Highland Ave #101, Lombard, IL 60148' },
+  { nombre: 'Lisle', direccion: '1500 Maple Ave, Lisle, IL 60532' },
+  { nombre: 'Glendale Heights', direccion: '280 E Army Trail Rd, Addison, IL 60101' },
+  { nombre: 'West Chicago', direccion: '100 W Roosevelt Rd, West Chicago, IL 60185' },
+  { nombre: 'Batavia', direccion: '76 S Randall Rd, Batavia, IL 60510' },
+  { nombre: 'Algonquin', direccion: '2321 Algonquin Rd, Algonquin, IL 60102' },
+  { nombre: 'Naperville on Ogden', direccion: '820 E Ogden Ave, Naperville, IL 60563' },
+  { nombre: 'Rolling Meadows', direccion: '2101 S Plum Grove Rd, Rolling Meadows, IL 60008' },
+  { nombre: 'Schaumburg', direccion: '720 E Higgins Rd, Schaumburg, IL 60173' },
 ];
 
 function codigoDe(nombre: string, usados: Set<string>): string {
@@ -70,9 +70,9 @@ async function main() {
   creds.push({ ubicacion: bodega.nombre, rol: 'Bodega y reparto', pin: String(pin) });
   pin++;
 
-  for (const nombre of SUCURSALES) {
+  for (const { nombre, direccion } of SUCURSALES) {
     const ubic = await prisma.ubicaciones.create({
-      data: { negocio_id: org.id, nombre, codigo: codigoDe(nombre, usados), tipo: 'sucursal' },
+      data: { negocio_id: org.id, nombre, codigo: codigoDe(nombre, usados), tipo: 'sucursal', direccion },
     });
     const user = await prisma.usuarios.create({
       data: { negocio_id: org.id, nombre, rol: 'encargado_sucursal', pin_hash: hash(String(pin)) },
