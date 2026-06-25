@@ -36,8 +36,11 @@ export default function Distribucion() {
   async function calcular() {
     setCalculando(true); setError(''); setInfo('');
     try {
-      const r = await api<{ id: number; lineas: number; sin_conteo: string[] }>('/distribuciones', { method: 'POST', body: {} });
-      if (r.sin_conteo.length) setInfo(`Sucursales sin conteo cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
+      const r = await api<{ id: number; lineas: number; sin_conteo: string[]; sin_existencia: string[] }>('/distribuciones', { method: 'POST', body: {} });
+      const avisos: string[] = [];
+      if (r.sin_conteo.length) avisos.push(`Sucursales sin conteo cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
+      if (r.sin_existencia?.length) avisos.push(`Sin existencia en bodega central (excluidos): ${r.sin_existencia.join(', ')}`);
+      if (avisos.length) setInfo(avisos.join(' · '));
       await cargar();
       setAbierta(r.id);
     } catch (e) {

@@ -23,6 +23,12 @@ async function disponibleConteo(ubicacionId: bigint) {
  * sucursales activas. La sugerencia surge del conteo + parámetros (la sucursal no pide).
  */
 export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ubicacionIds?: number[]) {
+  // Todo sale de la bodega central (Adison): si no existe, no hay distribución posible.
+  await bodegaDe(negocioId);
+  // Existencia EN VIVO de la bodega: es la fuente única. Un producto sin stock aquí NO se
+  // distribuye (no se generan líneas para él), aunque la sucursal esté por debajo de su objetivo.
+  const disponibleBod = await disponibleBodega(negocioId);
+
   const sucursales = await prisma.ubicaciones.findMany({
     where: {
       negocio_id: negocioId,
@@ -34,6 +40,7 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
   if (sucursales.length === 0) throw new HttpError(400, 'No hay sucursales activas para distribuir');
 
   const sinConteo: string[] = [];
+  const sinExistencia = new Set<string>(); // productos excluidos por no tener stock en bodega
   const lineasData: {
     ubicacion_destino_id: bigint;
     product_id: bigint;
@@ -54,7 +61,7 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
     }
     const params = await prisma.producto_ubicacion.findMany({
       where: { ubicacion_id: suc.id, habilitado: true, products: { activo: true } },
-      include: { products: { select: { id: true, ultimo_costo: true, costo_promedio: true } } },
+      include: { products: { select: { id: true, nombre: true, ultimo_costo: true, costo_promedio: true } } },
     });
     for (const pu of params) {
       const disponible = disp.get(pu.product_id.toString()) ?? 0;
@@ -67,6 +74,12 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
         minimo_envio: num0(pu.minimo_envio),
       });
       if (sugerida <= 0) continue;
+      // Regla bodega central: sin existencia en bodega no se distribuye este producto.
+      const enBodega = disponibleBod.get(pu.product_id.toString()) ?? 0;
+      if (enBodega <= 0) {
+        sinExistencia.add(pu.products.nombre);
+        continue;
+      }
       const costo = num(pu.products.ultimo_costo) ?? num(pu.products.costo_promedio);
       lineasData.push({
         ubicacion_destino_id: suc.id,
@@ -83,10 +96,13 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
   }
 
   if (lineasData.length === 0) {
+    const partes: string[] = [];
+    if (sinConteo.length) partes.push(`Sucursales sin conteo cerrado: ${sinConteo.join(', ')}.`);
+    if (sinExistencia.size) partes.push(`Sin existencia en bodega central: ${[...sinExistencia].join(', ')}.`);
     throw new HttpError(
       400,
-      sinConteo.length
-        ? `No hay nada que distribuir. Sucursales sin conteo cerrado: ${sinConteo.join(', ')}.`
+      partes.length
+        ? `No hay nada que distribuir. ${partes.join(' ')}`
         : 'No hay nada que distribuir: todas las sucursales están en su nivel objetivo.',
     );
   }
@@ -101,7 +117,7 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
     return d;
   });
 
-  return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinConteo };
+  return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinConteo, sin_existencia: [...sinExistencia] };
 }
 
 /** Control total del admin: fija el estado de la distribución a cualquier valor (override). */
@@ -139,13 +155,26 @@ async function cargarDistribucion(negocioId: bigint, id: bigint) {
 }
 
 /**
+ * Bodega central del negocio (Bodega Adison): la ÚNICA fuente de salida. Todo lo que se
+ * distribuye sale de aquí. Se elige de forma DETERMINISTA (la de menor id) para que todos los
+ * caminos (disponibilidad, cálculo, carga, recepción) usen exactamente la misma bodega y el
+ * inventario no se descuadre. Devuelve null si el negocio aún no tiene bodega activa.
+ */
+async function bodegaCentralOpcional(negocioId: bigint) {
+  return prisma.ubicaciones.findFirst({
+    where: { negocio_id: negocioId, tipo: 'bodega', activo: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
+/**
  * Disponibilidad EN VIVO de la bodega central: existencias.cantidad_disponible.
  * Es la verdad operativa (refleja ingresos, retiros, cargas y recepciones), no el último
  * conteo. Con esto el "faltante" del consolidado y el tope de carga son reales y el
  * inventario nunca se descuadra (no se puede cargar lo que no hay).
  */
 async function disponibleBodega(negocioId: bigint): Promise<Map<string, number>> {
-  const bodega = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, tipo: 'bodega', activo: true } });
+  const bodega = await bodegaCentralOpcional(negocioId);
   if (!bodega) return new Map();
   const filas = await prisma.existencias.findMany({
     where: { ubicacion_id: bodega.id },
@@ -319,6 +348,8 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   // descontando del "restante" línea por línea (orden estable por id) para que la suma cargada
   // de cada producto nunca exceda lo disponible → el inventario no se descuadra (sin negativos).
   const restante = await disponibleBodega(negocioId);
+  let totalCargado = 0;
+  const sucursalesConCarga = new Set<string>(); // solo estas serán paradas de la ruta
 
   await prisma.$transaction(async (tx) => {
     for (const l of [...lineas].sort((a, b) => Number(a.id - b.id))) {
@@ -331,6 +362,8 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
 
       // Lo realmente cargado sale de disponible y entra a tránsito (movimiento idempotente).
       if (cargada > 0) {
+        totalCargado = redondear3(totalCargado + cargada);
+        sucursalesConCarga.add(l.ubicacion_destino_id.toString());
         await aplicarMovimiento(tx, {
           negocioId,
           productId: l.product_id,
@@ -350,9 +383,14 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       // Persistimos lo realmente cargado (clamp): es lo que viaja y lo que la sucursal recibirá.
       await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_cargada: cargada } });
     }
+    // Sin existencias en bodega no hay nada que salga: no se genera tránsito ni ruta (rollback).
+    if (totalCargado <= 0) {
+      throw new HttpError(409, 'No hay existencias en la bodega central para surtir esta distribución. Registra un ingreso antes de cargar.');
+    }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
-    // El camión cargado pone la ruta en curso (la crea si no se planeó una).
-    await asegurarRutaEnCurso(tx, negocioId, id, usuarioId);
+    // El camión cargado pone la ruta en curso (la crea si no se planeó una). Solo las sucursales
+    // que de verdad recibieron carga se convierten en paradas.
+    await asegurarRutaEnCurso(tx, negocioId, id, usuarioId, sucursalesConCarga);
   });
   void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
   return { ok: true };
@@ -591,7 +629,7 @@ export async function operacionDetalle(negocioId: bigint, id: bigint) {
 }
 
 async function bodegaDe(negocioId: bigint) {
-  const b = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, tipo: 'bodega', activo: true } });
+  const b = await bodegaCentralOpcional(negocioId);
   if (!b) throw new HttpError(400, 'No hay una bodega central activa');
   return b;
 }

@@ -349,7 +349,13 @@ export async function entregarParada(
  *   (orden alfabético), sin repartidor asignado, para que la cuadrilla de reparto la entregue.
  * Se invoca dentro de la transacción de confirmarCarga.
  */
-export async function asegurarRutaEnCurso(tx: Tx, negocioId: bigint, distId: bigint, usuarioId: bigint) {
+export async function asegurarRutaEnCurso(
+  tx: Tx,
+  negocioId: bigint,
+  distId: bigint,
+  usuarioId: bigint,
+  sucursalesConCarga?: Set<string>,
+) {
   const existente = await tx.rutas.findFirst({
     where: { negocio_id: negocioId, distribucion_id: distId },
     orderBy: { id: 'desc' },
@@ -365,7 +371,12 @@ export async function asegurarRutaEnCurso(tx: Tx, negocioId: bigint, distId: big
     select: { ubicacion_destino_id: true, ubicaciones: { select: { nombre: true } } },
   });
   const sucursales = new Map<string, { id: bigint; nombre: string }>();
-  for (const l of lineas) sucursales.set(l.ubicacion_destino_id.toString(), { id: l.ubicacion_destino_id, nombre: l.ubicaciones.nombre });
+  for (const l of lineas) {
+    const k = l.ubicacion_destino_id.toString();
+    // Solo paradas con carga real: una sucursal cuyas líneas quedaron en 0 (sin stock) no se visita.
+    if (sucursalesConCarga && !sucursalesConCarga.has(k)) continue;
+    sucursales.set(k, { id: l.ubicacion_destino_id, nombre: l.ubicaciones.nombre });
+  }
   const ordenadas = [...sucursales.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   if (ordenadas.length === 0) return;
 
