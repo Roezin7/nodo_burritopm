@@ -9,10 +9,12 @@ WORKDIR /app
 
 # 1) Manifests primero (mejor caché de capas). Instala TODAS las deps (incluye dev:
 #    tsc, vite y el CLI de prisma hacen falta para build y migrate).
+#    .npmrc: sin audit/fund y con reintentos de red → menos memoria y más robusto.
+COPY .npmrc ./
 COPY package*.json ./
 COPY server/package.json server/package.json
 COPY client/package.json client/package.json
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 # 2) Código y build: prisma generate + (client -> server/public, server -> server/dist)
 COPY . .
