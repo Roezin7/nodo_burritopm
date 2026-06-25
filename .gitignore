@@ -22,3 +22,6 @@ server/prisma/*.db
 
 # claude code (config local con permisos/atajos de esta máquina)
 .claude/settings.local.json
+
+# Backups de base de datos (no subir a git)
+backups/

@@ -59,17 +59,16 @@ de estados ya está diseñada).
    # opcional: datos de ejemplo (3 ubicaciones, 5 productos, usuarios Maria/Beto)
    SEED_DEMO=1 npm run seed
    ```
-3. Desarrollo (API :3000, PWA :5173 con proxy a /api):
+3. Desarrollo (API :3100, PWA :5173 con proxy a /api):
    ```bash
    npm run dev
    ```
-4. Producción local (build + servir todo desde :3000):
+4. Producción local (build + servir todo desde :3100):
    ```bash
    npm run build && npm start
    ```
 
-> Si corres **otro NODO** (p. ej. Ibérico) en el :3000, levanta este en otro puerto:
-> `PORT=3100 npm start`.
+> El puerto por defecto es **3100**. Para usar otro: `PORT=XXXX npm start`.
 
 ## Pruebas
 

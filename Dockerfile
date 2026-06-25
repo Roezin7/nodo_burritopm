@@ -20,11 +20,12 @@ RUN npm run prisma:generate -w server && npm run build
 
 # El entorno de ejecución es producción (no afecta a las capas de instalación de arriba).
 ENV NODE_ENV=production
-EXPOSE 3000
+ENV PORT=3100
+EXPOSE 3100
 
 # Healthcheck del contenedor (curl ya disponible). Coincide con el de Coolify.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
-  CMD curl -fsS http://localhost:3000/api/health || exit 1
+  CMD curl -fsS http://localhost:3100/api/health || exit 1
 
 # Migraciones + bootstrap del admin (idempotente: no duplica si ya existe) + arranque.
 CMD ["sh", "-c", "npx --workspace server prisma migrate deploy && npm run seed -w server && npm start"]
