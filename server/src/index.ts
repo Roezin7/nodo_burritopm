@@ -39,10 +39,14 @@ const csp = {
     workerSrc: ["'self'"],
     objectSrc: ["'none'"],
     frameAncestors: ["'self'"],
-    upgradeInsecureRequests: [],
+    // NO forzar HTTPS en los subrecursos: rompería el sitio servido por HTTP
+    // (los assets se "upgradearían" a https sin TLS). Inofensivo bajo HTTPS.
+    upgradeInsecureRequests: null,
   },
 };
-app.use(helmet({ contentSecurityPolicy: isProd ? csp : false }));
+// HSTS solo tiene sentido bajo HTTPS; en HTTP el navegador lo ignora. Lo dejamos
+// apagado para no forzar HTTPS mientras el dominio sea HTTP (sslip.io sin TLS).
+app.use(helmet({ contentSecurityPolicy: isProd ? csp : false, hsts: false }));
 
 // CORS: por defecto solo mismo origen (el despliegue es un solo servicio). Si se
 // define ALLOWED_ORIGINS, se habilitan esos orígenes; si no, no se emiten cabeceras
