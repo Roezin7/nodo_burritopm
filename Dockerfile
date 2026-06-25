@@ -1,4 +1,4 @@
-# Sistema Ibérico — imagen de un solo servicio (API + PWA) para Coolify/Hetzner.
+# NODO · Burrito Parrilla — imagen de un solo servicio (API + PWA) para Coolify/Hetzner.
 # Debian slim (no Alpine) para evitar problemas de Prisma con musl/openssl.
 FROM node:22-slim
 
@@ -26,5 +26,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
   CMD curl -fsS http://localhost:3000/api/health || exit 1
 
-# Aplica migraciones pendientes y arranca. migrate deploy es idempotente y seguro.
-CMD ["sh", "-c", "npx --workspace server prisma migrate deploy && npm start"]
+# Migraciones + bootstrap del admin (idempotente: no duplica si ya existe) + arranque.
+CMD ["sh", "-c", "npx --workspace server prisma migrate deploy && npm run seed -w server && npm start"]

@@ -19,10 +19,11 @@ async function main() {
   }
   console.log(`Organización: ${org.nombre} (id ${org.id})`);
 
-  // 2) Usuario administrador general (idempotente por nombre).
-  let admin = await prisma.usuarios.findFirst({ where: { negocio_id: org.id, nombre: 'Admin' } });
+  // 2) Admin de arranque: solo si NO existe ningún admin (seguro de correr en cada deploy;
+  //    no duplica si ya creaste el tuyo, p. ej. "Martin").
+  const admin = await prisma.usuarios.findFirst({ where: { negocio_id: org.id, rol: 'admin' } });
   if (!admin) {
-    admin = await prisma.usuarios.create({
+    await prisma.usuarios.create({
       data: { negocio_id: org.id, nombre: 'Admin', rol: 'admin', pin_hash: await bcrypt.hash(PIN_INICIAL, 10) },
     });
     console.log(`  + usuario admin "Admin" (PIN inicial: ${PIN_INICIAL})`);

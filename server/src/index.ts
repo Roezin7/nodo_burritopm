@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit';
 import { env, isProd } from './env.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/error.js';
+import { iniciarAvisos } from './push/scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '../public');
@@ -97,4 +98,5 @@ app.use(errorHandler);
 
 app.listen(env.PORT, () => {
   console.log(`🌯 NODO · Burrito Parrilla API + PWA escuchando en http://localhost:${env.PORT}`);
+  iniciarAvisos(); // recordatorio diario "hoy toca inventario" (si hay push configurado)
 });

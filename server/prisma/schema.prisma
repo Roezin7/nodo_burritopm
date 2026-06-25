@@ -29,6 +29,8 @@ model negocios {
   verificacion_carga Boolean  @default(false)
   // Días de la semana (0=Dom … 6=Sáb) en que se habilita el inventario para todas las ubicaciones.
   inventario_dias    Int[]    @default([])
+  // Fecha en que se envió el aviso push "hoy toca inventario" (evita duplicados al reiniciar).
+  aviso_inventario_at DateTime? @db.Date
   creado_at          DateTime @default(now()) @db.Timestamptz(6)
 
   usuarios    usuarios[]

@@ -80,9 +80,21 @@ npm test            # vitest: fórmula de abastecimiento (server/src/distribucio
 ## Despliegue (Coolify)
 
 Servicio propio + PostgreSQL propio. Build con el `Dockerfile` (single-service, Node 22-slim).
-Variables: `DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=production`, `ALLOWED_ORIGINS` (dominio),
-opcional `ANTHROPIC_API_KEY`. Healthcheck: `/api/health`. El contenedor aplica
-`prisma migrate deploy` al arrancar.
+
+**Variables de entorno (Coolify):**
+- `DATABASE_URL` — Postgres de Coolify (red interna: `...@<servicio-db>:5432/...?sslmode=disable`).
+- `JWT_SECRET` — valor largo y aleatorio.
+- `ALLOWED_ORIGINS` — el dominio público (ej. `https://abasto.burritoparrilla.com`).
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` — avisos web push
+  (`npx web-push generate-vapid-keys`). Si faltan, la app corre sin avisos.
+- `NODE_ENV=production` lo fija el Dockerfile · `PORT` lo inyecta el proxy · `ANTHROPIC_API_KEY` opcional.
+
+**HTTPS con dominio es obligatorio** para PWA/push (Coolify lo da con Let's Encrypt). En
+iPhone/iPad el push solo funciona con la **PWA instalada** (Compartir → Agregar a inicio).
+
+Al arrancar, el contenedor aplica `prisma migrate deploy` y un **seed idempotente** que crea el
+admin de arranque solo si la base no tiene ninguno (admin `Admin`, PIN `1234` — cámbialo).
+Healthcheck: `/api/health`. Datos de prueba (sucursales/usuarios): scripts en `server/scripts/`.
 
 ## Estado por bloque (Fase 1 — MVP)
 
