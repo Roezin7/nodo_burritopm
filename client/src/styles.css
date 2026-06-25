@@ -116,11 +116,19 @@ body,
   margin: 0;
   height: 100%;
 }
+html,
+body {
+  overflow-x: clip; /* iPhone: evita scroll horizontal accidental sin romper position:sticky */
+}
 body {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
   -webkit-tap-highlight-color: transparent;
+  /* iPhone: sin rebote/overscroll, sin reescalado de texto en rotación */
+  overscroll-behavior-y: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   font-size: 0.875rem;
   line-height: 1.4;
 }
@@ -319,6 +327,7 @@ table th {
   top: 0;
   align-self: start;
   height: 100vh;
+  height: 100dvh; /* iOS: alto real del viewport (sin saltos por barras) */
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -1206,7 +1215,8 @@ select:disabled {
 
 /* ---------- 14. LOGIN / LOCKSCREEN (momento firma) ---------- */
 .login {
-  min-height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1285,7 +1295,7 @@ select:disabled {
   display: flex;
   align-items: center;
   gap: 0.8rem;
-  width: min(100%, 420px);
+  width: 100%; max-width: 420px;
   text-align: left;
   padding: 0.85rem 1rem;
   border: 2px solid var(--brand);
@@ -1304,7 +1314,7 @@ select:disabled {
 
 /* Selección de usuario: buscador + lista compacta (escala a muchos usuarios) */
 .login-search {
-  width: min(100%, 420px);
+  width: 100%; max-width: 420px;
   padding: 0.7rem 1.1rem;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-pill);
@@ -1314,7 +1324,7 @@ select:disabled {
 }
 .login-search:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint); }
 .user-list {
-  width: min(100%, 420px);
+  width: 100%; max-width: 420px;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
