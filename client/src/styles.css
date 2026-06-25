@@ -1957,8 +1957,8 @@ select:disabled {
    Bloque 12 — Marca BurritoPM, flujo visual, carga total y rutas de entrega
    ========================================================================== */
 
-/* ── Lockup co-branded: NODO arriba, logo de Burrito (imagen transparente) abajo. */
-.bpm-lockup { display: flex; flex-direction: column; align-items: center; gap: 0; }
+/* ── Lockup co-branded: NODO a la izquierda y el logo de Burrito a la derecha (versión). */
+.bpm-lockup { display: flex; flex-direction: row; align-items: center; gap: 0.55rem; }
 .bpm-lockup-nodo { display: flex; align-items: center; gap: 0.5rem; }
 .bpm-lockup-word {
   font-family: var(--font-ui);
@@ -1972,11 +1972,10 @@ select:disabled {
 .bpm-logo--dark { display: none; }
 :root[data-tema='dark'] .bpm-logo--light { display: none; }
 :root[data-tema='dark'] .bpm-logo--dark { display: block; }
-/* Margen negativo: el PNG trae aire arriba; así pega el "burrito" al NODO. */
-.bpm-lockup--rail .bpm-lockup-word { font-size: 1.2rem; }
-.bpm-logo--rail { height: 48px; margin-top: -10px; }
-.bpm-lockup--full .bpm-lockup-word { font-size: 1.85rem; }
-.bpm-logo--full { height: 124px; margin-top: -16px; }
+.bpm-lockup--rail .bpm-lockup-word { font-size: 1.15rem; }
+.bpm-logo--rail { height: 34px; }
+.bpm-lockup--full .bpm-lockup-word { font-size: 1.7rem; }
+.bpm-logo--full { height: 58px; }
 
 /* ── Chips de estado de ruta/parada (color fuerte, fast-food) ──────────────── */
 .chip--accent { background: var(--accent-tint); color: var(--accent); }
