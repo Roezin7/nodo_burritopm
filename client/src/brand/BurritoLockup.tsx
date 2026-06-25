@@ -1,7 +1,7 @@
 import NodoIsotipo from './NodoIsotipo';
 
 interface Props {
-  /** Tamaño del isotipo en px. */
+  /** Tamaño del isotipo NODO en px. */
   size?: number;
   /** 'rail' (compacto, nav lateral), 'full' (login/splash). */
   variante?: 'rail' | 'full';
@@ -9,18 +9,15 @@ interface Props {
   glow?: boolean;
 }
 
-/**
- * Lockup de marca fiel al logo real: "burrito" en script verde sobre "PARRILLA MEXICANA",
- * acompañado del isotipo NODO (marca de la plataforma).
- */
+/** Lockup co-branded: NODO (isotipo + wordmark) arriba y el logo de Burrito abajo. */
 export default function BurritoLockup({ size = 32, variante = 'rail', animated = false, glow = false }: Props) {
   return (
     <div className={`bpm-lockup bpm-lockup--${variante}`}>
-      <NodoIsotipo size={size} animated={animated} glow={glow} />
-      <div className="bpm-lockup-text">
-        <span className="bpm-wm-burrito">burrito</span>
-        <span className="bpm-wm-sub">Parrilla Mexicana<sup>®</sup></span>
+      <div className="bpm-lockup-nodo">
+        <NodoIsotipo size={size} animated={animated} glow={glow} />
+        <span className="bpm-lockup-word">NODO</span>
       </div>
+      <img className={`bpm-logo bpm-logo--${variante}`} src="/burrito-logo.png" alt="Burrito Parrilla Mexicana" draggable={false} />
     </div>
   );
 }

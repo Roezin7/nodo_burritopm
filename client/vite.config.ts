@@ -12,7 +12,7 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'burrito-logo.png'],
       injectManifest: {
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },

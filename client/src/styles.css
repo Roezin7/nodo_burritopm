@@ -1957,29 +1957,22 @@ select:disabled {
    Bloque 12 — Marca BurritoPM, flujo visual, carga total y rutas de entrega
    ========================================================================== */
 
-/* ── Lockup de marca: "burrito" script + PARRILLA MEXICANA (fiel al logo) ────── */
-.bpm-lockup { display: flex; align-items: center; gap: 0.6rem; }
-.bpm-lockup-text { display: flex; flex-direction: column; line-height: 1; }
-.bpm-wm-burrito {
-  font-family: var(--font-script);
-  font-weight: 400;
-  font-size: 1.95rem;
-  line-height: 0.8;
-  color: var(--logo-verde);
-  padding-right: 0.12em; /* la cola de la 'o' del script */
-}
-.bpm-wm-sub {
+/* ── Lockup co-branded: NODO arriba, logo de Burrito (imagen transparente) abajo. */
+.bpm-lockup { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.bpm-lockup-nodo { display: flex; align-items: center; gap: 0.5rem; }
+.bpm-lockup-word {
   font-family: var(--font-ui);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.5rem;
-  color: var(--ink-2);
-  margin-top: 0.18rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--ink);
+  line-height: 1;
 }
-.bpm-wm-sub sup { font-size: 0.7em; }
-.bpm-lockup--full .bpm-wm-burrito { font-size: 3.1rem; }
-.bpm-lockup--full .bpm-wm-sub { font-size: 0.8rem; letter-spacing: 0.22em; margin-top: 0.3rem; }
+.bpm-logo { display: block; width: auto; object-fit: contain; user-select: none; }
+.bpm-lockup--rail { gap: 0.3rem; }
+.bpm-lockup--rail .bpm-lockup-word { font-size: 1.2rem; }
+.bpm-logo--rail { height: 30px; }
+.bpm-lockup--full .bpm-lockup-word { font-size: 1.8rem; }
+.bpm-logo--full { height: 88px; }
 
 /* ── Chips de estado de ruta/parada (color fuerte, fast-food) ──────────────── */
 .chip--accent { background: var(--accent-tint); color: var(--accent); }
