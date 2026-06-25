@@ -141,11 +141,104 @@ export async function listarDistribuciones(negocioId: bigint) {
   });
   return ds.map((d) => ({
     id: Number(d.id),
+    nombre: d.nombre,
     estado: d.estado,
     creado_at: d.creado_at.toISOString(),
     aprobado_at: d.aprobado_at?.toISOString() ?? null,
     total_lineas: d._count.lineas,
   }));
+}
+
+/** Renombra la distribución (etiqueta libre del admin). No toca inventario ni estado. */
+export async function renombrarDistribucion(negocioId: bigint, id: bigint, nombre: string) {
+  await cargarDistribucion(negocioId, id);
+  const limpio = nombre.trim().slice(0, 120);
+  await prisma.distribuciones.update({ where: { id }, data: { nombre: limpio || null } });
+  return { ok: true, nombre: limpio || null };
+}
+
+/**
+ * Elimina una distribución y TODO lo relacionado (líneas, rutas y paradas por cascada;
+ * incidencias por borrado explícito), devolviendo el inventario a la bodega central para que
+ * nunca quede descuadre. La reversa es FÍSICA (lo que de verdad se movió), no contable:
+ *   - Línea ya recibida en sucursal → se devuelve a bodega lo que aún tenga la sucursal
+ *     (min(recibido, disponible_actual)); lo que la sucursal ya consumió no se inventa.
+ *   - Línea en tránsito (cargada, no recibida) → regresa de tránsito a disponible de bodega.
+ *   - Línea sin cargar → no movió inventario, nada que revertir.
+ * Todo en una sola transacción e idempotente por movimiento.
+ */
+export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuarioId: bigint) {
+  await cargarDistribucion(negocioId, id);
+  const bodega = await bodegaDe(negocioId);
+  const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
+  const sello = Date.now(); // permite distinguir reversas si se reintenta
+
+  await prisma.$transaction(async (tx) => {
+    for (const l of lineas) {
+      const costo = num(l.costo_unitario);
+      const recibida = num(l.cantidad_recibida);
+      const cargada = num(l.cantidad_cargada);
+
+      if (recibida != null) {
+        // Ya está en la sucursal: devolvemos a bodega lo que físicamente siga allí.
+        const sucEx = await tx.existencias.findUnique({
+          where: { ubicacion_id_product_id: { ubicacion_id: l.ubicacion_destino_id, product_id: l.product_id } },
+        });
+        const enSuc = Math.max(0, num0(sucEx?.cantidad_disponible));
+        const devolver = redondear3(Math.min(recibida, enSuc));
+        if (devolver > 0) {
+          await aplicarMovimiento(tx, {
+            negocioId,
+            productId: l.product_id,
+            tipo: 'cancelacion',
+            cantidad: devolver,
+            usuarioId,
+            origenId: l.ubicacion_destino_id,
+            destinoId: bodega.id,
+            costoUnitario: costo,
+            documentoTipo: 'distribucion_eliminada',
+            documentoId: id,
+            comentario: 'Devolución a bodega por distribución eliminada',
+            idempotencyKey: `del:${id}:${l.id}:${sello}`,
+            deltas: [
+              { ubicacionId: l.ubicacion_destino_id, productId: l.product_id, disponible: -devolver },
+              { ubicacionId: bodega.id, productId: l.product_id, disponible: devolver, costoUnitario: costo },
+            ],
+          });
+        }
+      } else if (cargada != null && cargada > 0) {
+        // En tránsito: regresa de tránsito a disponible en la bodega (sin negativos).
+        const bodEx = await tx.existencias.findUnique({
+          where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: l.product_id } },
+        });
+        const enTransito = Math.max(0, num0(bodEx?.cantidad_transito));
+        const devolver = redondear3(Math.min(cargada, enTransito));
+        if (devolver > 0) {
+          await aplicarMovimiento(tx, {
+            negocioId,
+            productId: l.product_id,
+            tipo: 'cancelacion',
+            cantidad: devolver,
+            usuarioId,
+            origenId: bodega.id,
+            destinoId: bodega.id,
+            costoUnitario: costo,
+            documentoTipo: 'distribucion_eliminada',
+            documentoId: id,
+            comentario: 'Regreso de tránsito a disponible por distribución eliminada',
+            idempotencyKey: `del:${id}:${l.id}:${sello}`,
+            deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: devolver, transito: -devolver }],
+          });
+        }
+      }
+    }
+    // Incidencias atadas a esta distribución (no tienen FK, se borran a mano).
+    await tx.incidencias.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'distribucion', documento_id: id } });
+    // La distribución arrastra por cascada: líneas, rutas y paradas.
+    await tx.distribuciones.delete({ where: { id } });
+  });
+
+  return { ok: true };
 }
 
 async function cargarDistribucion(negocioId: bigint, id: bigint) {
@@ -225,7 +318,7 @@ export async function consolidado(negocioId: bigint, id: bigint, vista: 'product
       g.subtotal = Math.round((g.subtotal + v) * 100) / 100;
     }
     const grupos = [...m.values()].sort((a, b) => a.ubicacion.nombre.localeCompare(b.ubicacion.nombre, 'es'));
-    return { estado: dist.estado, vista, grupos, total: redondear2(grupos.reduce((a, g) => a + g.subtotal, 0)) };
+    return { estado: dist.estado, nombre: dist.nombre, vista, grupos, total: redondear2(grupos.reduce((a, g) => a + g.subtotal, 0)) };
   }
 
   // vista === 'producto'
@@ -268,6 +361,7 @@ export async function consolidado(negocioId: bigint, id: bigint, vista: 'product
   items.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   return {
     estado: dist.estado,
+    nombre: dist.nombre,
     vista,
     items,
     total_valor: redondear2(items.reduce((a, i) => a + i.valor, 0)),

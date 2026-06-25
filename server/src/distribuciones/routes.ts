@@ -128,6 +128,27 @@ distribucionesRouter.post(
   }),
 );
 
+/** PATCH /distribuciones/:id { nombre } — renombra la distribución (etiqueta del admin). */
+distribucionesRouter.patch(
+  '/:id',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const { nombre } = z.object({ nombre: z.string().trim().max(120) }).parse(req.body);
+    res.json(await svc.renombrarDistribucion(req.auth!.negocioId, id, nombre));
+  }),
+);
+
+/** DELETE /distribuciones/:id — elimina la distribución y devuelve el inventario a bodega. */
+distribucionesRouter.delete(
+  '/:id',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.eliminarDistribucion(req.auth!.negocioId, id, req.auth!.usuarioId));
+  }),
+);
+
 // ───────── Operación de bodega (admin + encargado_bodega) ─────────
 
 /** GET /distribuciones/:id/operacion — líneas con cantidades por etapa, por sucursal. */

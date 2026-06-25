@@ -5,11 +5,14 @@ import { EstadoDistChip, ParadaChip, FlujoStepper } from '../../flujo';
 
 interface DistResumen {
   id: number;
+  nombre: string | null;
   estado: string;
   creado_at: string;
   aprobado_at: string | null;
   total_lineas: number;
 }
+
+const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Distribución #${d.id}`;
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 
@@ -83,7 +86,7 @@ export default function Distribucion() {
             <button key={d.id} className="card card-click" onClick={() => setAbierta(d.id)}>
               <div className="ubic-row">
                 <div>
-                  <strong>Distribución #{d.id}</strong> <EstadoDistChip estado={d.estado} />
+                  <strong>{tituloDist(d)}</strong> <EstadoDistChip estado={d.estado} />
                   <div className="muted">
                     {new Date(d.creado_at).toLocaleString('es-MX', { timeZone: 'America/Chicago' })} · {d.total_lineas} líneas
                   </div>
@@ -115,6 +118,7 @@ interface SucItem {
 }
 interface VistaSucursal {
   estado: string;
+  nombre: string | null;
   vista: 'sucursal';
   grupos: { ubicacion: { id: number; nombre: string }; items: SucItem[]; subtotal: number }[];
   total: number;
@@ -134,6 +138,7 @@ interface ProdItem {
 }
 interface VistaProducto {
   estado: string;
+  nombre: string | null;
   vista: 'producto';
   items: ProdItem[];
   total_valor: number;
@@ -151,8 +156,9 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // El estado lo conocemos de cualquier vista ya cargada.
+  // El estado y el nombre los conocemos de cualquier vista ya cargada.
   const estado = prod?.estado ?? suc?.estado;
+  const nombre = prod?.nombre ?? suc?.nombre ?? null;
   const editable = estado === 'calculada' || estado === 'en_revision';
   const puedeRuta = estado != null && !['calculada', 'en_revision'].includes(estado);
 
@@ -185,6 +191,35 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
     }
   }
 
+  async function renombrar() {
+    const actual = nombre ?? '';
+    const nuevo = window.prompt('Nombre de la distribución (vacío para quitar):', actual);
+    if (nuevo == null || nuevo.trim() === actual) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/distribuciones/${id}`, { method: 'PATCH', body: { nombre: nuevo.trim() } });
+      await cargar();
+      toast.ok('Distribución renombrada.');
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo renombrar.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function eliminar() {
+    if (!window.confirm('¿Eliminar esta distribución? Se devolverá a la bodega central el inventario que las sucursales aún tengan de ella y se borrarán su ruta e incidencias. No se puede deshacer.')) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/distribuciones/${id}`, { method: 'DELETE' });
+      toast.ok('Distribución eliminada · inventario devuelto a bodega.');
+      onSalir();
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo eliminar.'));
+      setBusy(false);
+    }
+  }
+
   async function aprobar() {
     setBusy(true); setError('');
     try {
@@ -210,7 +245,12 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
       <header className="page-head">
         <div>
           <button className="link-btn" onClick={onSalir}>← Distribuciones</button>
-          <h1>Distribución #{id} {estado && <EstadoDistChip estado={estado} />}</h1>
+          <h1>{nombre?.trim() || `Distribución #${id}`} {estado && <EstadoDistChip estado={estado} />}</h1>
+          {nombre?.trim() && <p className="page-sub">Distribución #{id}</p>}
+        </div>
+        <div className="dist-acciones">
+          <button className="btn btn-secondary" disabled={busy} onClick={() => void renombrar()}>Renombrar</button>
+          <button className="btn btn-danger" disabled={busy} onClick={() => void eliminar()}>Eliminar</button>
         </div>
       </header>
 

@@ -1934,6 +1934,8 @@ select:disabled {
 .card--falt { border-color: color-mix(in srgb, #c0392b 45%, var(--border)); }
 .txt-danger { color: #c0392b; font-weight: 600; }
 .dist-valor { font-family: var(--font-mono, monospace); font-weight: 600; white-space: nowrap; }
+.dist-acciones { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.dist-acciones .btn { padding: 0.4rem 0.7rem; }
 .dist-suc-mini { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; font-size: 0.8rem; color: var(--muted); }
 .dist-suc-mini span { background: var(--surface-2, rgba(127,127,127,0.12)); padding: 0.1rem 0.4rem; border-radius: 6px; }
 .dist-row {
