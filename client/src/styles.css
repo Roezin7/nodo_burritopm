@@ -1966,13 +1966,6 @@ select:disabled {
   font-size: 1.95rem;
   line-height: 0.8;
   color: var(--logo-verde);
-  /* Borde oscuro + sombra como en el logo real (idéntico en ambos modos). */
-  text-shadow:
-    -0.5px -0.5px 0 #23310f,
-     0.5px -0.5px 0 #23310f,
-    -0.5px  0.5px 0 #23310f,
-     0.5px  0.5px 0 #23310f,
-     1.5px 2px 2.5px rgba(0, 0, 0, 0.35);
   padding-right: 0.12em; /* la cola de la 'o' del script */
 }
 .bpm-wm-sub {
