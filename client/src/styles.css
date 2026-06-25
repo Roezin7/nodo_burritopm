@@ -2542,3 +2542,26 @@ a.flujo-paso { text-decoration: none; }
   .ruta-page .parada-card, .parada-card--actual, .exito-circ, .exito-tick { animation: none !important; }
   .exito-circ, .exito-tick { stroke-dashoffset: 0; }
 }
+
+/* Inventario v4 — stock compacto, lista de sucursales con $, agregar entrada */
+.stock-card2 { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); margin: 0.8rem 0; overflow: hidden; }
+.stock-card2-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; width: 100%; padding: 0.7rem 0.9rem; background: none; border: 0; font: inherit; color: var(--ink); cursor: pointer; }
+.stock-card2-meta { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; min-width: 0; }
+.stock-card2-name { font-weight: 700; }
+.stock-card2-right { display: inline-flex; align-items: center; gap: 0.5rem; flex: 0 0 auto; }
+.stock-card2-valor { font-size: 1.1rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; }
+.stock-card2-caret { color: var(--ink-3); transition: transform 0.16s; }
+.stock-card2-caret.is-open { transform: rotate(180deg); }
+.stock-card2 .stock-card-body { padding: 0 0.9rem 0.8rem; }
+
+.suc-row { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.suc-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.suc-row-val { font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+
+.btn-entrada { width: 100%; margin: 0.2rem 0 0.6rem; }
+.entrada-card { margin-bottom: 0.8rem; }
+.entrada-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-top: 0.6rem; }
+.entrada-campos .retiro-label { margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+@media (max-width: 460px) { .entrada-campos { grid-template-columns: 1fr; } }
+
+.btn-conciliar { display: inline-flex; margin: 0.2rem 0 0.4rem; }

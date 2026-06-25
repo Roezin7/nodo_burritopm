@@ -65,8 +65,14 @@ export default function Inventario() {
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Admin: vista central de bodega (default) o revisión de sucursales.
+  const [modo, setModo] = useState<'bodega' | 'sucursales'>('bodega');
+  const [stockKey, setStockKey] = useState(0); // fuerza recarga del stock tras una entrada
 
-  // Cargar ubicaciones disponibles según rol.
+  const bodega = ubicaciones.find((u) => u.tipo === 'bodega') ?? null;
+  const sucursales = ubicaciones.filter((u) => u.tipo === 'sucursal');
+
+  // Cargar ubicaciones disponibles según rol. El admin entra centrado en la Bodega.
   useEffect(() => {
     async function cargarUbic() {
       try {
@@ -74,7 +80,8 @@ export default function Inventario() {
           const us = await api<{ id: number; nombre: string; tipo: 'bodega' | 'sucursal'; activo: boolean }[]>('/ubicaciones');
           const activas = us.filter((u) => u.activo).map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo, activo: u.activo }));
           setUbicaciones(activas);
-          if (activas[0]) setUbicId(String(activas[0].id));
+          const bod = activas.find((u) => u.tipo === 'bodega');
+          setUbicId(String((bod ?? activas[0])?.id ?? ''));
         } else {
           const asignadas = usuario?.ubicaciones ?? [];
           setUbicaciones(asignadas);
@@ -138,6 +145,80 @@ export default function Inventario() {
   const t = q.trim().toLowerCase();
   const histFiltrado = inventarios.filter((c) => !t || fechaLarga(c.fecha).toLowerCase().includes(t) || c.estado.toLowerCase().includes(t));
 
+  // Bloque reutilizable: sesión de hoy + historial. `promo`=false oculta el aviso de "abrir
+  // inventario" (lo usamos en la bodega central, donde estorba).
+  const renderSeccion = (promo: boolean) => (
+    <>
+      {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} discreto={!promo} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
+      <h3 className="seccion-title">Historial de inventarios</h3>
+      {inventarios.length > 8 && (
+        <input className="inv-search" type="search" placeholder="Buscar por fecha…" value={q} onChange={(e) => setQ(e.target.value)} />
+      )}
+      {histFiltrado.length === 0 ? (
+        <p className="muted">{inventarios.length === 0 ? 'Aún no hay inventarios en esta ubicación.' : 'Sin coincidencias.'}</p>
+      ) : (
+        <div className="lista-ubicaciones">
+          {histFiltrado.map((c) => (
+            <button key={c.id} className="card card-click" onClick={() => void abrir(c.id)}>
+              <div className="ubic-row">
+                <div>
+                  <strong className="inv-fecha-titulo">Inventario {fechaLarga(c.fecha)}</strong>{' '}
+                  <EstadoChip estado={c.estado} />
+                  <div className="muted">{c.contadas}/{c.total_lineas} contados</div>
+                </div>
+                <span className="muted">›</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  // ── Admin: bodega central (gestiona) + revisión de sucursales ──────────────
+  if (esAdmin) {
+    const enSucursal = modo === 'sucursales' && ubicId && bodega && ubicId !== String(bodega.id);
+    const nombreActivo = ubicaciones.find((u) => String(u.id) === ubicId)?.nombre ?? '';
+    return (
+      <div className="page">
+        <header className="page-head">
+          <div>
+            <h1>Inventario</h1>
+            <p className="page-sub">Gestiona el inventario de la bodega central y revisa el de cada sucursal.</p>
+          </div>
+        </header>
+        <FlujoStepper activo="conteo" />
+
+        <div className="tabs">
+          <button className={modo === 'bodega' ? 'tab tab--on' : 'tab'} onClick={() => { setModo('bodega'); if (bodega) setUbicId(String(bodega.id)); }}>Bodega central</button>
+          <button className={modo === 'sucursales' ? 'tab tab--on' : 'tab'} onClick={() => { setModo('sucursales'); setUbicId(''); }}>Sucursales</button>
+        </div>
+        {error && <p className="error-msg">{error}</p>}
+
+        {modo === 'bodega' ? (
+          bodega ? (
+            <>
+              <StockActual key={`${bodega.id}:${stockKey}`} ubicId={String(bodega.id)} nombre={bodega.nombre} abiertoDefault />
+              <AgregarEntrada onHecho={() => { setStockKey((k) => k + 1); void cargarUbicacion(String(bodega.id)); }} />
+              {renderSeccion(false)}
+            </>
+          ) : (
+            <p className="muted">No hay una bodega central activa.</p>
+          )
+        ) : enSucursal ? (
+          <>
+            <button className="link-btn" onClick={() => setUbicId('')}>← Todas las sucursales</button>
+            <StockActual key={`${ubicId}:${stockKey}`} ubicId={ubicId} nombre={nombreActivo} />
+            {renderSeccion(true)}
+          </>
+        ) : (
+          <SucursalesOverview sucursales={sucursales} onElegir={setUbicId} />
+        )}
+      </div>
+    );
+  }
+
+  // ── Sucursal / bodega-reparto: su propia ubicación ─────────────────────────
   return (
     <div className="page">
       <header className="page-head">
@@ -152,46 +233,18 @@ export default function Inventario() {
         <p className="muted">No tienes ubicaciones asignadas. Pide a un administrador que te asigne una.</p>
       ) : (
         <>
-          {esAdmin && <ValuacionAdmin onElegir={setUbicId} />}
           <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
-
-          {/* Valor e inventario actual de la ubicación seleccionada */}
-          {ubicId && <StockActual ubicId={ubicId} nombre={ubicaciones.find((u) => String(u.id) === ubicId)?.nombre ?? ''} />}
-
-          {/* Tarjeta de la sesión de hoy */}
-          {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
-
-          <h3 className="seccion-title">Historial de inventarios</h3>
-          {inventarios.length > 8 && (
-            <input className="inv-search" type="search" placeholder="Buscar por fecha…" value={q} onChange={(e) => setQ(e.target.value)} />
-          )}
-          {histFiltrado.length === 0 ? (
-            <p className="muted">{inventarios.length === 0 ? 'Aún no hay inventarios en esta ubicación.' : 'Sin coincidencias.'}</p>
-          ) : (
-            <div className="lista-ubicaciones">
-              {histFiltrado.map((c) => (
-                <button key={c.id} className="card card-click" onClick={() => void abrir(c.id)}>
-                  <div className="ubic-row">
-                    <div>
-                      <strong className="inv-fecha-titulo">Inventario {fechaLarga(c.fecha)}</strong>{' '}
-                      <EstadoChip estado={c.estado} />
-                      <div className="muted">{c.contadas}/{c.total_lineas} contados</div>
-                    </div>
-                    <span className="muted">›</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          {ubicId && <StockActual key={ubicId} ubicId={ubicId} nombre={ubicaciones.find((u) => String(u.id) === ubicId)?.nombre ?? ''} />}
+          {renderSeccion(true)}
         </>
       )}
     </div>
   );
 }
 
-/** Tarjeta de la sesión de inventario de hoy. */
-function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir }: { sesion: Sesion; esAdmin: boolean; busy: boolean; onTomar: () => void; onAbrir: (id: number) => void }) {
+/** Tarjeta de la sesión de inventario de hoy. `discreto` oculta el aviso grande de "abrir". */
+function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir, discreto = false }: { sesion: Sesion; esAdmin: boolean; busy: boolean; onTomar: () => void; onAbrir: (id: number) => void; discreto?: boolean }) {
   const c = sesion.conteo;
   const cerrado = c?.estado === 'cerrado';
 
@@ -207,6 +260,15 @@ function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir }: { sesion: Sesion; 
           {cerrado ? 'Ver inventario' : 'Continuar inventario'}
         </button>
       </div>
+    );
+  }
+
+  // Modo discreto (bodega central): sin el aviso grande de "abrir"; solo un botón pequeño.
+  if (discreto) {
+    return (
+      <button className="btn btn-secondary btn-sm btn-conciliar" disabled={busy} onClick={onTomar}>
+        Tomar inventario para corregir cantidades
+      </button>
     );
   }
 
@@ -241,16 +303,16 @@ const usd = (n: number) => `$${n.toLocaleString('es-MX', { minimumFractionDigits
 interface ExistItem { product_id: number; nombre: string; unidad: string; disponible: number; costo_promedio: number | null; valor: number }
 interface ExistResp { items: ExistItem[]; valor_total: number }
 
-/** Valor del inventario y stock actual de la ubicación seleccionada (en vivo, desde existencias). */
-function StockActual({ ubicId, nombre }: { ubicId: string; nombre: string }) {
+/** Valor del inventario y stock actual de la ubicación (en vivo, desde existencias). Compacto. */
+function StockActual({ ubicId, nombre, abiertoDefault = false }: { ubicId: string; nombre: string; abiertoDefault?: boolean }) {
   const [data, setData] = useState<ExistResp | null>(null);
-  const [abierto, setAbierto] = useState(false);
+  const [abierto, setAbierto] = useState(abiertoDefault);
   const [q, setQ] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     let vivo = true;
-    setData(null); setError(''); setAbierto(false);
+    setData(null); setError('');
     api<ExistResp>(`/existencias?ubicacion=${ubicId}`)
       .then((r) => { if (vivo) setData(r); })
       .catch(() => { if (vivo) setError('No se pudo cargar el inventario actual'); });
@@ -263,16 +325,16 @@ function StockActual({ ubicId, nombre }: { ubicId: string; nombre: string }) {
   const vis = conStock.filter((i) => !t || i.nombre.toLowerCase().includes(t));
 
   return (
-    <div className="stock-card">
-      <div className="stock-card-top">
-        <div>
-          <span className="stock-card-label">Valor del inventario · {nombre}</span>
-          <div className="stock-card-valor">{data ? usd(data.valor_total) : '—'}</div>
-        </div>
-        <span className="stock-card-skus">{conStock.length} productos con stock</span>
-      </div>
-      <button type="button" className="stock-card-toggle" onClick={() => setAbierto((v) => !v)}>
-        {abierto ? 'Ocultar inventario actual' : 'Ver inventario actual'} <span className={abierto ? 'is-open' : ''}>▾</span>
+    <div className="stock-card2">
+      <button type="button" className="stock-card2-head" onClick={() => setAbierto((v) => !v)}>
+        <span className="stock-card2-meta">
+          <span className="stock-card2-name">{nombre}</span>
+          <span className="muted">{conStock.length} con stock</span>
+        </span>
+        <span className="stock-card2-right">
+          <span className="stock-card2-valor">{data ? usd(data.valor_total) : '—'}</span>
+          <span className={`stock-card2-caret ${abierto ? 'is-open' : ''}`}>▾</span>
+        </span>
       </button>
       {abierto && (
         <div className="stock-card-body">
@@ -298,35 +360,115 @@ function StockActual({ ubicId, nombre }: { ubicId: string; nombre: string }) {
 
 interface ValuacionResp { ubicaciones: { id: number; nombre: string; tipo: string; skus: number; valor: number }[]; valor_total: number }
 
-/** Panorama del admin: dinero en inventario en cada ubicación (bodega + sucursales). */
-function ValuacionAdmin({ onElegir }: { onElegir: (id: string) => void }) {
-  const [data, setData] = useState<ValuacionResp | null>(null);
-  const [abierto, setAbierto] = useState(false);
-  useEffect(() => { api<ValuacionResp>('/existencias/valuacion').then(setData).catch(() => {}); }, []);
-  if (!data) return null;
-  const orden = [...data.ubicaciones].sort((a, b) => b.valor - a.valor);
+/** Lista compacta de sucursales con su dinero en inventario; tocar una abre su detalle. */
+function SucursalesOverview({ sucursales, onElegir }: { sucursales: UbicacionAsignada[]; onElegir: (id: string) => void }) {
+  const [val, setVal] = useState<ValuacionResp | null>(null);
+  useEffect(() => { api<ValuacionResp>('/existencias/valuacion').then(setVal).catch(() => {}); }, []);
+  const valorDe = new Map((val?.ubicaciones ?? []).map((u) => [u.id, u]));
+  const lista = [...sucursales].sort((a, b) => (valorDe.get(b.id)?.valor ?? 0) - (valorDe.get(a.id)?.valor ?? 0));
+
   return (
-    <div className="valuacion-card">
-      <button type="button" className="valuacion-head" onClick={() => setAbierto((v) => !v)}>
-        <span>
-          <span className="valuacion-label">Dinero en inventario (todas las ubicaciones)</span>
-          <strong className="valuacion-total">{usd(data.valor_total)}</strong>
-        </span>
-        <span className={`valuacion-caret ${abierto ? 'is-open' : ''}`}>▾</span>
-      </button>
-      {abierto && (
-        <div className="valuacion-body">
-          {orden.map((u) => (
-            <button key={u.id} type="button" className="valuacion-row" onClick={() => onElegir(String(u.id))}>
-              <span className="valuacion-row-name">
-                {u.tipo === 'bodega' && <span className="ubic-pill-tag">Bodega</span>}{u.nombre}
-              </span>
-              <span className="muted">{u.skus} prod.</span>
-              <span className="valuacion-row-val">{usd(u.valor)}</span>
+    <div className="lista-ubicaciones">
+      {lista.length === 0 ? (
+        <p className="muted">No hay sucursales activas.</p>
+      ) : (
+        lista.map((s) => {
+          const v = valorDe.get(s.id);
+          return (
+            <button key={s.id} className="card card-click suc-row" onClick={() => onElegir(String(s.id))}>
+              <span className="suc-row-name"><strong>{s.nombre}</strong>{v && <small className="muted"> · {v.skus} prod.</small>}</span>
+              <span className="suc-row-val">{v ? usd(v.valor) : '—'}</span>
             </button>
-          ))}
-        </div>
+          );
+        })
       )}
+    </div>
+  );
+}
+
+interface ProdCat { id: number; nombre: string; sku: string; unidad_distribucion: string; activo: boolean }
+
+/** Agregar entrada a la bodega central (compra/recepción): sube stock y recalcula costo. */
+function AgregarEntrada({ onHecho }: { onHecho: () => void }) {
+  const toast = useToast();
+  const [abierto, setAbierto] = useState(false);
+  const [productos, setProductos] = useState<ProdCat[]>([]);
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState<ProdCat | null>(null);
+  const [cantidad, setCantidad] = useState('');
+  const [costo, setCosto] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!abierto || productos.length) return;
+    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo))).catch(() => {});
+  }, [abierto, productos.length]);
+
+  const resultados = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return [];
+    return productos.filter((p) => p.nombre.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t)).slice(0, 8);
+  }, [q, productos]);
+
+  function limpiar() { setSel(null); setQ(''); setCantidad(''); setCosto(''); }
+
+  async function registrar() {
+    const c = Number(cantidad);
+    if (!sel || !(c > 0)) { setError('Elige producto y cantidad'); return; }
+    setBusy(true); setError('');
+    try {
+      await api('/existencias/ingreso', { method: 'POST', body: { product_id: sel.id, cantidad: c, costo_unitario: costo ? Number(costo) : null } });
+      toast.ok(`+${c} ${sel.unidad_distribucion} de ${sel.nombre} a bodega.`);
+      limpiar();
+      onHecho();
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo registrar la entrada.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!abierto) {
+    return <button type="button" className="btn btn-secondary btn-entrada" onClick={() => setAbierto(true)}>+ Agregar entrada a bodega</button>;
+  }
+
+  return (
+    <div className="card entrada-card">
+      <div className="card-head"><strong>Agregar entrada a bodega</strong><button className="link-btn" onClick={() => { setAbierto(false); limpiar(); setError(''); }}>Cerrar</button></div>
+      {error && <p className="error-msg">{error}</p>}
+      {sel ? (
+        <div className="retiro-sel">
+          <span><strong>{sel.nombre}</strong> <small className="muted">{sel.unidad_distribucion} · {sel.sku}</small></span>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSel(null); setQ(''); }}>Cambiar</button>
+        </div>
+      ) : (
+        <>
+          <input className="inv-search" type="search" placeholder="Buscar producto o SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
+          {resultados.length > 0 && (
+            <div className="retiro-resultados">
+              {resultados.map((p) => (
+                <button key={p.id} className="retiro-resultado" onClick={() => { setSel(p); setQ(''); }}>
+                  <strong>{p.nombre}</strong> <small className="muted">{p.unidad_distribucion} · {p.sku}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          {q.trim() && resultados.length === 0 && <p className="muted">Sin coincidencias.</p>}
+        </>
+      )}
+      <div className="entrada-campos">
+        <label className="retiro-label">Cantidad{sel ? ` (${sel.unidad_distribucion})` : ''}
+          <input className="conteo-input2" inputMode="decimal" value={cantidad} placeholder="0" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCantidad(e.target.value)} />
+        </label>
+        <label className="retiro-label">Costo unitario (opcional)
+          <input className="conteo-input2" inputMode="decimal" value={costo} placeholder="0.00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCosto(e.target.value)} />
+        </label>
+      </div>
+      <div className="form-actions" style={{ marginTop: '0.7rem' }}>
+        <button className="btn btn-primary" disabled={busy || !sel || !(Number(cantidad) > 0)} onClick={() => void registrar()}>Registrar entrada</button>
+      </div>
+      <p className="muted" style={{ marginTop: '0.4rem' }}>Para corregir cantidades exactas usa <strong>Tomar/continuar inventario</strong> (concilia el stock).</p>
     </div>
   );
 }

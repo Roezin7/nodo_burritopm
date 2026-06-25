@@ -293,6 +293,8 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
 // ───────────────────── Monitor del admin (rutas activas en vivo) ─────────────
 function MonitorRutas() {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
+  const [historial, setHistorial] = useState<RutaDetalle[]>([]);
+  const [tab, setTab] = useState<'activas' | 'historial'>('activas');
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [actualizado, setActualizado] = useState<Date | null>(null);
@@ -315,12 +317,16 @@ function MonitorRutas() {
     const t = setInterval(() => void cargar(), 15000); // auto-refresco cada 15 s
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (tab !== 'historial' || historial.length) return;
+    api<(RutaDetalle | null)[]>('/rutas/historial').then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
+  }, [tab, historial.length]);
 
   return (
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Rutas activas</h1>
+          <h1>Rutas</h1>
           <p className="page-sub">
             En vivo: dónde va cada camión y qué sucursal sigue.
             {actualizado && <> · actualizado {hora(actualizado.toISOString())}</>}
@@ -328,9 +334,20 @@ function MonitorRutas() {
         </div>
       </header>
       <FlujoStepper activo="ruta" />
+
+      <div className="tabs">
+        <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>Activas ({rutas.length})</button>
+        <button className={tab === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setTab('historial')}>Historial</button>
+      </div>
       {error && <p className="error-msg">{error}</p>}
 
-      {cargando ? (
+      {tab === 'historial' ? (
+        historial.length === 0 ? (
+          <div className="card"><p className="muted">Aún no hay rutas completadas.</p></div>
+        ) : (
+          historial.map((r) => <MonitorRutaCard key={r.ruta_id} ruta={r} historico />)
+        )
+      ) : cargando ? (
         <p className="muted">Cargando…</p>
       ) : rutas.length === 0 ? (
         <div className="card"><p className="muted">No hay rutas en curso ahora mismo. Aparecerán aquí cuando un camión salga de bodega.</p></div>
@@ -341,23 +358,26 @@ function MonitorRutas() {
   );
 }
 
-function MonitorRutaCard({ ruta }: { ruta: RutaDetalle }) {
+function MonitorRutaCard({ ruta, historico = false }: { ruta: RutaDetalle; historico?: boolean }) {
   const paradas = [...ruta.paradas].sort((a, b) => a.orden - b.orden);
   const total = paradas.length;
   const hechas = paradas.filter((p) => cerrada(p.estado)).length;
   const pct = total ? Math.round((hechas / total) * 100) : 0;
   const actual = paradas.find((p) => !cerrada(p.estado)) ?? null;
   const ultimaEntregada = [...paradas].reverse().find((p) => p.entregada_at);
+  const conIncidencia = paradas.filter((p) => p.estado === 'con_incidencia').length;
 
   return (
     <div className="card monitor-ruta">
       <div className="card-head">
         <strong>{ruta.nombre ?? `Ruta #${ruta.ruta_id}`}</strong>
-        <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}</span>
+        <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}{historico && ruta.despachada_at ? ` · ${new Date(ruta.despachada_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' })}` : ''}</span>
       </div>
 
       <div className="monitor-estado">
-        {actual ? (
+        {historico ? (
+          <span className="monitor-actual"><span className="ruta-dot ruta-dot--confirmada" /> Completada · {total} paradas{conIncidencia > 0 ? ` · ${conIncidencia} con incidencia` : ''}</span>
+        ) : actual ? (
           <span className="monitor-actual"><span className="ruta-dot ruta-dot--en_camino" /> En camino a <strong>{actual.ubicacion.nombre}</strong> (parada {actual.orden} de {total})</span>
         ) : (
           <span className="monitor-actual"><span className="ruta-dot ruta-dot--confirmada" /> Ruta completada</span>
