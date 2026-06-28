@@ -122,3 +122,15 @@ conteosRouter.post(
     res.json(await svc.reabrirConteo(req.auth!.negocioId, id));
   }),
 );
+
+/** DELETE /conteos/:id — elimina el inventario y revierte su efecto en el stock (solo admin). */
+conteosRouter.delete(
+  '/:id',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    await conteoConAcceso(req, id);
+    res.json(await svc.eliminarConteo(req.auth!.negocioId, id));
+  }),
+);

@@ -68,6 +68,7 @@ export default function Inventario() {
   // Admin: vista central de bodega (default) o revisión de sucursales.
   const [modo, setModo] = useState<'bodega' | 'sucursales'>('bodega');
   const [stockKey, setStockKey] = useState(0); // fuerza recarga del stock tras una entrada
+  const [entradaAbierta, setEntradaAbierta] = useState(false); // panel "Registrar entrada"
 
   const bodega = ubicaciones.find((u) => u.tipo === 'bodega') ?? null;
   const sucursales = ubicaciones.filter((u) => u.tipo === 'sucursal');
@@ -145,11 +146,9 @@ export default function Inventario() {
   const t = q.trim().toLowerCase();
   const histFiltrado = inventarios.filter((c) => !t || fechaLarga(c.fecha).toLowerCase().includes(t) || c.estado.toLowerCase().includes(t));
 
-  // Bloque reutilizable: sesión de hoy + historial. `promo`=false oculta el aviso de "abrir
-  // inventario" (lo usamos en la bodega central, donde estorba).
-  const renderSeccion = (promo: boolean) => (
+  // Solo el historial de inventarios (lista). Se reutiliza en bodega y sucursales.
+  const renderHistorial = () => (
     <>
-      {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} discreto={!promo} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
       <h3 className="seccion-title">Historial de inventarios</h3>
       {inventarios.length > 8 && (
         <input className="inv-search" type="search" placeholder="Buscar por fecha…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -172,6 +171,14 @@ export default function Inventario() {
           ))}
         </div>
       )}
+    </>
+  );
+
+  // Sesión de hoy + historial (sucursal/personal). `promo`=false usa el aviso discreto.
+  const renderSeccion = (promo: boolean) => (
+    <>
+      {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} discreto={!promo} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
+      {renderHistorial()}
     </>
   );
 
@@ -199,8 +206,18 @@ export default function Inventario() {
           bodega ? (
             <>
               <StockActual key={`${bodega.id}:${stockKey}`} ubicId={String(bodega.id)} nombre={bodega.nombre} abiertoDefault />
-              <AgregarEntrada onHecho={() => { setStockKey((k) => k + 1); void cargarUbicacion(String(bodega.id)); }} />
-              {renderSeccion(false)}
+              <AccionesBodega
+                busy={busy}
+                entradaAbierta={entradaAbierta}
+                onToggleEntrada={() => setEntradaAbierta((v) => !v)}
+                onTomarInventario={() => void tomarHoy()}
+              />
+              <AgregarEntrada
+                abierto={entradaAbierta}
+                onClose={() => setEntradaAbierta(false)}
+                onHecho={() => { setStockKey((k) => k + 1); void cargarUbicacion(String(bodega.id)); }}
+              />
+              {renderHistorial()}
             </>
           ) : (
             <p className="muted">No hay una bodega central activa.</p>
@@ -388,10 +405,33 @@ function SucursalesOverview({ sucursales, onElegir }: { sucursales: UbicacionAsi
 
 interface ProdCat { id: number; nombre: string; sku: string; unidad_distribucion: string; activo: boolean }
 
-/** Agregar entrada a la bodega central (compra/recepción): sube stock y recalcula costo. */
-function AgregarEntrada({ onHecho }: { onHecho: () => void }) {
+/** Dos acciones claras de la bodega: registrar entrada (suma stock) o tomar inventario (conteo). */
+function AccionesBodega({ busy, entradaAbierta, onToggleEntrada, onTomarInventario }: {
+  busy: boolean; entradaAbierta: boolean; onToggleEntrada: () => void; onTomarInventario: () => void;
+}) {
+  return (
+    <div className="acciones-bodega">
+      <button type="button" className={`accion-tile ${entradaAbierta ? 'accion-tile--on' : ''}`} onClick={onToggleEntrada}>
+        <span className="accion-ico accion-ico--in" aria-hidden="true">↧</span>
+        <span className="accion-tx">
+          <strong>Registrar entrada</strong>
+          <small>Llegó mercancía o compra. Suma al stock.</small>
+        </span>
+      </button>
+      <button type="button" className="accion-tile" disabled={busy} onClick={onTomarInventario}>
+        <span className="accion-ico accion-ico--count" aria-hidden="true">✓</span>
+        <span className="accion-tx">
+          <strong>Tomar inventario</strong>
+          <small>Conteo físico para fijar las cantidades exactas.</small>
+        </span>
+      </button>
+    </div>
+  );
+}
+
+/** Panel "Registrar entrada" a la bodega (compra/recepción): sube stock y recalcula costo. */
+function AgregarEntrada({ abierto, onClose, onHecho }: { abierto: boolean; onClose: () => void; onHecho: () => void }) {
   const toast = useToast();
-  const [abierto, setAbierto] = useState(false);
   const [productos, setProductos] = useState<ProdCat[]>([]);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<ProdCat | null>(null);
@@ -412,6 +452,7 @@ function AgregarEntrada({ onHecho }: { onHecho: () => void }) {
   }, [q, productos]);
 
   function limpiar() { setSel(null); setQ(''); setCantidad(''); setCosto(''); }
+  function cerrar() { onClose(); limpiar(); setError(''); }
 
   async function registrar() {
     const c = Number(cantidad);
@@ -429,46 +470,58 @@ function AgregarEntrada({ onHecho }: { onHecho: () => void }) {
     }
   }
 
-  if (!abierto) {
-    return <button type="button" className="btn btn-secondary btn-entrada" onClick={() => setAbierto(true)}>+ Agregar entrada a bodega</button>;
-  }
+  if (!abierto) return null;
 
   return (
-    <div className="card entrada-card">
-      <div className="card-head"><strong>Agregar entrada a bodega</strong><button className="link-btn" onClick={() => { setAbierto(false); limpiar(); setError(''); }}>Cerrar</button></div>
-      {error && <p className="error-msg">{error}</p>}
-      {sel ? (
-        <div className="retiro-sel">
-          <span><strong>{sel.nombre}</strong> <small className="muted">{sel.unidad_distribucion} · {sel.sku}</small></span>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setSel(null); setQ(''); }}>Cambiar</button>
+    <div className="card form-pro entrada-card">
+      <div className="form-pro-head">
+        <div className="form-pro-title">
+          <strong>Registrar entrada a bodega</strong>
+          <small className="muted">Compra o recepción de proveedor</small>
         </div>
-      ) : (
-        <>
-          <input className="inv-search" type="search" placeholder="Buscar producto o SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
-          {resultados.length > 0 && (
-            <div className="retiro-resultados">
-              {resultados.map((p) => (
-                <button key={p.id} className="retiro-resultado" onClick={() => { setSel(p); setQ(''); }}>
-                  <strong>{p.nombre}</strong> <small className="muted">{p.unidad_distribucion} · {p.sku}</small>
-                </button>
-              ))}
-            </div>
-          )}
-          {q.trim() && resultados.length === 0 && <p className="muted">Sin coincidencias.</p>}
-        </>
-      )}
-      <div className="entrada-campos">
-        <label className="retiro-label">Cantidad{sel ? ` (${sel.unidad_distribucion})` : ''}
-          <input className="conteo-input2" inputMode="decimal" value={cantidad} placeholder="0" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCantidad(e.target.value)} />
+        <button className="link-btn" onClick={cerrar}>Cerrar</button>
+      </div>
+      {error && <p className="error-msg">{error}</p>}
+
+      <div className="field">
+        <span className="field-cap">Producto</span>
+        {sel ? (
+          <div className="retiro-sel">
+            <span><strong>{sel.nombre}</strong> <small className="muted">{sel.unidad_distribucion} · {sel.sku}</small></span>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setSel(null); setQ(''); }}>Cambiar</button>
+          </div>
+        ) : (
+          <>
+            <input className="field-input" type="search" placeholder="Buscar producto o SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
+            {resultados.length > 0 && (
+              <div className="retiro-resultados">
+                {resultados.map((p) => (
+                  <button key={p.id} className="retiro-resultado" onClick={() => { setSel(p); setQ(''); }}>
+                    <strong>{p.nombre}</strong> <small className="muted">{p.unidad_distribucion} · {p.sku}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+            {q.trim() && resultados.length === 0 && <p className="muted">Sin coincidencias.</p>}
+          </>
+        )}
+      </div>
+
+      <div className="field-grid">
+        <label className="field">
+          <span className="field-cap">Cantidad{sel ? ` · ${sel.unidad_distribucion}` : ''}</span>
+          <input className="field-num" inputMode="decimal" value={cantidad} placeholder="0" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCantidad(e.target.value)} />
         </label>
-        <label className="retiro-label">Costo unitario (opcional)
-          <input className="conteo-input2" inputMode="decimal" value={costo} placeholder="0.00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCosto(e.target.value)} />
+        <label className="field">
+          <span className="field-cap">Costo unitario <span className="field-opt">opcional</span></span>
+          <input className="field-num" inputMode="decimal" value={costo} placeholder="0.00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCosto(e.target.value)} />
         </label>
       </div>
-      <div className="form-actions" style={{ marginTop: '0.7rem' }}>
-        <button className="btn btn-primary" disabled={busy || !sel || !(Number(cantidad) > 0)} onClick={() => void registrar()}>Registrar entrada</button>
+
+      <div className="form-pro-foot">
+        <button className="btn btn-primary btn-block" disabled={busy || !sel || !(Number(cantidad) > 0)} onClick={() => void registrar()}>Registrar entrada</button>
+        <p className="muted">Para fijar cantidades exactas usa <strong>Tomar inventario</strong> (concilia el stock).</p>
       </div>
-      <p className="muted" style={{ marginTop: '0.4rem' }}>Para corregir cantidades exactas usa <strong>Tomar/continuar inventario</strong> (concilia el stock).</p>
     </div>
   );
 }
@@ -581,6 +634,23 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
     }
   }
 
+  async function eliminar() {
+    const cerrado = detalle.estado === 'cerrado' || detalle.estado === 'reabierto';
+    const msg = cerrado
+      ? 'Eliminar este inventario revertirá el stock a como estaba antes de cerrarlo y borrará la sesión. ¿Continuar?'
+      : '¿Eliminar este inventario? No se podrá recuperar.';
+    if (!window.confirm(msg)) return;
+    setGuardando(true);
+    try {
+      await api(`/conteos/${detalle.id}`, { method: 'DELETE' });
+      toast.ok(cerrado ? 'Inventario eliminado · stock revertido.' : 'Inventario eliminado.');
+      onSalir();
+    } catch (e) {
+      toast.error(mensajeError(e, 'No se pudo eliminar.'));
+      setGuardando(false);
+    }
+  }
+
   return (
     <div className="page conteo-page">
       <header className="page-head">
@@ -664,11 +734,15 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
               <button className="btn btn-primary" onClick={() => { setArmado(true); setTimeout(() => setArmado(false), 5000); }} disabled={guardando}>Cerrar inventario</button>
             )}
           </div>
+          {esAdmin && (
+            <button className="btn btn-danger-ghost btn-sm" onClick={() => void eliminar()} disabled={guardando}>Eliminar inventario</button>
+          )}
         </div>
       ) : (
         esAdmin && (
-          <div className="action-bar">
-            <button className="btn btn-ghost" onClick={() => void reabrir()}>Reabrir inventario</button>
+          <div className="action-bar action-bar-row">
+            <button className="btn btn-ghost" onClick={() => void reabrir()} disabled={guardando}>Reabrir inventario</button>
+            <button className="btn btn-danger-ghost" onClick={() => void eliminar()} disabled={guardando}>Eliminar inventario</button>
           </div>
         )
       )}

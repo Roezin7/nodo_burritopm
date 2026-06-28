@@ -90,58 +90,64 @@ export default function Almacen() {
       {error && <p className="error-msg">{error}</p>}
       {ok && <p className="ok-msg">{ok}</p>}
 
-      <div className="card">
-        <label className="retiro-label">1 · Producto</label>
-        {sel ? (
-          <div className="retiro-sel">
-            <span><strong>{sel.nombre}</strong> <small className="muted">{sel.unidad_distribucion} · {sel.sku}</small></span>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSel(null); setQ(''); }}>Cambiar</button>
-          </div>
-        ) : (
-          <>
-            <input className="inv-search" type="search" placeholder="Buscar producto o SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
-            {resultados.length > 0 && (
-              <div className="retiro-resultados">
-                {resultados.map((p) => (
-                  <button key={p.id} className="retiro-resultado" onClick={() => { setSel(p); setQ(''); }}>
-                    <strong>{p.nombre}</strong> <small className="muted">{p.unidad_distribucion} · {p.sku}</small>
-                  </button>
-                ))}
-              </div>
-            )}
-            {q.trim() && resultados.length === 0 && <p className="muted">Sin coincidencias.</p>}
-          </>
-        )}
+      <div className="card form-pro">
+        <div className="field">
+          <span className="field-cap"><span className="field-step">1</span> Producto</span>
+          {sel ? (
+            <div className="retiro-sel">
+              <span><strong>{sel.nombre}</strong> <small className="muted">{sel.unidad_distribucion} · {sel.sku}</small></span>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setSel(null); setQ(''); }}>Cambiar</button>
+            </div>
+          ) : (
+            <>
+              <input className="field-input" type="search" placeholder="Buscar producto o SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
+              {resultados.length > 0 && (
+                <div className="retiro-resultados">
+                  {resultados.map((p) => (
+                    <button key={p.id} className="retiro-resultado" onClick={() => { setSel(p); setQ(''); }}>
+                      <strong>{p.nombre}</strong> <small className="muted">{p.unidad_distribucion} · {p.sku}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {q.trim() && resultados.length === 0 && <p className="muted">Sin coincidencias.</p>}
+            </>
+          )}
+        </div>
 
-        <label className="retiro-label">2 · Cantidad{sel ? ` (${sel.unidad_distribucion})` : ''}</label>
-        <input className="conteo-input2" inputMode="decimal" value={cantidad} placeholder="0" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCantidad(e.target.value)} />
+        <label className="field">
+          <span className="field-cap"><span className="field-step">2</span> Cantidad{sel ? ` · ${sel.unidad_distribucion}` : ''}</span>
+          <input className="field-num" inputMode="decimal" value={cantidad} placeholder="0" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCantidad(e.target.value)} />
+        </label>
 
         {esIngreso ? (
-          <>
-            <label className="retiro-label">3 · Costo unitario (opcional)</label>
-            <input className="conteo-input2" inputMode="decimal" value={costo} placeholder="0.00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCosto(e.target.value)} />
-            <p className="muted" style={{ marginTop: '0.3rem' }}>Sube al inventario de bodega y recalcula el costo promedio.</p>
-          </>
+          <label className="field">
+            <span className="field-cap"><span className="field-step">3</span> Costo unitario <span className="field-opt">opcional</span></span>
+            <input className="field-num" inputMode="decimal" value={costo} placeholder="0.00" onFocus={(e) => e.currentTarget.select()} onChange={(e) => setCosto(e.target.value)} />
+            <small className="field-hint">Sube al inventario de bodega y recalcula el costo promedio.</small>
+          </label>
         ) : (
-          <>
-            <label className="retiro-label">3 · ¿A dónde fue?</label>
+          <div className="field">
+            <span className="field-cap"><span className="field-step">3</span> ¿A dónde fue?</span>
             <div className="ubic-picker-pills">
               <button className={`ubic-pill ${destino === 'directa' ? 'ubic-pill--on' : ''}`} onClick={() => setDestino('directa')}>Salida directa</button>
               {sucursales.map((s) => (
                 <button key={s.id} className={`ubic-pill ${destino === String(s.id) ? 'ubic-pill--on' : ''}`} onClick={() => setDestino(String(s.id))}>{s.nombre}</button>
               ))}
             </div>
-            <p className="muted" style={{ marginTop: '0.3rem' }}>
+            <small className="field-hint">
               {destino === 'directa' ? 'Sale de bodega como consumo (no entra a una sucursal).' : 'Baja de bodega y sube al inventario de esa sucursal.'}
-            </p>
-          </>
+            </small>
+          </div>
         )}
 
-        <label className="retiro-label">4 · Motivo (opcional)</label>
-        <input className="inv-search" value={motivo} placeholder={esIngreso ? 'Ej. compra a proveedor…' : 'Ej. emergencia, se acabó en turno…'} onChange={(e) => setMotivo(e.target.value)} />
+        <label className="field">
+          <span className="field-cap"><span className="field-step">4</span> Motivo <span className="field-opt">opcional</span></span>
+          <input className="field-input" value={motivo} placeholder={esIngreso ? 'Ej. compra a proveedor…' : 'Ej. emergencia, se acabó en turno…'} onChange={(e) => setMotivo(e.target.value)} />
+        </label>
 
-        <div className="form-actions" style={{ marginTop: '0.9rem' }}>
-          <button className="btn btn-primary" disabled={busy || !sel || !(Number(cantidad) > 0)} onClick={() => void registrar()}>
+        <div className="form-pro-foot">
+          <button className="btn btn-primary btn-block" disabled={busy || !sel || !(Number(cantidad) > 0)} onClick={() => void registrar()}>
             {esIngreso ? 'Registrar entrada' : 'Registrar salida'}
           </button>
         </div>

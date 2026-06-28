@@ -234,3 +234,39 @@ export async function reabrirConteo(negocioId: bigint, conteoId: bigint) {
   await prisma.conteos.update({ where: { id: conteoId }, data: { estado: 'reabierto', cerrado_por: null, cerrado_at: null } });
   return { ok: true };
 }
+
+/**
+ * Elimina un inventario (conteo). Si ya estaba cerrado (reconciliado), REVIERTE su efecto en
+ * las existencias para dejar el stock como estaba antes, y borra sus movimientos de ajuste.
+ * Si nunca se cerró, solo borra la sesión. Las líneas caen por cascada. Todo atómico.
+ */
+export async function eliminarConteo(negocioId: bigint, conteoId: bigint) {
+  const conteo = await prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
+  if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
+
+  const movs = await prisma.movimientos_inventario.findMany({
+    where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId },
+    select: { product_id: true, tipo: true, cantidad: true },
+  });
+  // Neto firmado que el conteo aplicó a existencias por producto (+ sumó, − restó).
+  const neto = new Map<string, number>();
+  for (const m of movs) {
+    const signo = m.tipo === 'ajuste_negativo' ? -1 : 1;
+    const k = m.product_id.toString();
+    neto.set(k, (neto.get(k) ?? 0) + signo * num0(m.cantidad));
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const [pid, d] of neto) {
+      if (d === 0) continue;
+      // updateMany no lanza si la existencia ya no existe (no descuadra).
+      await tx.existencias.updateMany({
+        where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) },
+        data: { cantidad_disponible: { decrement: d } },
+      });
+    }
+    await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId } });
+    await tx.conteos.delete({ where: { id: conteoId } });
+  });
+  return { ok: true };
+}
