@@ -4,7 +4,14 @@
       "Bash(awk '{print $1, $2, $9}')",
       "Bash(lsof -nP -iTCP:5174 -sTCP:LISTEN)",
       "Bash(lsof -nP -iTCP:5175 -sTCP:LISTEN)",
-      "Bash(awk '{print $NF}')"
+      "Bash(awk '{print $NF}')",
+      "Bash(cp /tmp/claude-501/-Users-arturohernandez-Desktop-Burrito-Parrilla-Mexicana/18c5d834-b711-4635-b8c3-0977fa493412/scratchpad/e2e.mjs ./_e2e_clamp.mjs)",
+      "Bash(node ./_e2e_clamp.mjs)",
+      "Bash(lsof -ti:3100)",
+      "Bash(git restore *)",
+      "Bash(echo \"=== exit: $? \\(vacío = OK\\) ===\")",
+      "Bash(python3 -)",
+      "Bash(curl -s http://localhost:3100/api/health)"
     ]
   }
 }

@@ -1586,11 +1586,116 @@ select:disabled {
     font-weight: 600;
     min-height: 48px;
   }
+  .bottom-link {
+    gap: 0.2rem;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bottom-link span {
+    white-space: nowrap;
+    line-height: 1;
+  }
   .bottom-link--on {
     color: var(--brand);
   }
+  /* Indicador activo claro (barrita superior) para el pulgar en iPhone */
+  .bottom-link { position: relative; }
+  .bottom-link--on::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 26px;
+    height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: var(--brand);
+  }
+  /* Barra superior más compacta en móvil (no "grande") */
+  .context-bar {
+    padding: 0.45rem 0.9rem;
+    padding-top: calc(0.45rem + env(safe-area-inset-top));
+    padding-left: calc(0.9rem + env(safe-area-inset-left));
+    padding-right: calc(0.9rem + env(safe-area-inset-right));
+  }
+  .ctx-negocio { font-size: 0.9rem; }
+  .ctx-user {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* El tema vive en "Más" en móvil; quitamos el botón duplicado de la barra */
+  .context-bar .icon-btn { display: none; }
   /* La burbuja de Silvia se posiciona por arrastre (JS), no necesita reglas fijas aquí. */
 }
+
+/* ===== Hoja "Más" (overflow del nav inferior) ===== */
+.mas-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: mas-fade 0.18s ease;
+}
+.mas-sheet {
+  width: 100%;
+  background: var(--surface);
+  border-radius: var(--r-card) var(--r-card) 0 0;
+  border-top: 1px solid var(--border);
+  box-shadow: var(--sh-lg);
+  padding: 0.6rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  animation: mas-up 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mas-sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  margin: 0.2rem auto 0.85rem;
+}
+.mas-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.55rem;
+}
+@media (max-width: 360px) { .mas-grid { grid-template-columns: repeat(2, 1fr); } }
+.mas-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-align: center;
+  padding: 0.9rem 0.4rem;
+  min-height: 76px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.74rem;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s ease, border-color 0.14s, background 0.14s, color 0.14s;
+}
+.mas-item:active { transform: scale(0.97); }
+.mas-item--on { border-color: var(--brand); background: var(--brand-tint); color: var(--brand); }
+.mas-sheet-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+.mas-cerrar { margin-top: 0.7rem; }
+@keyframes mas-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes mas-fade { from { opacity: 0; } to { opacity: 1; } }
 
 @media (max-width: 460px) {
   .dia-inputs {

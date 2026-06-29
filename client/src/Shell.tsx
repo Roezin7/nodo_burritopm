@@ -1,5 +1,5 @@
-import { type ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { type ReactNode, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth, rolLabel } from './auth';
 import { useTema } from './theme';
 import { Icono } from './icons';
@@ -28,16 +28,26 @@ const ITEMS: Item[] = [
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
 ];
 
+// En móvil mostramos pocas pestañas y el resto en una hoja "Más" (accesible al pulgar).
+const MAX_PRIMARIOS = 4;
+
 export default function Shell({ children }: { children: ReactNode }) {
   const { usuario, logout } = useAuth();
   const { tema, alternar } = useTema();
   const { online, pendientes, sincronizar } = useOffline();
+  const { pathname } = useLocation();
+  const [masAbierto, setMasAbierto] = useState(false);
 
   const items = ITEMS.filter((i) => {
     if (i.soloAdmin && usuario?.rol !== 'admin') return false;
     if (i.roles && !(usuario && i.roles.includes(usuario.rol))) return false;
     return true;
   });
+
+  // Si caben todos en la barra (≤5), no hace falta "Más"; si no, dejamos 4 + "Más".
+  const hayMas = items.length > 5;
+  const primarios = hayMas ? items.slice(0, MAX_PRIMARIOS) : items;
+  const enMas = hayMas && items.slice(MAX_PRIMARIOS).some((i) => (i.ruta === '/' ? pathname === '/' : pathname.startsWith(i.ruta)));
 
   const syncChip = !online ? (
     <span className="ctx-chip ctx-chip--off">
@@ -106,9 +116,9 @@ export default function Shell({ children }: { children: ReactNode }) {
         <main className="content">{children}</main>
       </div>
 
-      {/* Nav inferior — móvil/tablet */}
+      {/* Nav inferior — móvil/tablet: pocas pestañas + "Más" para el resto */}
       <nav className="bottom-nav">
-        {items.map((i) => (
+        {primarios.map((i) => (
           <NavLink
             key={i.ruta}
             to={i.ruta}
@@ -119,7 +129,53 @@ export default function Shell({ children }: { children: ReactNode }) {
             <span>{i.label}</span>
           </NavLink>
         ))}
+        {hayMas && (
+          <button
+            type="button"
+            className={`bottom-link ${enMas || masAbierto ? 'bottom-link--on' : ''}`}
+            onClick={() => setMasAbierto(true)}
+            aria-haspopup="true"
+            aria-expanded={masAbierto}
+          >
+            <Icono name="menu" size={22} />
+            <span>Más</span>
+          </button>
+        )}
       </nav>
+
+      {/* Hoja "Más": resto de secciones + tema/salir, en tiles grandes y fáciles de tocar */}
+      {masAbierto && (
+        <div className="mas-sheet-backdrop" onClick={() => setMasAbierto(false)} role="presentation">
+          <div className="mas-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Más opciones">
+            <div className="mas-sheet-handle" />
+            <div className="mas-grid">
+              {items.slice(MAX_PRIMARIOS).map((i) => (
+                <NavLink
+                  key={i.ruta}
+                  to={i.ruta}
+                  end={i.ruta === '/'}
+                  onClick={() => setMasAbierto(false)}
+                  className={({ isActive }) => (isActive ? 'mas-item mas-item--on' : 'mas-item')}
+                >
+                  <Icono name={i.icono} size={24} />
+                  <span>{i.label}</span>
+                </NavLink>
+              ))}
+            </div>
+            <div className="mas-sheet-foot">
+              <button className="mas-item" onClick={() => { alternar(); }}>
+                <Icono name={tema === 'dark' ? 'sun' : 'moon'} size={24} />
+                <span>{tema === 'dark' ? 'Modo claro' : 'Modo oscuro'}</span>
+              </button>
+              <button className="mas-item" onClick={logout}>
+                <Icono name="logout" size={24} />
+                <span>Salir</span>
+              </button>
+            </div>
+            <button className="btn btn-secondary btn-block mas-cerrar" onClick={() => setMasAbierto(false)}>Cerrar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

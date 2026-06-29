@@ -121,6 +121,13 @@ const PATHS: Record<string, JSX.Element> = {
   ),
   chevron: <path d="M9 6l6 6-6 6" />,
   back: <path d="M15 6l-6 6 6 6" />,
+  menu: (
+    <>
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </>
+  ),
   sparkles: (
     <>
       <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3Z" />
