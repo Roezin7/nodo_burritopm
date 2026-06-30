@@ -153,6 +153,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   const [edits, setEdits] = useState<Record<number, string>>({});
   const [q, setQ] = useState('');
   const [soloFaltante, setSoloFaltante] = useState(false);
+  const [agregables, setAgregables] = useState<{ id: number; nombre: string }[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -161,6 +162,28 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   const nombre = prod?.nombre ?? suc?.nombre ?? null;
   const editable = estado === 'calculada' || estado === 'en_revision';
   const puedeRuta = estado != null && !['calculada', 'en_revision'].includes(estado);
+
+  // Sucursales rezagadas que aún se pueden sumar (solo mientras el pedido es editable).
+  useEffect(() => {
+    if (!editable) { setAgregables([]); return; }
+    api<{ id: number; nombre: string }[]>(`/distribuciones/${id}/agregables`).then(setAgregables).catch(() => setAgregables([]));
+  }, [id, editable]);
+
+  async function agregarSucursal(sucId: number) {
+    setBusy(true); setError('');
+    try {
+      const r = await api<{ agregadas: string[]; lineas: number; sin_existencia: string[] }>(
+        `/distribuciones/${id}/sucursales`, { method: 'POST', body: { ubicacion_ids: [sucId] } });
+      setAgregables((a) => a.filter((s) => s.id !== sucId));
+      await cargar();
+      const extra = r.sin_existencia?.length ? ` · sin stock en bodega: ${r.sin_existencia.join(', ')}` : '';
+      toast.ok(`${r.agregadas.join(', ')} agregada · ${r.lineas} líneas${extra}`);
+    } catch (e) {
+      setError(mensajeError(e, 'No se pudo agregar la sucursal.'));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function cargar() {
     setError('');
@@ -261,6 +284,20 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
       </div>
 
       {error && <p className="error-msg">{error}</p>}
+
+      {editable && agregables.length > 0 && vista !== 'ruta' && (
+        <div className="card">
+          <div className="card-head"><strong>¿Falta una sucursal?</strong><span className="muted">cerró tarde</span></div>
+          <p className="muted" style={{ margin: '0 0 0.5rem' }}>Inclúyela sin rehacer el pedido: se calcula solo su parte y se suma a este.</p>
+          <div className="dist-suc-mini">
+            {agregables.map((s) => (
+              <button key={s.id} className="chip chip--info" style={{ cursor: 'pointer', border: 0 }} disabled={busy} onClick={() => void agregarSucursal(s.id)}>
+                + {s.nombre}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {vista === 'ruta' && <RutaPlanner id={id} />}
 

@@ -18,40 +18,30 @@ async function disponibleConteo(ubicacionId: bigint) {
   return { map, conteoId: conteo?.id ?? null };
 }
 
+type LineaCalculada = {
+  ubicacion_destino_id: bigint;
+  product_id: bigint;
+  conteo_id: bigint | null;
+  inventario_disponible: number;
+  stock_objetivo: number;
+  stock_seguridad: number;
+  cantidad_sugerida: number;
+  costo_unitario: number | null;
+  costo_total: number;
+};
+
 /**
- * Calcula y crea una distribución a partir de los últimos conteos cerrados de las
- * sucursales activas. La sugerencia surge del conteo + parámetros (la sucursal no pide).
+ * Para cada sucursal dada, calcula las líneas sugeridas a partir de su último conteo cerrado,
+ * sus parámetros (objetivo/seguridad/múltiplo/mínimo) y la existencia en vivo de la bodega.
+ * Compartido por crearDistribucion y agregarSucursales (incluir una sucursal rezagada).
  */
-export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ubicacionIds?: number[]) {
-  // Todo sale de la bodega central (Adison): si no existe, no hay distribución posible.
-  await bodegaDe(negocioId);
-  // Existencia EN VIVO de la bodega: es la fuente única. Un producto sin stock aquí NO se
-  // distribuye (no se generan líneas para él), aunque la sucursal esté por debajo de su objetivo.
-  const disponibleBod = await disponibleBodega(negocioId);
-
-  const sucursales = await prisma.ubicaciones.findMany({
-    where: {
-      negocio_id: negocioId,
-      tipo: 'sucursal',
-      activo: true,
-      ...(ubicacionIds && ubicacionIds.length ? { id: { in: ubicacionIds.map((n) => BigInt(n)) } } : {}),
-    },
-  });
-  if (sucursales.length === 0) throw new HttpError(400, 'No hay sucursales activas para distribuir');
-
+async function calcularLineasSucursales(
+  sucursales: { id: bigint; nombre: string }[],
+  disponibleBod: Map<string, number>,
+) {
   const sinConteo: string[] = [];
   const sinExistencia = new Set<string>(); // productos excluidos por no tener stock en bodega
-  const lineasData: {
-    ubicacion_destino_id: bigint;
-    product_id: bigint;
-    conteo_id: bigint | null;
-    inventario_disponible: number;
-    stock_objetivo: number;
-    stock_seguridad: number;
-    cantidad_sugerida: number;
-    costo_unitario: number | null;
-    costo_total: number;
-  }[] = [];
+  const lineasData: LineaCalculada[] = [];
 
   for (const suc of sucursales) {
     const { map: disp, conteoId } = await disponibleConteo(suc.id);
@@ -94,6 +84,31 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
       });
     }
   }
+  return { lineasData, sinConteo, sinExistencia };
+}
+
+/**
+ * Calcula y crea una distribución a partir de los últimos conteos cerrados de las
+ * sucursales activas. La sugerencia surge del conteo + parámetros (la sucursal no pide).
+ */
+export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ubicacionIds?: number[]) {
+  // Todo sale de la bodega central (Adison): si no existe, no hay distribución posible.
+  await bodegaDe(negocioId);
+  // Existencia EN VIVO de la bodega: es la fuente única. Un producto sin stock aquí NO se
+  // distribuye (no se generan líneas para él), aunque la sucursal esté por debajo de su objetivo.
+  const disponibleBod = await disponibleBodega(negocioId);
+
+  const sucursales = await prisma.ubicaciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      tipo: 'sucursal',
+      activo: true,
+      ...(ubicacionIds && ubicacionIds.length ? { id: { in: ubicacionIds.map((n) => BigInt(n)) } } : {}),
+    },
+  });
+  if (sucursales.length === 0) throw new HttpError(400, 'No hay sucursales activas para distribuir');
+
+  const { lineasData, sinConteo, sinExistencia } = await calcularLineasSucursales(sucursales, disponibleBod);
 
   if (lineasData.length === 0) {
     const partes: string[] = [];
@@ -118,6 +133,70 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
   });
 
   return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinConteo, sin_existencia: [...sinExistencia] };
+}
+
+// Estados en los que el pedido aún se puede editar / ampliar (antes de aprobar y salir a bodega).
+const ESTADOS_EDITABLES = ['calculada', 'en_revision'];
+
+/**
+ * Sucursales que pueden sumarse a un pedido aún editable: activas, con conteo cerrado y que
+ * todavía no están en el pedido. Es la lista para "incluir una sucursal rezagada".
+ */
+export async function sucursalesAgregables(negocioId: bigint, id: bigint) {
+  const dist = await cargarDistribucion(negocioId, id);
+  if (!ESTADOS_EDITABLES.includes(dist.estado)) return [];
+  const enPedido = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: id },
+    select: { ubicacion_destino_id: true },
+    distinct: ['ubicacion_destino_id'],
+  });
+  const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
+  const sucursales = await prisma.ubicaciones.findMany({ where: { negocio_id: negocioId, tipo: 'sucursal', activo: true } });
+  const candidatas = [];
+  for (const s of sucursales) {
+    if (yaIds.has(s.id.toString())) continue;
+    const cerrado = await prisma.conteos.findFirst({ where: { ubicacion_id: s.id, estado: 'cerrado' }, select: { id: true } });
+    if (cerrado) candidatas.push({ id: Number(s.id), nombre: s.nombre });
+  }
+  return candidatas;
+}
+
+/**
+ * Suma una o más sucursales rezagadas a un pedido aún editable sin rehacerlo: calcula solo
+ * las líneas de esas sucursales y las anexa, dejando intactas las líneas (y ajustes) ya cargadas.
+ */
+export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacionIds: number[]) {
+  const dist = await cargarDistribucion(negocioId, id);
+  if (!ESTADOS_EDITABLES.includes(dist.estado)) {
+    throw new HttpError(409, 'Solo se pueden agregar sucursales a un pedido en cálculo o revisión (aún sin aprobar).');
+  }
+  const enPedido = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: id },
+    select: { ubicacion_destino_id: true },
+    distinct: ['ubicacion_destino_id'],
+  });
+  const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
+
+  const sucursales = (await prisma.ubicaciones.findMany({
+    where: { negocio_id: negocioId, tipo: 'sucursal', activo: true, id: { in: ubicacionIds.map((n) => BigInt(n)) } },
+  })).filter((s) => !yaIds.has(s.id.toString()));
+  if (sucursales.length === 0) throw new HttpError(400, 'Esas sucursales ya están en el pedido o no existen.');
+
+  const disponibleBod = await disponibleBodega(negocioId);
+  const { lineasData, sinConteo, sinExistencia } = await calcularLineasSucursales(sucursales, disponibleBod);
+
+  if (lineasData.length === 0) {
+    const partes: string[] = [];
+    if (sinConteo.length) partes.push(`Sin inventario cerrado: ${sinConteo.join(', ')}.`);
+    if (sinExistencia.size) partes.push(`Sin existencia en bodega: ${[...sinExistencia].join(', ')}.`);
+    throw new HttpError(400, partes.length ? `No hay nada que agregar. ${partes.join(' ')}` : 'No hay nada que agregar para esas sucursales.');
+  }
+
+  await prisma.distribucion_lineas.createMany({ data: lineasData.map((l) => ({ distribucion_id: id, ...l })) });
+  const agregadas = [...new Set(lineasData.map((l) => l.ubicacion_destino_id.toString()))]
+    .map((uid) => sucursales.find((s) => s.id.toString() === uid)?.nombre)
+    .filter((n): n is string => Boolean(n));
+  return { agregadas, lineas: lineasData.length, sin_conteo: sinConteo, sin_existencia: [...sinExistencia] };
 }
 
 /** Control total del admin: fija el estado de la distribución a cualquier valor (override). */

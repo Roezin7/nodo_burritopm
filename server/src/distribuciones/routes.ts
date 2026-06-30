@@ -86,6 +86,27 @@ distribucionesRouter.get(
   }),
 );
 
+/** GET /distribuciones/:id/agregables — sucursales rezagadas que pueden sumarse al pedido. */
+distribucionesRouter.get(
+  '/:id/agregables',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await svc.sucursalesAgregables(req.auth!.negocioId, id));
+  }),
+);
+
+/** POST /distribuciones/:id/sucursales { ubicacion_ids } — incluye sucursales rezagadas sin rehacer. */
+distribucionesRouter.post(
+  '/:id/sucursales',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    const { ubicacion_ids } = z.object({ ubicacion_ids: z.array(z.coerce.number().int().positive()).min(1) }).parse(req.body);
+    res.json(await svc.agregarSucursales(req.auth!.negocioId, id, ubicacion_ids));
+  }),
+);
+
 /** PATCH /distribuciones/:id/lineas { ajustes: [{linea_id, cantidad_aprobada}] } */
 distribucionesRouter.patch(
   '/:id/lineas',
