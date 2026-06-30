@@ -50,6 +50,26 @@ export async function enviarAUsuarios(usuarioIds: bigint[], aviso: AvisoPush) {
   );
 }
 
+/** Admins activos del negocio (para avisos de supervisión). */
+export async function usuariosAdmin(negocioId: bigint): Promise<bigint[]> {
+  const filas = await prisma.usuarios.findMany({
+    where: { negocio_id: negocioId, rol: 'admin', activo: true },
+    select: { id: true },
+  });
+  return filas.map((f) => f.id);
+}
+
+/** Avisa al admin que hay sucursales sin cerrar su inventario del día. */
+export async function avisarAdminRezagados(negocioId: bigint, pendientes: number) {
+  if (!pushHabilitado || pendientes <= 0) return;
+  const admins = await usuariosAdmin(negocioId);
+  await enviarAUsuarios(admins, {
+    titulo: 'Inventario pendiente ⏰',
+    cuerpo: `${pendientes} sucursal${pendientes > 1 ? 'es' : ''} aún no cierra${pendientes > 1 ? 'n' : ''} su inventario de hoy.`,
+    url: '/',
+  });
+}
+
 /** Usuarios activos asignados a una ubicación (para avisarles). */
 export async function usuariosDeUbicacion(ubicacionId: bigint): Promise<bigint[]> {
   const filas = await prisma.usuario_ubicaciones.findMany({

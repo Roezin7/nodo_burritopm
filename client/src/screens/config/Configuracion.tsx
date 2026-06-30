@@ -31,15 +31,23 @@ const DIAS = [
 ];
 
 /** Ajustes de operación: verificación de carga y días de inventario. */
+const AUTO_CIERRE_OPCIONES = [
+  { h: 0, label: 'Nunca' },
+  { h: 12, label: '12 h' },
+  { h: 24, label: '24 h' },
+  { h: 48, label: '48 h' },
+];
+
 function Operacion() {
   const [verif, setVerif] = useState<boolean | null>(null);
   const [dias, setDias] = useState<number[]>([]);
+  const [autoCierre, setAutoCierre] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api<{ verificacion_carga: boolean; inventario_dias: number[] }>('/negocio')
-      .then((n) => { setVerif(n.verificacion_carga); setDias(n.inventario_dias ?? []); })
+    api<{ verificacion_carga: boolean; inventario_dias: number[]; auto_cierre_horas: number }>('/negocio')
+      .then((n) => { setVerif(n.verificacion_carga); setDias(n.inventario_dias ?? []); setAutoCierre(n.auto_cierre_horas ?? 0); })
       .catch(() => setError('No se pudo cargar la configuración'));
   }, []);
 
@@ -63,6 +71,11 @@ function Operacion() {
     const next = dias.includes(n) ? dias.filter((d) => d !== n) : [...dias, n];
     setDias(next);
     await guardar({ inventario_dias: next });
+  }
+
+  async function elegirAutoCierre(h: number) {
+    setAutoCierre(h);
+    await guardar({ auto_cierre_horas: h });
   }
 
   if (verif === null) return <p className="muted">Cargando…</p>;
@@ -108,6 +121,28 @@ function Operacion() {
             <span className="switch-knob" />
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <strong>Auto-cierre de recepción</strong>
+        <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
+          Si una sucursal no confirma su recepción, el pedido se cierra solo pasado este tiempo (se da por recibido lo enviado) para liberar el inventario en tránsito de la bodega.
+        </p>
+        <div className="dias-selector">
+          {AUTO_CIERRE_OPCIONES.map((o) => (
+            <button
+              key={o.h}
+              type="button"
+              className={`dia-pill ${autoCierre === o.h ? 'dia-pill--on' : ''}`}
+              disabled={busy}
+              aria-pressed={autoCierre === o.h}
+              onClick={() => void elegirAutoCierre(o.h)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {autoCierre === 0 && <p className="muted" style={{ marginTop: '0.6rem' }}>Desactivado: las recepciones sin confirmar quedan en tránsito hasta que alguien las cierre a mano.</p>}
       </div>
       {error && <p className="error-msg">{error}</p>}
     </>

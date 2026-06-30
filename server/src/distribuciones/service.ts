@@ -651,6 +651,54 @@ export async function recibirDistribucion(
   return { ok: true };
 }
 
+/**
+ * Auto-cierre del tránsito sin confirmar: distribuciones cargadas hace más de `horas`
+ * y todavía en tránsito se cierran solas dando por recibido lo enviado (recibida = cargada,
+ * sin incidencia). Así el inventario "en tránsito" de la bodega no queda atascado para siempre
+ * cuando una sucursal olvida confirmar. Idempotente y reutiliza recibirDistribucion.
+ */
+export async function autoCerrarTransitoVencido(negocioId: bigint, horas: number) {
+  if (!horas || horas <= 0) return { cerradas: 0 };
+  const limite = new Date(Date.now() - horas * 3600 * 1000);
+  const dists = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      estado: { in: ['en_transito', 'parcialmente_entregada'] },
+      cargado_at: { not: null, lt: limite },
+    },
+    select: {
+      id: true,
+      aprobado_por: true,
+      creado_por: true,
+      lineas: {
+        where: { cantidad_recibida: null },
+        select: { id: true, ubicacion_destino_id: true, cantidad_cargada: true },
+      },
+    },
+  });
+
+  let cerradas = 0;
+  for (const d of dists) {
+    const usuarioId = d.aprobado_por ?? d.creado_por;
+    // Agrupa las líneas pendientes por sucursal: recibirDistribucion trabaja por ubicación.
+    const porUbic = new Map<string, { linea_id: number; cantidad: number }[]>();
+    for (const l of d.lineas) {
+      const k = l.ubicacion_destino_id.toString();
+      if (!porUbic.has(k)) porUbic.set(k, []);
+      porUbic.get(k)!.push({ linea_id: Number(l.id), cantidad: num(l.cantidad_cargada) ?? 0 });
+    }
+    for (const [ubic, items] of porUbic) {
+      try {
+        await recibirDistribucion(negocioId, d.id, BigInt(ubic), usuarioId, items);
+      } catch {
+        // best-effort: si una sucursal falla, seguimos con las demás y el resto del lote.
+      }
+    }
+    cerradas += 1;
+  }
+  return { cerradas };
+}
+
 const redondear2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const redondear3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 

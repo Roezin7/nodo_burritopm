@@ -14,7 +14,7 @@ negocioRouter.get(
   asyncHandler(async (req, res) => {
     const n = await prisma.negocios.findUnique({
       where: { id: req.auth!.negocioId },
-      select: { id: true, nombre: true, zona_horaria: true, verificacion_carga: true, inventario_dias: true },
+      select: { id: true, nombre: true, zona_horaria: true, verificacion_carga: true, inventario_dias: true, auto_cierre_horas: true },
     });
     if (!n) throw new HttpError(404, 'Negocio no encontrado');
     res.json({
@@ -23,6 +23,7 @@ negocioRouter.get(
       zona_horaria: n.zona_horaria,
       verificacion_carga: n.verificacion_carga,
       inventario_dias: [...n.inventario_dias].sort((a, b) => a - b),
+      auto_cierre_horas: n.auto_cierre_horas,
     });
   }),
 );
@@ -36,11 +37,13 @@ negocioRouter.patch(
       .object({
         verificacion_carga: z.boolean().optional(),
         inventario_dias: z.array(z.coerce.number().int().min(0).max(6)).optional(),
+        auto_cierre_horas: z.coerce.number().int().min(0).max(168).optional(),
       })
       .parse(req.body);
-    const data: { verificacion_carga?: boolean; inventario_dias?: number[] } = {};
+    const data: { verificacion_carga?: boolean; inventario_dias?: number[]; auto_cierre_horas?: number } = {};
     if (b.verificacion_carga !== undefined) data.verificacion_carga = b.verificacion_carga;
     if (b.inventario_dias !== undefined) data.inventario_dias = [...new Set(b.inventario_dias)].sort((a, b2) => a - b2);
+    if (b.auto_cierre_horas !== undefined) data.auto_cierre_horas = b.auto_cierre_horas;
     await prisma.negocios.update({ where: { id: req.auth!.negocioId }, data });
     res.json({ ok: true, ...data });
   }),
