@@ -326,6 +326,10 @@ const puItemSchema = z.object({
   stock_seguridad: z.coerce.number().nonnegative().optional(),
   multiplo_distribucion: z.coerce.number().positive().optional(),
   minimo_envio: z.coerce.number().nonnegative().optional(),
+  // Procedencia del cálculo (al aplicar sugerencias del motor de stock objetivo).
+  origen_calculo: z.enum(['manual', 'historico', 'automatico']).optional(),
+  consumo_promedio: z.coerce.number().nonnegative().optional(),
+  dias_cobertura: z.coerce.number().int().nonnegative().optional(),
 });
 
 /** PUT /catalogo/producto-ubicacion { ubicacion_id, items[] } — upsert masivo de niveles par. */
@@ -365,6 +369,9 @@ catalogoRouter.put(
             stock_seguridad: i.stock_seguridad ?? 0,
             multiplo_distribucion: i.multiplo_distribucion ?? 1,
             minimo_envio: i.minimo_envio ?? 0,
+            origen_calculo: i.origen_calculo ?? 'manual',
+            consumo_promedio: i.consumo_promedio,
+            dias_cobertura: i.dias_cobertura,
             actualizado_por: req.auth!.usuarioId,
           },
           update: {
@@ -375,6 +382,9 @@ catalogoRouter.put(
             stock_seguridad: i.stock_seguridad,
             multiplo_distribucion: i.multiplo_distribucion,
             minimo_envio: i.minimo_envio,
+            origen_calculo: i.origen_calculo,
+            consumo_promedio: i.consumo_promedio,
+            dias_cobertura: i.dias_cobertura,
             actualizado_por: req.auth!.usuarioId,
           },
         }),

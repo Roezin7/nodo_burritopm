@@ -2914,3 +2914,26 @@ a.flujo-paso { text-decoration: none; }
   .ciclo-celda { font-size: 0.64rem; }
   .ciclo-suc { font-size: 0.8rem; }
 }
+
+/* ── Fase 3: motor de stock objetivo + historial ───────────────────────── */
+.motor-controls { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: flex-end; }
+.motor-controls .so-ubic { min-width: 9rem; }
+.motor-controls .so-num { width: 5rem; }
+.motor-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+.motor-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.7rem; align-items: center; }
+.motor-info { min-width: 0; }
+.motor-prod { overflow: hidden; text-overflow: ellipsis; }
+.motor-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: 0.2rem 0; }
+.motor-base { font-size: 0.78rem; }
+.motor-nums { display: flex; align-items: center; gap: 0.5rem; text-align: right; white-space: nowrap; }
+.motor-actual, .motor-sug { display: flex; flex-direction: column; line-height: 1.15; }
+.motor-actual span, .motor-sug strong { font-variant-numeric: tabular-nums; }
+.motor-arrow { font-size: 1.1rem; color: var(--muted); }
+.motor-arrow.up { color: var(--warn, #d98324); }
+.motor-arrow.down { color: var(--ok, #2e9e5b); }
+.chip--muted { background: var(--surface-2); color: var(--muted); }
+.hist-textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 0.5rem; background: var(--surface); color: var(--text); resize: vertical; }
+@media (max-width: 540px) {
+  .motor-row { grid-template-columns: auto minmax(0, 1fr); }
+  .motor-nums { grid-column: 1 / -1; justify-content: flex-end; border-top: 1px dashed var(--border); padding-top: 0.4rem; }
+}

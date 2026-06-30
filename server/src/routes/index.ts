@@ -12,6 +12,7 @@ import { existenciasRouter } from '../existencias/routes.js';
 import { incidenciasRouter } from '../incidencias/routes.js';
 import { negocioRouter } from '../negocio/routes.js';
 import { pushRouter } from '../push/routes.js';
+import { inventarioRouter } from '../inventario/routes.js';
 
 export const apiRouter = Router();
 
@@ -37,3 +38,4 @@ apiRouter.use('/existencias', existenciasRouter); // Bloque 8
 apiRouter.use('/incidencias', incidenciasRouter); // Bloque 11
 apiRouter.use('/negocio', negocioRouter); // settings de operación
 apiRouter.use('/push', pushRouter); // avisos web push
+apiRouter.use('/inventario', inventarioRouter); // Fase 3 — stock objetivo (motor) + historial
