@@ -8,6 +8,89 @@ export const dashboardRouter = Router();
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+// Estados de distribución en los que el pedido ya salió a la calle (recepción tiene sentido).
+const EN_RUTA_O_DESPUES = new Set(['en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias']);
+
+/**
+ * GET /dashboard/ciclo — semáforo del ciclo por sucursal: inventario (de hoy), si está en el
+ * pedido actual y su recepción. Una sola fila por sucursal para que el admin vea de un vistazo
+ * quién frena el ciclo.
+ */
+dashboardRouter.get(
+  '/ciclo',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const negocioId = req.auth!.negocioId;
+    const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true } });
+    const tz = negocio?.zona_horaria ?? 'America/Chicago';
+    const hoyISO = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const hoy = new Date(`${hoyISO}T00:00:00.000Z`);
+
+    const sucursales = await prisma.ubicaciones.findMany({
+      where: { negocio_id: negocioId, tipo: 'sucursal', activo: true },
+      orderBy: { nombre: 'asc' },
+      select: { id: true, nombre: true },
+    });
+
+    const sucIds = sucursales.map((s) => s.id);
+    // Conteo de HOY por sucursal (una sola consulta).
+    const conteosHoy = await prisma.conteos.findMany({
+      where: { negocio_id: negocioId, fecha: hoy, ubicacion_id: { in: sucIds } },
+      select: { ubicacion_id: true, estado: true },
+    });
+    const conteoDe = new Map(conteosHoy.map((c) => [c.ubicacion_id.toString(), c.estado]));
+    // Sucursales con algún conteo ya cerrado (para no marcar "falta" en días sin inventario).
+    const cerradosPrevios = await prisma.conteos.findMany({
+      where: { negocio_id: negocioId, estado: 'cerrado', ubicacion_id: { in: sucIds } },
+      distinct: ['ubicacion_id'],
+      select: { ubicacion_id: true },
+    });
+    const tieneCerrado = new Set(cerradosPrevios.map((c) => c.ubicacion_id.toString()));
+
+    // Distribución actual y sus líneas por sucursal (para "pedido" y "recepción").
+    const dist = await prisma.distribuciones.findFirst({
+      where: { negocio_id: negocioId },
+      orderBy: { id: 'desc' },
+      include: { _count: { select: { lineas: true } } },
+    });
+    const enRuta = dist ? EN_RUTA_O_DESPUES.has(dist.estado) : false;
+    const lineas = dist
+      ? await prisma.distribucion_lineas.findMany({
+          where: { distribucion_id: dist.id },
+          select: { ubicacion_destino_id: true, cantidad_recibida: true },
+        })
+      : [];
+    const porSuc = new Map<string, { total: number; recibidas: number }>();
+    for (const l of lineas) {
+      const k = l.ubicacion_destino_id.toString();
+      const g = porSuc.get(k) ?? { total: 0, recibidas: 0 };
+      g.total++;
+      if (l.cantidad_recibida != null) g.recibidas++;
+      porSuc.set(k, g);
+    }
+
+    const filas = sucursales.map((s) => {
+      const k = s.id.toString();
+      const cEstado = conteoDe.get(k);
+      // Listo si cerró hoy o ya tiene un cierre reciente; en captura si hoy está abierto; falta si nunca.
+      const conteo = cEstado === 'cerrado' ? 'cerrado' : cEstado ? 'abierto' : tieneCerrado.has(k) ? 'cerrado' : 'pendiente';
+      const g = porSuc.get(s.id.toString());
+      const pedido = !dist ? 'na' : g ? 'en' : 'sin';
+      let recepcion: 'recibido' | 'parcial' | 'pendiente' | 'na' = 'na';
+      if (dist && g && enRuta) {
+        recepcion = g.recibidas === 0 ? 'pendiente' : g.recibidas < g.total ? 'parcial' : 'recibido';
+      }
+      return { id: Number(s.id), nombre: s.nombre, conteo, pedido, recepcion };
+    });
+
+    res.json({
+      distribucion: dist ? { id: Number(dist.id), estado: dist.estado, total_lineas: dist._count.lineas } : null,
+      sucursales: filas,
+    });
+  }),
+);
+
 /** GET /dashboard — resumen operativo del admin. */
 dashboardRouter.get(
   '/',

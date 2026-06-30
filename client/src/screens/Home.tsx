@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, type Rol } from '../auth';
+import { faseDistribucion } from '../flujo';
 import { Icono } from '../icons';
 import ActivarAvisos from '../components/ActivarAvisos';
 import PanelAdmin from './PanelAdmin';
@@ -37,6 +38,29 @@ function TareaHoy() {
           if (porSurtir > 0) return { titulo: `${porSurtir} pedido${porSurtir > 1 ? 's' : ''} por surtir`, sub: 'Surte y carga el camión', ruta: '/bodega' };
           const rutas = (await api<(unknown | null)[]>('/rutas/mias')).filter(Boolean);
           if (rutas.length > 0) return { titulo: 'Tienes una ruta en curso', sub: 'Entrega parada por parada', ruta: '/ruta' };
+          return null;
+        }
+        if (usuario.rol === 'admin') {
+          // Próxima acción del admin según dónde está atorado el ciclo.
+          const d = await api<{
+            conteos_pendientes: number;
+            conteos_listos: number;
+            distribucion_actual: { id: number; estado: string } | null;
+          }>('/dashboard');
+          const dist = d.distribucion_actual;
+          const cerrado = dist && ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'].includes(dist.estado);
+          if (dist && !cerrado) {
+            const f = faseDistribucion(dist.estado);
+            if (f.clave === 'planeacion') return { titulo: `Revisa y aprueba el pedido #${dist.id}`, sub: 'Ajusta cantidades y aprueba', ruta: '/distribucion' };
+            if (f.clave === 'bodega') return { titulo: `Pedido #${dist.id} en bodega`, sub: 'Surte y carga el camión', ruta: '/bodega' };
+            if (f.clave === 'ruta') return { titulo: `Pedido #${dist.id} en ruta`, sub: 'Sigue el reparto y las recepciones', ruta: '/ruta' };
+          }
+          if (d.conteos_pendientes > 0) {
+            return { titulo: `${d.conteos_pendientes} sucursal${d.conteos_pendientes > 1 ? 'es' : ''} sin cerrar inventario`, sub: 'Aún no pueden entrar al pedido', ruta: '/inventario' };
+          }
+          if (d.conteos_listos > 0) {
+            return { titulo: 'Calcula la distribución', sub: 'Las sucursales ya cerraron su inventario', ruta: '/distribucion' };
+          }
           return null;
         }
         return null;
@@ -129,7 +153,7 @@ export default function Home() {
       </header>
 
       <ActivarAvisos />
-      {!esAdmin && <TareaHoy />}
+      <TareaHoy />
 
       {esAdmin && (
         <div className="tabs">

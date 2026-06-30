@@ -26,6 +26,34 @@ export function EstadoDistChip({ estado }: { estado: string }) {
   return <span className={`chip chip-estado ${e?.cls ?? 'chip--muted'}`}>{e?.label ?? estado}</span>;
 }
 
+// ── Fase del pedido: agrupa los 16 estados en 4 fases legibles (para no confundir al admin) ──
+export type FaseDist = 'planeacion' | 'bodega' | 'ruta' | 'recibido' | 'cancelada';
+const FASE_DE: Record<string, FaseDist> = {
+  borrador: 'planeacion', esperando_conteos: 'planeacion', calculada: 'planeacion', en_revision: 'planeacion', aprobada: 'planeacion',
+  en_preparacion: 'bodega', preparada: 'bodega', verificada: 'bodega', en_carga: 'bodega', cargada: 'bodega',
+  en_transito: 'ruta', parcialmente_entregada: 'ruta',
+  entregada: 'recibido', cerrada: 'recibido', cerrada_con_incidencias: 'recibido',
+  cancelada: 'cancelada',
+};
+const FASE_META: Record<FaseDist, { label: string; cls: string }> = {
+  planeacion: { label: 'Planeación', cls: 'chip--info' },
+  bodega: { label: 'En bodega', cls: 'chip--accent' },
+  ruta: { label: 'En ruta', cls: 'chip--warn' },
+  recibido: { label: 'Recibido', cls: 'chip--ok' },
+  cancelada: { label: 'Cancelada', cls: 'chip--danger' },
+};
+
+export function faseDistribucion(estado: string): { clave: FaseDist; label: string; cls: string } {
+  const clave = FASE_DE[estado] ?? 'planeacion';
+  return { clave, ...FASE_META[clave] };
+}
+
+/** Chip de FASE (4 fases) — vista simple del admin. El detalle granular usa EstadoDistChip. */
+export function FaseChip({ estado }: { estado: string }) {
+  const f = faseDistribucion(estado);
+  return <span className={`chip chip-estado ${f.cls}`}>{f.label}</span>;
+}
+
 // ── Estado de una parada de ruta ───────────────────────────────────────────
 const PARADA: Record<string, { label: string; cls: string }> = {
   pendiente: { label: 'Pendiente', cls: 'chip--muted' },

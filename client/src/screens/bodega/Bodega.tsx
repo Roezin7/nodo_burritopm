@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
-import { EstadoDistChip, FlujoStepper } from '../../flujo';
+import { EstadoDistChip, FaseChip, FlujoStepper } from '../../flujo';
 
 interface DistResumen { id: number; estado: string; creado_at: string; total_lineas: number }
 interface OpItem {
@@ -90,7 +90,7 @@ export default function Bodega() {
           {mostradas.map((d) => (
             <button key={d.id} className="card card-click" onClick={() => void abrir(d.id)}>
               <div className="ubic-row">
-                <div><strong>Distribución #{d.id}</strong> <EstadoDistChip estado={d.estado} />
+                <div><strong>Pedido #{d.id}</strong> <FaseChip estado={d.estado} />
                   <div className="muted">{new Date(d.creado_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' })} · {d.total_lineas} líneas</div></div>
                 <span className="muted">›</span>
               </div>

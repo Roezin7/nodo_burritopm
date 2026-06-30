@@ -2846,3 +2846,71 @@ a.flujo-paso { text-decoration: none; }
 @media (max-width: 460px) { .field-grid { grid-template-columns: 1fr; } }
 
 .btn-conciliar { display: inline-flex; margin: 0.2rem 0 0.4rem; }
+
+/* ===== Tablero del ciclo (semáforo por sucursal) ===== */
+.ciclo-card { display: flex; flex-direction: column; gap: 0.7rem; }
+.ciclo-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.ciclo-titulo { display: flex; flex-direction: column; gap: 0.1rem; }
+.ciclo-titulo strong { font-size: 1rem; }
+.ciclo-pedido { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }
+.ciclo-tabla { display: flex; flex-direction: column; }
+.ciclo-fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.7rem 3.4rem 4.9rem;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+}
+.ciclo-fila--head {
+  border-top: 0;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ciclo-fila--head span:not(:first-child) { text-align: center; }
+.ciclo-fila--link {
+  text-decoration: none;
+  color: inherit;
+  margin: 0 -0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-radius: var(--r-input);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s;
+}
+.ciclo-fila--link:hover,
+.ciclo-fila--link:active { background: var(--surface-2); }
+.ciclo-suc {
+  font-weight: 600;
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ciclo-celda {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ciclo-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--ink-3); }
+.ciclo-celda--ok .ciclo-dot { background: var(--success); }
+.ciclo-celda--warn .ciclo-dot { background: var(--warning); }
+.ciclo-celda--bad .ciclo-dot { background: var(--danger); }
+.ciclo-celda--na { color: var(--ink-3); }
+.ciclo-celda--na .ciclo-dot { background: var(--border-strong); }
+.ciclo-pie { font-size: 0.78rem; margin: 0.1rem 0 0; }
+.dist-actual-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+@media (max-width: 380px) {
+  .ciclo-fila { grid-template-columns: minmax(0, 1fr) 4.2rem 3rem 4.4rem; }
+  .ciclo-celda { font-size: 0.64rem; }
+  .ciclo-suc { font-size: 0.8rem; }
+}

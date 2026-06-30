@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useToast, mensajeError } from '../../toast';
-import { EstadoDistChip, ParadaChip, FlujoStepper } from '../../flujo';
+import { EstadoDistChip, FaseChip, ParadaChip, FlujoStepper } from '../../flujo';
 
 interface DistResumen {
   id: number;
@@ -12,7 +12,7 @@ interface DistResumen {
   total_lineas: number;
 }
 
-const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Distribución #${d.id}`;
+const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Pedido #${d.id}`;
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 
@@ -29,7 +29,7 @@ export default function Distribucion() {
     try {
       setLista(await api<DistResumen[]>('/distribuciones'));
     } catch {
-      setError('No se pudieron cargar las distribuciones');
+      setError('No se pudieron cargar los pedidos');
     } finally {
       setCargando(false);
     }
@@ -41,7 +41,7 @@ export default function Distribucion() {
     try {
       const r = await api<{ id: number; lineas: number; sin_conteo: string[]; sin_existencia: string[] }>('/distribuciones', { method: 'POST', body: {} });
       const avisos: string[] = [];
-      if (r.sin_conteo.length) avisos.push(`Sucursales sin conteo cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
+      if (r.sin_conteo.length) avisos.push(`Sucursales sin inventario cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
       if (r.sin_existencia?.length) avisos.push(`Sin existencia en bodega central (excluidos): ${r.sin_existencia.join(', ')}`);
       if (avisos.length) setInfo(avisos.join(' · '));
       await cargar();
@@ -62,7 +62,7 @@ export default function Distribucion() {
       <header className="page-head">
         <div>
           <h1>Distribución</h1>
-          <p className="page-sub">Calcula el pedido maestro a partir de los conteos cerrados.</p>
+          <p className="page-sub">Calcula el pedido maestro a partir de los inventarios cerrados.</p>
         </div>
       </header>
 
@@ -72,10 +72,10 @@ export default function Distribucion() {
       {info && <p className="muted">{info}</p>}
 
       <button className="btn btn-primary btn-grande" onClick={() => void calcular()} disabled={calculando}>
-        {calculando ? 'Calculando…' : '+ Calcular distribución'}
+        {calculando ? 'Calculando…' : '+ Calcular pedido'}
       </button>
 
-      <h3 className="seccion-title">Distribuciones</h3>
+      <h3 className="seccion-title">Pedidos</h3>
       {cargando ? (
         <p className="muted">Cargando…</p>
       ) : lista.length === 0 ? (
@@ -86,7 +86,7 @@ export default function Distribucion() {
             <button key={d.id} className="card card-click" onClick={() => setAbierta(d.id)}>
               <div className="ubic-row">
                 <div>
-                  <strong>{tituloDist(d)}</strong> <EstadoDistChip estado={d.estado} />
+                  <strong>{tituloDist(d)}</strong> <FaseChip estado={d.estado} />
                   <div className="muted">
                     {new Date(d.creado_at).toLocaleString('es-MX', { timeZone: 'America/Chicago' })} · {d.total_lineas} líneas
                   </div>
@@ -193,13 +193,13 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
 
   async function renombrar() {
     const actual = nombre ?? '';
-    const nuevo = window.prompt('Nombre de la distribución (vacío para quitar):', actual);
+    const nuevo = window.prompt('Nombre del pedido (vacío para quitar):', actual);
     if (nuevo == null || nuevo.trim() === actual) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'PATCH', body: { nombre: nuevo.trim() } });
       await cargar();
-      toast.ok('Distribución renombrada.');
+      toast.ok('Pedido renombrado.');
     } catch (e) {
       setError(mensajeError(e, 'No se pudo renombrar.'));
     } finally {
@@ -208,11 +208,11 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   }
 
   async function eliminar() {
-    if (!window.confirm('¿Eliminar esta distribución? Se devolverá a la bodega central el inventario que las sucursales aún tengan de ella y se borrarán su ruta e incidencias. No se puede deshacer.')) return;
+    if (!window.confirm('¿Eliminar este pedido? Se devolverá a la bodega central el inventario que las sucursales aún tengan de él y se borrarán su ruta e incidencias. No se puede deshacer.')) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'DELETE' });
-      toast.ok('Distribución eliminada · inventario devuelto a bodega.');
+      toast.ok('Pedido eliminado · inventario devuelto a bodega.');
       onSalir();
     } catch (e) {
       setError(mensajeError(e, 'No se pudo eliminar.'));
@@ -225,7 +225,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
     try {
       if (Object.keys(edits).length) await guardarAjustes();
       await api(`/distribuciones/${id}/aprobar`, { method: 'POST' });
-      toast.ok('Distribución aprobada · lista para bodega.', {
+      toast.ok('Pedido aprobado · listo para bodega.', {
         label: 'Deshacer',
         onClick: async () => {
           try { await api(`/distribuciones/${id}/estado`, { method: 'PATCH', body: { estado: 'en_revision' } }); await cargar(); }
@@ -244,9 +244,9 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
     <div className="page conteo-page">
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← Distribuciones</button>
-          <h1>{nombre?.trim() || `Distribución #${id}`} {estado && <EstadoDistChip estado={estado} />}</h1>
-          {nombre?.trim() && <p className="page-sub">Distribución #{id}</p>}
+          <button className="link-btn" onClick={onSalir}>← Pedidos</button>
+          <h1>{nombre?.trim() || `Pedido #${id}`} {estado && <EstadoDistChip estado={estado} />}</h1>
+          {nombre?.trim() && <p className="page-sub">Pedido #{id}</p>}
         </div>
         <div className="dist-acciones">
           <button className="btn btn-secondary" disabled={busy} onClick={() => void renombrar()}>Renombrar</button>

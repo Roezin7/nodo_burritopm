@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { useToast, mensajeError } from '../../toast';
@@ -69,6 +70,7 @@ export default function Inventario() {
   const [modo, setModo] = useState<'bodega' | 'sucursales'>('bodega');
   const [stockKey, setStockKey] = useState(0); // fuerza recarga del stock tras una entrada
   const [entradaAbierta, setEntradaAbierta] = useState(false); // panel "Registrar entrada"
+  const [searchParams] = useSearchParams();
 
   const bodega = ubicaciones.find((u) => u.tipo === 'bodega') ?? null;
   const sucursales = ubicaciones.filter((u) => u.tipo === 'sucursal');
@@ -96,6 +98,14 @@ export default function Inventario() {
     }
     void cargarUbic();
   }, [esAdmin, usuario]);
+
+  // Deep-link desde el Tablero del ciclo: /inventario?ubicacion=ID abre esa sucursal directo.
+  useEffect(() => {
+    const u = searchParams.get('ubicacion');
+    if (!u) return;
+    const suc = ubicaciones.find((x) => String(x.id) === u && x.tipo === 'sucursal');
+    if (suc) { setModo('sucursales'); setUbicId(u); }
+  }, [searchParams, ubicaciones]);
 
   async function cargarUbicacion(uid: string) {
     if (!uid) return;
@@ -422,7 +432,7 @@ function AccionesBodega({ busy, entradaAbierta, onToggleEntrada, onTomarInventar
         <span className="accion-ico accion-ico--count" aria-hidden="true">✓</span>
         <span className="accion-tx">
           <strong>Tomar inventario</strong>
-          <small>Conteo físico para fijar las cantidades exactas.</small>
+          <small>Inventario físico para fijar las cantidades exactas.</small>
         </span>
       </button>
     </div>

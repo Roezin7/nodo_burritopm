@@ -1,7 +1,84 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import { ParadaChip } from '../flujo';
+import { ParadaChip, FaseChip, faseDistribucion } from '../flujo';
+
+// ── Tablero del ciclo: semáforo por sucursal (inventario / pedido / recepción) ──
+type EstadoCelda = 'cerrado' | 'abierto' | 'pendiente' | 'en' | 'sin' | 'recibido' | 'parcial' | 'na';
+interface FilaCiclo { id: number; nombre: string; conteo: 'cerrado' | 'abierto' | 'pendiente'; pedido: 'en' | 'sin' | 'na'; recepcion: 'recibido' | 'parcial' | 'pendiente' | 'na' }
+interface Ciclo { distribucion: { id: number; estado: string; total_lineas: number } | null; sucursales: FilaCiclo[] }
+
+// Color (tono) de cada estado de celda: verde=listo, ámbar=en proceso, rojo=falta, gris=n/a.
+const TONO: Record<EstadoCelda, 'ok' | 'warn' | 'bad' | 'na'> = {
+  cerrado: 'ok', recibido: 'ok', en: 'ok',
+  abierto: 'warn', parcial: 'warn',
+  pendiente: 'bad',
+  sin: 'na', na: 'na',
+};
+const ETIQUETA: Record<EstadoCelda, string> = {
+  cerrado: 'Listo', abierto: 'Captura', pendiente: 'Falta',
+  en: 'Sí', sin: 'No', recibido: 'Recibido', parcial: 'Parcial', na: '—',
+};
+
+function Celda({ v }: { v: EstadoCelda }) {
+  return (
+    <span className={`ciclo-celda ciclo-celda--${TONO[v]}`}>
+      <span className="ciclo-dot" />
+      {ETIQUETA[v]}
+    </span>
+  );
+}
+
+function TableroCiclo() {
+  const [c, setC] = useState<Ciclo | null>(null);
+  useEffect(() => { api<Ciclo>('/dashboard/ciclo').then(setC).catch(() => {}); }, []);
+  if (!c) return null;
+
+  const fase = c.distribucion ? faseDistribucion(c.distribucion.estado) : null;
+  const faltanConteo = c.sucursales.filter((s) => s.conteo !== 'cerrado').length;
+
+  return (
+    <div className="card ciclo-card">
+      <div className="ciclo-head">
+        <div className="ciclo-titulo">
+          <strong>Estado del ciclo</strong>
+          <small className="muted">{faltanConteo > 0 ? `${faltanConteo} sin cerrar inventario` : 'Inventarios al día'}</small>
+        </div>
+        {c.distribucion ? (
+          <Link className="ciclo-pedido" to="/distribucion">
+            <FaseChip estado={c.distribucion.estado} />
+            <small className="muted">Pedido #{c.distribucion.id}</small>
+          </Link>
+        ) : (
+          <Link className="link-btn" to="/distribucion">Calcular pedido →</Link>
+        )}
+      </div>
+
+      <div className="ciclo-tabla">
+        <div className="ciclo-fila ciclo-fila--head">
+          <span>Sucursal</span>
+          <span>Inventario</span>
+          <span>Pedido</span>
+          <span>Recepción</span>
+        </div>
+        {c.sucursales.map((s) => (
+          <Link key={s.id} to={`/inventario?ubicacion=${s.id}`} className="ciclo-fila ciclo-fila--link">
+            <span className="ciclo-suc">{s.nombre}</span>
+            <Celda v={s.conteo} />
+            <Celda v={s.pedido} />
+            <Celda v={s.recepcion} />
+          </Link>
+        ))}
+      </div>
+
+      {fase && (
+        <p className="muted ciclo-pie">
+          Fase actual del pedido: <strong>{fase.label}</strong>. {fase.clave === 'planeacion' ? 'Revisa y aprueba en Distribución.' : fase.clave === 'bodega' ? 'Bodega debe surtir y cargar.' : fase.clave === 'ruta' ? 'En reparto; las sucursales confirman recepción.' : 'Ciclo recibido.'}
+        </p>
+      )}
+    </div>
+  );
+}
 
 interface Panel {
   sucursales_total: number;
@@ -48,6 +125,8 @@ export default function PanelAdmin() {
 
   return (
     <div className="panel-admin">
+      <TableroCiclo />
+
       <div className="kpi-grid">
         <div className="kpi-card">
           <span className="kpi-label">Inventarios listos</span>
@@ -78,16 +157,19 @@ export default function PanelAdmin() {
 
       <div className="card">
         <div className="card-head">
-          <strong>Distribución actual</strong>
-          <Link className="link-btn" to="/distribucion">Ir a distribución →</Link>
+          <strong>Pedido actual</strong>
+          <Link className="link-btn" to="/distribucion">Ir a Distribución →</Link>
         </div>
         {p.distribucion_actual ? (
-          <div className="muted">
-            #{p.distribucion_actual.id} · {p.distribucion_actual.estado} · {p.distribucion_actual.total_lineas} líneas ·{' '}
-            {new Date(p.distribucion_actual.creado_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago' })}
+          <div className="dist-actual-row">
+            <FaseChip estado={p.distribucion_actual.estado} />
+            <span className="muted">
+              Pedido #{p.distribucion_actual.id} · {p.distribucion_actual.total_lineas} líneas ·{' '}
+              {new Date(p.distribucion_actual.creado_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago' })}
+            </span>
           </div>
         ) : (
-          <p className="muted">Aún no hay distribuciones. Calcula una cuando las sucursales cierren su conteo.</p>
+          <p className="muted">Aún no hay pedidos. Calcula uno cuando las sucursales cierren su inventario.</p>
         )}
       </div>
 
@@ -116,7 +198,7 @@ export default function PanelAdmin() {
             <div key={u.id} className="ubic-row">
               <div>
                 {u.nombre} <span className={`chip ${u.tipo === 'bodega' ? 'chip--info' : 'chip--ok'}`}>{u.tipo}</span>
-                {u.conteo_estado !== 'cerrado' && <span className="chip chip--warn">sin conteo cerrado</span>}
+                {u.conteo_estado !== 'cerrado' && <span className="chip chip--warn">sin inventario cerrado</span>}
               </div>
               <div className="dist-valor">{usd(u.valor)}</div>
             </div>
