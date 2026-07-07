@@ -39,7 +39,7 @@ export default function ActivarAvisos() {
         <small className="muted">
           {iosSinInstalar
             ? 'En iPhone: Compartir → Agregar a inicio, y abre la app desde ahí.'
-            : 'Te avisamos cuando toque inventario o llegue un pedido.'}
+            : 'Te avisamos cuando toque pedido o llegue una entrega.'}
         </small>
       </div>
       {!iosSinInstalar && (

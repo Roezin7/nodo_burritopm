@@ -41,8 +41,8 @@ export default function Distribucion() {
     try {
       const r = await api<{ id: number; lineas: number; sin_conteo: string[]; sin_existencia: string[] }>('/distribuciones', { method: 'POST', body: {} });
       const avisos: string[] = [];
-      if (r.sin_conteo.length) avisos.push(`Sucursales sin inventario cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
-      if (r.sin_existencia?.length) avisos.push(`Sin existencia en bodega central (excluidos): ${r.sin_existencia.join(', ')}`);
+      if (r.sin_conteo.length) avisos.push(`Sucursales sin pedido cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
+      if (r.sin_existencia?.length) avisos.push(`Sin existencia en bodega central: ${r.sin_existencia.join(', ')}`);
       if (avisos.length) setInfo(avisos.join(' · '));
       await cargar();
       setAbierta(r.id);
@@ -62,7 +62,7 @@ export default function Distribucion() {
       <header className="page-head">
         <div>
           <h1>Distribución</h1>
-          <p className="page-sub">Calcula el pedido maestro a partir de los inventarios cerrados.</p>
+          <p className="page-sub">Crea el pedido maestro a partir de los pedidos cerrados por cada sucursal.</p>
         </div>
       </header>
 
@@ -72,7 +72,7 @@ export default function Distribucion() {
       {info && <p className="muted">{info}</p>}
 
       <button className="btn btn-primary btn-grande" onClick={() => void calcular()} disabled={calculando}>
-        {calculando ? 'Calculando…' : '+ Calcular pedido'}
+        {calculando ? 'Creando…' : '+ Crear pedido'}
       </button>
 
       <h3 className="seccion-title">Pedidos</h3>
@@ -288,7 +288,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
       {editable && agregables.length > 0 && vista !== 'ruta' && (
         <div className="card">
           <div className="card-head"><strong>¿Falta una sucursal?</strong><span className="muted">cerró tarde</span></div>
-          <p className="muted" style={{ margin: '0 0 0.5rem' }}>Inclúyela sin rehacer el pedido: se calcula solo su parte y se suma a este.</p>
+          <p className="muted" style={{ margin: '0 0 0.5rem' }}>Inclúyela sin rehacer el pedido: se suma lo que pidió esa sucursal.</p>
           <div className="dist-suc-mini">
             {agregables.map((s) => (
               <button key={s.id} className="chip chip--info" style={{ cursor: 'pointer', border: 0 }} disabled={busy} onClick={() => void agregarSucursal(s.id)}>
@@ -352,7 +352,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
                 <div key={it.linea_id} className="dist-row">
                   <div className="conteo-prod">
                     <strong>{it.nombre}</strong>
-                    <small className="muted">{it.unidad} · tiene {it.disponible} · objetivo {it.stock_objetivo} · sugerido {it.cantidad_sugerida}</small>
+                    <small className="muted">{it.unidad} · pedido {it.cantidad_sugerida}</small>
                   </div>
                   {editable ? (
                     <input

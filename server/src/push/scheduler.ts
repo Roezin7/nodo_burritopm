@@ -2,7 +2,7 @@ import { prisma } from '../db.js';
 import { autoCerrarTransitoVencido } from '../distribuciones/service.js';
 import { avisarAdminRezagados, enviarAUsuarios, pushHabilitado, usuariosDeUbicacion } from './service.js';
 
-// Hora del negocio a partir de la cual se manda el aviso "hoy toca inventario".
+// Hora del negocio a partir de la cual se manda el aviso "hoy toca pedido" a sucursales.
 const HORA_AVISO = 8;
 // Hora a partir de la cual, si aún faltan sucursales por cerrar, se avisa al admin.
 const HORA_REZAGADOS = 11;
@@ -15,7 +15,7 @@ const diaSemanaEnTz = (d: Date, tz: string) =>
 const horaEnTz = (d: Date, tz: string) =>
   Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hour12: false }).format(d));
 
-/** Sucursales activas de un negocio sin inventario cerrado en la fecha dada (ISO yyyy-mm-dd). */
+/** Sucursales activas de un negocio sin pedido cerrado en la fecha dada (ISO yyyy-mm-dd). */
 async function sucursalesSinCerrar(negocioId: bigint, hoyISO: string) {
   const sucursales = await prisma.ubicaciones.findMany({ where: { negocio_id: negocioId, tipo: 'sucursal', activo: true } });
   const pendientes = [];
@@ -31,7 +31,7 @@ async function sucursalesSinCerrar(negocioId: bigint, hoyISO: string) {
 
 /**
  * Una vez al día (en día programado, a partir de HORA_AVISO en la zona del negocio) avisa a las
- * sucursales que aún no han cerrado su inventario de hoy. Idempotente vía aviso_inventario_at.
+ * sucursales que aún no han cerrado su pedido de hoy. Idempotente vía aviso_inventario_at.
  * Más tarde (HORA_REZAGADOS) avisa al admin de las que siguen pendientes (aviso_rezagados_at).
  */
 export async function tickAvisos() {
@@ -52,7 +52,7 @@ export async function tickAvisos() {
       await prisma.negocios.update({ where: { id: n.id }, data: { aviso_inventario_at: new Date(`${hoy}T00:00:00.000Z`) } });
       for (const s of await sucursalesSinCerrar(n.id, hoy)) {
         const usuarios = await usuariosDeUbicacion(s.id);
-        await enviarAUsuarios(usuarios, { titulo: 'Hoy toca inventario 📋', cuerpo: `Captura el inventario de ${s.nombre}.`, url: '/inventario' });
+        await enviarAUsuarios(usuarios, { titulo: 'Hoy toca pedido 📋', cuerpo: `Elige cuánto producto quieres recibir en ${s.nombre}.`, url: '/inventario' });
       }
     }
 
@@ -80,10 +80,10 @@ async function tick() {
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
-/** Arranca el chequeo periódico: avisos de inventario (si hay push) + auto-cierre de tránsito. */
+/** Arranca el chequeo periódico: avisos de pedido (si hay push) + auto-cierre de tránsito. */
 export function iniciarAvisos() {
   if (timer) return;
   void tick();
   timer = setInterval(() => void tick(), CADA_MS);
-  console.log('🔔 Scheduler activo (avisos de inventario + auto-cierre de tránsito).');
+  console.log('🔔 Scheduler activo (avisos de pedido + auto-cierre de tránsito).');
 }

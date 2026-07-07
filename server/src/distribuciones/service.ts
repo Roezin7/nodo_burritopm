@@ -1,13 +1,13 @@
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { sugerirEnvio, valor } from './logic.js';
+import { valor } from './logic.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.js';
 import { avisarPedidoEnCamino } from '../push/service.js';
 
-/** Último conteo CERRADO de la ubicación: mapa product_id(string) → disponible, y su id. */
-async function disponibleConteo(ubicacionId: bigint) {
+/** Último pedido CERRADO de la sucursal: mapa product_id(string) → cantidad pedida, y su id. */
+async function pedidoCerradoSucursal(ubicacionId: bigint) {
   const conteo = await prisma.conteos.findFirst({
     where: { ubicacion_id: ubicacionId, estado: 'cerrado' },
     orderBy: { cerrado_at: 'desc' },
@@ -31,72 +31,51 @@ type LineaCalculada = {
 };
 
 /**
- * Para cada sucursal dada, calcula las líneas sugeridas a partir de su último conteo cerrado,
- * sus parámetros (objetivo/seguridad/múltiplo/mínimo) y la existencia en vivo de la bodega.
+ * Para cada sucursal dada, copia su último pedido cerrado. En sucursales la cantidad capturada
+ * ya es lo que el restaurante quiere recibir; no se calcula contra stock objetivo.
  * Compartido por crearDistribucion y agregarSucursales (incluir una sucursal rezagada).
  */
-async function calcularLineasSucursales(
-  sucursales: { id: bigint; nombre: string }[],
-  disponibleBod: Map<string, number>,
-) {
-  const sinConteo: string[] = [];
-  const sinExistencia = new Set<string>(); // productos excluidos por no tener stock en bodega
+async function calcularLineasSucursales(sucursales: { id: bigint; nombre: string }[]) {
+  const sinPedido: string[] = [];
   const lineasData: LineaCalculada[] = [];
 
   for (const suc of sucursales) {
-    const { map: disp, conteoId } = await disponibleConteo(suc.id);
+    const { map: pedido, conteoId } = await pedidoCerradoSucursal(suc.id);
     if (conteoId == null) {
-      sinConteo.push(suc.nombre);
+      sinPedido.push(suc.nombre);
       continue;
     }
-    const params = await prisma.producto_ubicacion.findMany({
+    const productos = await prisma.producto_ubicacion.findMany({
       where: { ubicacion_id: suc.id, habilitado: true, products: { activo: true } },
       include: { products: { select: { id: true, nombre: true, ultimo_costo: true, costo_promedio: true } } },
     });
-    for (const pu of params) {
-      const disponible = disp.get(pu.product_id.toString()) ?? 0;
-      const sugerida = sugerirEnvio({
-        stock_objetivo: num0(pu.stock_objetivo),
-        stock_seguridad: num0(pu.stock_seguridad),
-        disponible,
-        en_transito: 0,
-        multiplo_distribucion: num0(pu.multiplo_distribucion) || 1,
-        minimo_envio: num0(pu.minimo_envio),
-      });
-      if (sugerida <= 0) continue;
-      // Regla bodega central: sin existencia en bodega no se distribuye este producto.
-      const enBodega = disponibleBod.get(pu.product_id.toString()) ?? 0;
-      if (enBodega <= 0) {
-        sinExistencia.add(pu.products.nombre);
-        continue;
-      }
+    for (const pu of productos) {
+      const cantidad = pedido.get(pu.product_id.toString()) ?? 0;
+      if (cantidad <= 0) continue;
       const costo = num(pu.products.ultimo_costo) ?? num(pu.products.costo_promedio);
       lineasData.push({
         ubicacion_destino_id: suc.id,
         product_id: pu.product_id,
         conteo_id: conteoId,
-        inventario_disponible: disponible,
-        stock_objetivo: num0(pu.stock_objetivo),
-        stock_seguridad: num0(pu.stock_seguridad),
-        cantidad_sugerida: sugerida,
+        inventario_disponible: 0,
+        stock_objetivo: 0,
+        stock_seguridad: 0,
+        cantidad_sugerida: cantidad,
         costo_unitario: costo,
-        costo_total: valor(sugerida, costo),
+        costo_total: valor(cantidad, costo),
       });
     }
   }
-  return { lineasData, sinConteo, sinExistencia };
+  return { lineasData, sinPedido };
 }
 
 /**
- * Calcula y crea una distribución a partir de los últimos conteos cerrados de las
- * sucursales activas. La sugerencia surge del conteo + parámetros (la sucursal no pide).
+ * Crea una distribución a partir de los últimos pedidos cerrados de las sucursales activas.
+ * La sucursal decide directamente cuánto quiere recibir; el admin revisa y aprueba.
  */
 export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ubicacionIds?: number[]) {
   // Todo sale de la bodega central (Adison): si no existe, no hay distribución posible.
   await bodegaDe(negocioId);
-  // Existencia EN VIVO de la bodega: es la fuente única. Un producto sin stock aquí NO se
-  // distribuye (no se generan líneas para él), aunque la sucursal esté por debajo de su objetivo.
-  const disponibleBod = await disponibleBodega(negocioId);
 
   const sucursales = await prisma.ubicaciones.findMany({
     where: {
@@ -108,17 +87,16 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
   });
   if (sucursales.length === 0) throw new HttpError(400, 'No hay sucursales activas para distribuir');
 
-  const { lineasData, sinConteo, sinExistencia } = await calcularLineasSucursales(sucursales, disponibleBod);
+  const { lineasData, sinPedido } = await calcularLineasSucursales(sucursales);
 
   if (lineasData.length === 0) {
     const partes: string[] = [];
-    if (sinConteo.length) partes.push(`Sucursales sin conteo cerrado: ${sinConteo.join(', ')}.`);
-    if (sinExistencia.size) partes.push(`Sin existencia en bodega central: ${[...sinExistencia].join(', ')}.`);
+    if (sinPedido.length) partes.push(`Sucursales sin pedido cerrado: ${sinPedido.join(', ')}.`);
     throw new HttpError(
       400,
       partes.length
         ? `No hay nada que distribuir. ${partes.join(' ')}`
-        : 'No hay nada que distribuir: todas las sucursales están en su nivel objetivo.',
+        : 'No hay nada que distribuir: las sucursales no pidieron producto.',
     );
   }
 
@@ -132,14 +110,14 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
     return d;
   });
 
-  return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinConteo, sin_existencia: [...sinExistencia] };
+  return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinPedido, sin_existencia: [] };
 }
 
 // Estados en los que el pedido aún se puede editar / ampliar (antes de aprobar y salir a bodega).
 const ESTADOS_EDITABLES = ['calculada', 'en_revision'];
 
 /**
- * Sucursales que pueden sumarse a un pedido aún editable: activas, con conteo cerrado y que
+ * Sucursales que pueden sumarse a un pedido aún editable: activas, con pedido cerrado y que
  * todavía no están en el pedido. Es la lista para "incluir una sucursal rezagada".
  */
 export async function sucursalesAgregables(negocioId: bigint, id: bigint) {
@@ -182,13 +160,11 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
   })).filter((s) => !yaIds.has(s.id.toString()));
   if (sucursales.length === 0) throw new HttpError(400, 'Esas sucursales ya están en el pedido o no existen.');
 
-  const disponibleBod = await disponibleBodega(negocioId);
-  const { lineasData, sinConteo, sinExistencia } = await calcularLineasSucursales(sucursales, disponibleBod);
+  const { lineasData, sinPedido } = await calcularLineasSucursales(sucursales);
 
   if (lineasData.length === 0) {
     const partes: string[] = [];
-    if (sinConteo.length) partes.push(`Sin inventario cerrado: ${sinConteo.join(', ')}.`);
-    if (sinExistencia.size) partes.push(`Sin existencia en bodega: ${[...sinExistencia].join(', ')}.`);
+    if (sinPedido.length) partes.push(`Sin pedido cerrado: ${sinPedido.join(', ')}.`);
     throw new HttpError(400, partes.length ? `No hay nada que agregar. ${partes.join(' ')}` : 'No hay nada que agregar para esas sucursales.');
   }
 
@@ -196,7 +172,7 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
   const agregadas = [...new Set(lineasData.map((l) => l.ubicacion_destino_id.toString()))]
     .map((uid) => sucursales.find((s) => s.id.toString() === uid)?.nombre)
     .filter((n): n is string => Boolean(n));
-  return { agregadas, lineas: lineasData.length, sin_conteo: sinConteo, sin_existencia: [...sinExistencia] };
+  return { agregadas, lineas: lineasData.length, sin_conteo: sinPedido, sin_existencia: [] };
 }
 
 /** Control total del admin: fija el estado de la distribución a cualquier valor (override). */

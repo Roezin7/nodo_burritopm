@@ -12,7 +12,7 @@ const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const EN_RUTA_O_DESPUES = new Set(['en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias']);
 
 /**
- * GET /dashboard/ciclo — semáforo del ciclo por sucursal: inventario (de hoy), si está en el
+ * GET /dashboard/ciclo — semáforo del ciclo por sucursal: pedido (de hoy), si está en el
  * pedido actual y su recepción. Una sola fila por sucursal para que el admin vea de un vistazo
  * quién frena el ciclo.
  */
@@ -34,13 +34,13 @@ dashboardRouter.get(
     });
 
     const sucIds = sucursales.map((s) => s.id);
-    // Conteo de HOY por sucursal (una sola consulta).
+    // Pedido de HOY por sucursal (una sola consulta; usa la tabla de conteos como sesión).
     const conteosHoy = await prisma.conteos.findMany({
       where: { negocio_id: negocioId, fecha: hoy, ubicacion_id: { in: sucIds } },
       select: { ubicacion_id: true, estado: true },
     });
     const conteoDe = new Map(conteosHoy.map((c) => [c.ubicacion_id.toString(), c.estado]));
-    // Sucursales con algún conteo ya cerrado (para no marcar "falta" en días sin inventario).
+    // Sucursales con algún pedido ya cerrado (para no marcar "falta" fuera del día programado).
     const cerradosPrevios = await prisma.conteos.findMany({
       where: { negocio_id: negocioId, estado: 'cerrado', ubicacion_id: { in: sucIds } },
       distinct: ['ubicacion_id'],
@@ -119,21 +119,26 @@ dashboardRouter.get(
       const cerrado = await prisma.conteos.findFirst({
         where: { ubicacion_id: u.id, estado: 'cerrado' },
         orderBy: { cerrado_at: 'desc' },
-        include: { lineas: { include: { products: { select: { ultimo_costo: true, costo_promedio: true } } } } },
+        select: { cerrado_at: true },
       });
 
+      const existencias = await prisma.existencias.findMany({
+        where: { ubicacion_id: u.id },
+        include: { products: { select: { ultimo_costo: true, costo_promedio: true } } },
+      });
       let valor = 0;
-      if (cerrado) {
-        for (const l of cerrado.lineas) {
-          const costo = num(l.products.ultimo_costo) ?? num(l.products.costo_promedio) ?? 0;
-          valor += num0(l.qty) * costo;
-        }
-        // Productos bajo mínimo en esta ubicación.
+      for (const e of existencias) {
+        const costo = num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0;
+        valor += num0(e.cantidad_disponible) * costo;
+      }
+
+      // Bajo mínimo aplica al inventario operativo de bodega; sucursales ya piden directo.
+      if (u.tipo === 'bodega') {
         const params = await prisma.producto_ubicacion.findMany({
           where: { ubicacion_id: u.id, habilitado: true },
           select: { product_id: true, stock_min: true },
         });
-        const qtyDe = new Map(cerrado.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]));
+        const qtyDe = new Map(existencias.map((e) => [e.product_id.toString(), num0(e.cantidad_disponible)]));
         for (const p of params) {
           const min = num0(p.stock_min);
           if (min > 0 && (qtyDe.get(p.product_id.toString()) ?? 0) < min) bajo_minimo++;

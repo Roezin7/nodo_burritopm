@@ -74,6 +74,7 @@ export default function Inventario() {
 
   const bodega = ubicaciones.find((u) => u.tipo === 'bodega') ?? null;
   const sucursales = ubicaciones.filter((u) => u.tipo === 'sucursal');
+  const ubicActiva = ubicaciones.find((u) => String(u.id) === ubicId) ?? null;
 
   // Cargar ubicaciones disponibles según rol. El admin entra centrado en la Bodega.
   useEffect(() => {
@@ -157,9 +158,9 @@ export default function Inventario() {
   const histFiltrado = inventarios.filter((c) => !t || fechaLarga(c.fecha).toLowerCase().includes(t) || c.estado.toLowerCase().includes(t));
 
   // Solo el historial de inventarios (lista). Se reutiliza en bodega y sucursales.
-  const renderHistorial = () => (
+  const renderHistorial = (esPedido = false) => (
     <>
-      <h3 className="seccion-title">Historial de inventarios</h3>
+      <h3 className="seccion-title">{esPedido ? 'Historial de pedidos' : 'Historial de inventarios'}</h3>
       {inventarios.length > 8 && (
         <input className="inv-search" type="search" placeholder="Buscar por fecha…" value={q} onChange={(e) => setQ(e.target.value)} />
       )}
@@ -171,7 +172,7 @@ export default function Inventario() {
             <button key={c.id} className="card card-click" onClick={() => void abrir(c.id)}>
               <div className="ubic-row">
                 <div>
-                  <strong className="inv-fecha-titulo">Inventario {fechaLarga(c.fecha)}</strong>{' '}
+                  <strong className="inv-fecha-titulo">{esPedido ? 'Pedido' : 'Inventario'} {fechaLarga(c.fecha)}</strong>{' '}
                   <EstadoChip estado={c.estado} />
                   <div className="muted">{c.contadas}/{c.total_lineas} contados</div>
                 </div>
@@ -185,17 +186,16 @@ export default function Inventario() {
   );
 
   // Sesión de hoy + historial (sucursal/personal). `promo`=false usa el aviso discreto.
-  const renderSeccion = (promo: boolean) => (
+  const renderSeccion = (promo: boolean, esPedido = false) => (
     <>
-      {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} discreto={!promo} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
-      {renderHistorial()}
+      {sesion && <HoyCard sesion={sesion} esAdmin={esAdmin} esPedido={esPedido} discreto={!promo} busy={busy} onTomar={() => void tomarHoy()} onAbrir={abrir} />}
+      {renderHistorial(esPedido)}
     </>
   );
 
   // ── Admin: bodega central (gestiona) + revisión de sucursales ──────────────
   if (esAdmin) {
     const enSucursal = modo === 'sucursales' && ubicId && bodega && ubicId !== String(bodega.id);
-    const nombreActivo = ubicaciones.find((u) => String(u.id) === ubicId)?.nombre ?? '';
     return (
       <div className="page">
         <header className="page-head">
@@ -235,8 +235,7 @@ export default function Inventario() {
         ) : enSucursal ? (
           <>
             <button className="link-btn" onClick={() => setUbicId('')}>← Todas las sucursales</button>
-            <StockActual key={`${ubicId}:${stockKey}`} ubicId={ubicId} nombre={nombreActivo} />
-            {renderSeccion(true)}
+            {renderSeccion(true, true)}
           </>
         ) : (
           <SucursalesOverview sucursales={sucursales} onElegir={setUbicId} />
@@ -251,7 +250,7 @@ export default function Inventario() {
       <header className="page-head">
         <div>
           <h1>Inventario</h1>
-          <p className="page-sub">Captura el inventario físico de tu ubicación.</p>
+          <p className="page-sub">{ubicActiva?.tipo === 'sucursal' ? 'Elige cuánto producto quieres que te envíen.' : 'Captura el inventario físico de tu ubicación.'}</p>
         </div>
       </header>
       <FlujoStepper activo="conteo" />
@@ -262,8 +261,8 @@ export default function Inventario() {
         <>
           <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
-          {ubicId && <StockActual key={ubicId} ubicId={ubicId} nombre={ubicaciones.find((u) => String(u.id) === ubicId)?.nombre ?? ''} />}
-          {renderSeccion(true)}
+          {ubicId && ubicActiva?.tipo === 'bodega' && <StockActual key={ubicId} ubicId={ubicId} nombre={ubicActiva.nombre} />}
+          {renderSeccion(true, ubicActiva?.tipo === 'sucursal')}
         </>
       )}
     </div>
@@ -271,20 +270,22 @@ export default function Inventario() {
 }
 
 /** Tarjeta de la sesión de inventario de hoy. `discreto` oculta el aviso grande de "abrir". */
-function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir, discreto = false }: { sesion: Sesion; esAdmin: boolean; busy: boolean; onTomar: () => void; onAbrir: (id: number) => void; discreto?: boolean }) {
+function HoyCard({ sesion, esAdmin, esPedido = false, busy, onTomar, onAbrir, discreto = false }: { sesion: Sesion; esAdmin: boolean; esPedido?: boolean; busy: boolean; onTomar: () => void; onAbrir: (id: number) => void; discreto?: boolean }) {
   const c = sesion.conteo;
   const cerrado = c?.estado === 'cerrado';
+  const nombre = esPedido ? 'Pedido' : 'Inventario';
+  const nombreMin = nombre.toLowerCase();
 
   // Ya existe el inventario de hoy.
   if (c) {
     return (
       <div className={`hoy-card ${cerrado ? 'hoy-card--cerrado' : ''}`}>
-        <div className="hoy-card-fecha">Inventario de hoy · {fechaLarga(sesion.fecha)}</div>
+        <div className="hoy-card-fecha">{nombre} de hoy · {fechaLarga(sesion.fecha)}</div>
         <p className="muted" style={{ margin: '0.2rem 0 0.8rem' }}>
-          {cerrado ? 'Cerrado — es la foto oficial de hoy.' : `En captura · ${c.contadas}/${c.total_lineas} contados`}
+          {cerrado ? (esPedido ? 'Cerrado — listo para que admin lo apruebe.' : 'Cerrado — es la foto oficial de hoy.') : `En captura · ${c.contadas}/${c.total_lineas} productos`}
         </p>
         <button className="btn btn-primary" onClick={() => onAbrir(c.id)}>
-          {cerrado ? 'Ver inventario' : 'Continuar inventario'}
+          {cerrado ? `Ver ${nombreMin}` : `Continuar ${nombreMin}`}
         </button>
       </div>
     );
@@ -303,12 +304,12 @@ function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir, discreto = false }: 
   if (sesion.programado || esAdmin) {
     return (
       <div className="hoy-card">
-        <div className="hoy-card-fecha">{sesion.programado ? 'Hoy toca inventario' : 'Abrir inventario'} · {fechaLarga(sesion.fecha)}</div>
+        <div className="hoy-card-fecha">{sesion.programado ? `Hoy toca ${nombreMin}` : `Abrir ${nombreMin}`} · {fechaLarga(sesion.fecha)}</div>
         <p className="muted" style={{ margin: '0.2rem 0 0.8rem' }}>
-          {sesion.programado ? 'El espacio de hoy está habilitado.' : 'Hoy no es día programado, pero puedes abrir uno como admin.'}
+          {sesion.programado ? 'El espacio de hoy está habilitado.' : `Hoy no es día programado, pero puedes abrir ${esPedido ? 'un pedido' : 'un inventario'} como admin.`}
         </p>
         <button className="btn btn-primary" disabled={busy} onClick={onTomar}>
-          Tomar inventario de hoy
+          {esPedido ? 'Hacer pedido de hoy' : 'Tomar inventario de hoy'}
         </button>
       </div>
     );
@@ -317,9 +318,9 @@ function HoyCard({ sesion, esAdmin, busy, onTomar, onAbrir, discreto = false }: 
   // No programado y no admin: solo informativo.
   return (
     <div className="card">
-      <strong>Hoy no es día de inventario</strong>
+      <strong>{esPedido ? 'Hoy no es día de pedido' : 'Hoy no es día de inventario'}</strong>
       <p className="muted" style={{ margin: '0.3rem 0 0' }}>
-        {sesion.proximo ? <>Próximo inventario: <strong className="inv-fecha-titulo">{fechaLarga(sesion.proximo)}</strong>.</> : 'Aún no hay días de inventario configurados.'}
+        {sesion.proximo ? <>Próximo {nombreMin}: <strong className="inv-fecha-titulo">{fechaLarga(sesion.proximo)}</strong>.</> : `Aún no hay días de ${nombreMin} configurados.`}
       </p>
     </div>
   );
@@ -558,6 +559,7 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
   const [colapsadas, setColapsadas] = useState<Set<string>>(new Set());
   const editable = detalle.editable;
   const esAdmin = usuario?.rol === 'admin';
+  const esPedido = detalle.ubicacion.tipo === 'sucursal';
 
   // Filtro por búsqueda (nombre / SKU) y agrupado por categoría.
   const grupos = useMemo(() => {
@@ -626,10 +628,10 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
       await api(`/conteos/${detalle.id}/cerrar`, { method: 'POST' });
       setArmado(false);
       // El admin puede deshacer (reabrir); la sucursal pide al admin si se equivocó.
-      toast.ok('Inventario cerrado.', esAdmin ? { label: 'Deshacer', onClick: () => void reabrir() } : undefined);
+      toast.ok(esPedido ? 'Pedido cerrado.' : 'Inventario cerrado.', esAdmin ? { label: 'Deshacer', onClick: () => void reabrir() } : undefined);
       onRecargar();
     } catch (e) {
-      setError(mensajeError(e, 'No se pudo cerrar el inventario. Reintenta.'));
+      setError(mensajeError(e, esPedido ? 'No se pudo cerrar el pedido. Reintenta.' : 'No se pudo cerrar el inventario. Reintenta.'));
       setGuardando(false);
     }
   }
@@ -637,7 +639,7 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
   async function reabrir() {
     try {
       await api(`/conteos/${detalle.id}/reabrir`, { method: 'POST' });
-      toast.ok('Inventario reabierto.');
+      toast.ok(esPedido ? 'Pedido reabierto.' : 'Inventario reabierto.');
       onRecargar();
     } catch (e) {
       toast.error(mensajeError(e, 'No se pudo reabrir.'));
@@ -647,13 +649,13 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
   async function eliminar() {
     const cerrado = detalle.estado === 'cerrado' || detalle.estado === 'reabierto';
     const msg = cerrado
-      ? 'Eliminar este inventario revertirá el stock a como estaba antes de cerrarlo y borrará la sesión. ¿Continuar?'
-      : '¿Eliminar este inventario? No se podrá recuperar.';
+      ? (esPedido ? '¿Eliminar este pedido cerrado? No se podrá recuperar.' : 'Eliminar este inventario revertirá el stock a como estaba antes de cerrarlo y borrará la sesión. ¿Continuar?')
+      : `¿Eliminar este ${esPedido ? 'pedido' : 'inventario'}? No se podrá recuperar.`;
     if (!window.confirm(msg)) return;
     setGuardando(true);
     try {
       await api(`/conteos/${detalle.id}`, { method: 'DELETE' });
-      toast.ok(cerrado ? 'Inventario eliminado · stock revertido.' : 'Inventario eliminado.');
+      toast.ok(esPedido ? 'Pedido eliminado.' : cerrado ? 'Inventario eliminado · stock revertido.' : 'Inventario eliminado.');
       onSalir();
     } catch (e) {
       toast.error(mensajeError(e, 'No se pudo eliminar.'));
@@ -665,8 +667,8 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
     <div className="page conteo-page">
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← Inventarios</button>
-          <h1 className="inv-fecha-titulo">Inventario {fechaLarga(detalle.fecha)} <EstadoChip estado={detalle.estado} /></h1>
+          <button className="link-btn" onClick={onSalir}>← {esPedido ? 'Pedidos' : 'Inventarios'}</button>
+          <h1 className="inv-fecha-titulo">{esPedido ? 'Pedido' : 'Inventario'} {fechaLarga(detalle.fecha)} <EstadoChip estado={detalle.estado} /></h1>
           <p className="page-sub">{detalle.ubicacion.nombre}</p>
         </div>
       </header>
@@ -705,7 +707,7 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
               <div key={l.product_id} className={`conteo-row2 ${l.contado ? 'conteo-row2--ok' : ''} ${l.atipico ? 'conteo-row2--atip' : ''}`}>
                 <div className="conteo-prod">
                   <strong>{l.nombre}</strong>
-                  <small className="muted">{l.unidad}{l.stock_objetivo > 0 ? ` · objetivo ${l.stock_objetivo}` : ''}{l.atipico ? ' · atípico' : ''}</small>
+                  <small className="muted">{l.unidad}{!esPedido && l.stock_objetivo > 0 ? ` · objetivo ${l.stock_objetivo}` : ''}{l.atipico ? ' · atípico' : ''}</small>
                 </div>
                 <div className="qty-stepper">
                   <button type="button" className="qty-btn" disabled={!editable} aria-label="menos" onClick={() => inc(l.product_id, -1)}>−</button>
@@ -735,24 +737,24 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
 
       {editable ? (
         <div className="action-bar action-bar--col">
-          {armado && <p className="armar-aviso">Queda como la foto oficial de hoy{pendientes > 0 ? ` · ${pendientes} sin contar` : ''}. Toca de nuevo para confirmar.</p>}
+          {armado && <p className="armar-aviso">{esPedido ? 'Queda como el pedido oficial de hoy para aprobación' : 'Queda como la foto oficial de hoy'}{pendientes > 0 ? ` · ${pendientes} sin revisar` : ''}. Toca de nuevo para confirmar.</p>}
           <div className="action-bar-row">
             <button className="btn btn-secondary" onClick={() => void guardar()} disabled={guardando}>Guardar avance</button>
             {armado ? (
               <button className="btn btn-primary" onClick={() => void cerrar()} disabled={guardando}>Confirmar cierre</button>
             ) : (
-              <button className="btn btn-primary" onClick={() => { setArmado(true); setTimeout(() => setArmado(false), 5000); }} disabled={guardando}>Cerrar inventario</button>
+              <button className="btn btn-primary" onClick={() => { setArmado(true); setTimeout(() => setArmado(false), 5000); }} disabled={guardando}>{esPedido ? 'Cerrar pedido' : 'Cerrar inventario'}</button>
             )}
           </div>
           {esAdmin && (
-            <button className="btn btn-danger-ghost btn-sm" onClick={() => void eliminar()} disabled={guardando}>Eliminar inventario</button>
+            <button className="btn btn-danger-ghost btn-sm" onClick={() => void eliminar()} disabled={guardando}>Eliminar {esPedido ? 'pedido' : 'inventario'}</button>
           )}
         </div>
       ) : (
         esAdmin && (
           <div className="action-bar action-bar-row">
-            <button className="btn btn-ghost" onClick={() => void reabrir()} disabled={guardando}>Reabrir inventario</button>
-            <button className="btn btn-danger-ghost" onClick={() => void eliminar()} disabled={guardando}>Eliminar inventario</button>
+            <button className="btn btn-ghost" onClick={() => void reabrir()} disabled={guardando}>Reabrir {esPedido ? 'pedido' : 'inventario'}</button>
+            <button className="btn btn-danger-ghost" onClick={() => void eliminar()} disabled={guardando}>Eliminar {esPedido ? 'pedido' : 'inventario'}</button>
           </div>
         )
       )}

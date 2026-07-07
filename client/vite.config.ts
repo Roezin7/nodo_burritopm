@@ -37,8 +37,8 @@ export default defineConfig({
           { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
         shortcuts: [
-          { name: 'Inventario', short_name: 'Inventario', url: '/inventario', description: 'Capturar el inventario' },
-          { name: 'Distribución', short_name: 'Pedidos', url: '/distribucion', description: 'Calcular y aprobar pedidos' },
+          { name: 'Pedido / inventario', short_name: 'Pedido', url: '/inventario', description: 'Capturar pedido de sucursal o inventario de bodega' },
+          { name: 'Distribución', short_name: 'Pedidos', url: '/distribucion', description: 'Crear y aprobar pedidos' },
           { name: 'Recepción', short_name: 'Recepción', url: '/recepcion', description: 'Confirmar lo que llega' },
         ],
       },

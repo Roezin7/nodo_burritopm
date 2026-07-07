@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { ParadaChip, FaseChip, faseDistribucion } from '../flujo';
 
-// ── Tablero del ciclo: semáforo por sucursal (inventario / pedido / recepción) ──
+// ── Tablero del ciclo: semáforo por sucursal (pedido / distribución / recepción) ──
 type EstadoCelda = 'cerrado' | 'abierto' | 'pendiente' | 'en' | 'sin' | 'recibido' | 'parcial' | 'na';
 interface FilaCiclo { id: number; nombre: string; conteo: 'cerrado' | 'abierto' | 'pendiente'; pedido: 'en' | 'sin' | 'na'; recepcion: 'recibido' | 'parcial' | 'pendiente' | 'na' }
 interface Ciclo { distribucion: { id: number; estado: string; total_lineas: number } | null; sucursales: FilaCiclo[] }
@@ -42,7 +42,7 @@ function TableroCiclo() {
       <div className="ciclo-head">
         <div className="ciclo-titulo">
           <strong>Estado del ciclo</strong>
-          <small className="muted">{faltanConteo > 0 ? `${faltanConteo} sin cerrar inventario` : 'Inventarios al día'}</small>
+          <small className="muted">{faltanConteo > 0 ? `${faltanConteo} sin cerrar pedido` : 'Pedidos al día'}</small>
         </div>
         {c.distribucion ? (
           <Link className="ciclo-pedido" to="/distribucion">
@@ -50,14 +50,14 @@ function TableroCiclo() {
             <small className="muted">Pedido #{c.distribucion.id}</small>
           </Link>
         ) : (
-          <Link className="link-btn" to="/distribucion">Calcular pedido →</Link>
+          <Link className="link-btn" to="/distribucion">Crear pedido →</Link>
         )}
       </div>
 
       <div className="ciclo-tabla">
         <div className="ciclo-fila ciclo-fila--head">
           <span>Sucursal</span>
-          <span>Inventario</span>
+          <span>Pedido sucursal</span>
           <span>Pedido</span>
           <span>Recepción</span>
         </div>
@@ -129,11 +129,11 @@ export default function PanelAdmin() {
 
       <div className="kpi-grid">
         <div className="kpi-card">
-          <span className="kpi-label">Inventarios listos</span>
+          <span className="kpi-label">Pedidos listos</span>
           <span className="big-number">{p.conteos_listos}<small className="muted">/{p.sucursales_total}</small></span>
         </div>
         <div className={`kpi-card ${p.conteos_pendientes > 0 ? 'kpi-card--warn' : ''}`}>
-          <span className="kpi-label">Inventarios pendientes</span>
+          <span className="kpi-label">Pedidos pendientes</span>
           <span className="big-number">{p.conteos_pendientes}</span>
         </div>
         <div className={`kpi-card ${p.bajo_minimo > 0 ? 'kpi-card--warn' : ''}`}>
@@ -148,7 +148,7 @@ export default function PanelAdmin() {
 
       {p.conteos_pendientes > 0 && (
         <div className="card card--falt">
-          <strong>Sucursales sin inventario cerrado</strong>
+          <strong>Sucursales sin pedido cerrado</strong>
           <div className="dist-suc-mini">
             {p.sucursales_pendientes.map((s) => <span key={s.id}>{s.nombre}</span>)}
           </div>
@@ -169,7 +169,7 @@ export default function PanelAdmin() {
             </span>
           </div>
         ) : (
-          <p className="muted">Aún no hay pedidos. Calcula uno cuando las sucursales cierren su inventario.</p>
+          <p className="muted">Aún no hay pedidos. Crea uno cuando las sucursales cierren su pedido.</p>
         )}
       </div>
 
@@ -198,7 +198,7 @@ export default function PanelAdmin() {
             <div key={u.id} className="ubic-row">
               <div>
                 {u.nombre} <span className={`chip ${u.tipo === 'bodega' ? 'chip--info' : 'chip--ok'}`}>{u.tipo}</span>
-                {u.conteo_estado !== 'cerrado' && <span className="chip chip--warn">sin inventario cerrado</span>}
+                {u.tipo === 'sucursal' && u.conteo_estado !== 'cerrado' && <span className="chip chip--warn">sin pedido cerrado</span>}
               </div>
               <div className="dist-valor">{usd(u.valor)}</div>
             </div>

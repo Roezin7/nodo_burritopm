@@ -34,6 +34,15 @@ async function negocioProg(negocioId: bigint) {
   return { tz: n?.zona_horaria ?? 'America/Chicago', dias: n?.inventario_dias ?? [] };
 }
 
+async function tipoUbicacion(negocioId: bigint, ubicacionId: bigint) {
+  const ubic = await prisma.ubicaciones.findFirst({
+    where: { id: ubicacionId, negocio_id: negocioId },
+    select: { tipo: true },
+  });
+  if (!ubic) throw new HttpError(404, 'Ubicación no encontrada');
+  return ubic.tipo;
+}
+
 /** Lista de conteos de una ubicación, con un pequeño resumen de avance (ordenada por fecha). */
 export async function listarConteos(negocioId: bigint, ubicacionId: bigint) {
   const conteos = await prisma.conteos.findMany({
@@ -104,7 +113,7 @@ export async function abrirConteoDeHoy(negocioId: bigint, ubicacionId: bigint, u
     include: { products: { select: { id: true, unidad_distribucion_id: true } } },
   });
   if (habilitados.length === 0) {
-    throw new HttpError(400, 'Esta ubicación no tiene productos habilitados. Configúralos en Stock objetivo.');
+    throw new HttpError(400, 'Esta ubicación no tiene productos habilitados. Configúralos en el catálogo por ubicación.');
   }
 
   const conteo = await prisma.$transaction(async (tx) => {
@@ -126,7 +135,7 @@ export async function abrirConteoDeHoy(negocioId: bigint, ubicacionId: bigint, u
   return { id: Number(conteo.id), reusado: false };
 }
 
-/** Detalle de un conteo con sus líneas (info de producto, categoría, objetivo). */
+/** Detalle de un conteo con sus líneas (info de producto y categoría). */
 export async function detalleConteo(negocioId: bigint, conteoId: bigint) {
   const conteo = await prisma.conteos.findFirst({
     where: { id: conteoId, negocio_id: negocioId },
@@ -134,16 +143,17 @@ export async function detalleConteo(negocioId: bigint, conteoId: bigint) {
   });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
 
-  const [lineas, params] = await Promise.all([
-    prisma.conteo_lineas.findMany({
-      where: { conteo_id: conteoId },
-      include: { products: { include: { categorias: true, unidad_distribucion: true } } },
-    }),
-    prisma.producto_ubicacion.findMany({
-      where: { ubicacion_id: conteo.ubicacion_id },
-      select: { product_id: true, stock_objetivo: true },
-    }),
-  ]);
+  const lineas = await prisma.conteo_lineas.findMany({
+    where: { conteo_id: conteoId },
+    include: { products: { include: { categorias: true, unidad_distribucion: true } } },
+  });
+  const esBodega = conteo.ubicaciones.tipo === 'bodega';
+  const params = esBodega
+    ? await prisma.producto_ubicacion.findMany({
+        where: { ubicacion_id: conteo.ubicacion_id },
+        select: { product_id: true, stock_objetivo: true },
+      })
+    : [];
   const objetivoDe = new Map(params.map((p) => [p.product_id.toString(), num0(p.stock_objetivo)]));
 
   return {
@@ -178,23 +188,26 @@ export interface LineaInput {
   comentario?: string | null;
 }
 
-/** Guarda avance del conteo (solo si es editable). Marca atípicos (qty > 4× objetivo). */
+/** Guarda avance del conteo/pedido (solo si es editable). En bodega marca atípicos contra objetivo. */
 export async function guardarLineas(negocioId: bigint, conteoId: bigint, lineas: LineaInput[]) {
   const conteo = await prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
   if (!esEditable(conteo.estado)) throw new HttpError(409, 'El conteo ya está cerrado; pide reabrirlo para editarlo.');
 
-  const objetivos = await prisma.producto_ubicacion.findMany({
-    where: { ubicacion_id: conteo.ubicacion_id },
-    select: { product_id: true, stock_objetivo: true },
-  });
+  const esBodega = (await tipoUbicacion(negocioId, conteo.ubicacion_id)) === 'bodega';
+  const objetivos = esBodega
+    ? await prisma.producto_ubicacion.findMany({
+        where: { ubicacion_id: conteo.ubicacion_id },
+        select: { product_id: true, stock_objetivo: true },
+      })
+    : [];
   const objetivoDe = new Map(objetivos.map((p) => [p.product_id.toString(), num0(p.stock_objetivo)]));
 
   await prisma.$transaction(
     lineas.map((l) => {
       const objetivo = objetivoDe.get(l.product_id.toString()) ?? 0;
       const qty = l.qty ?? 0;
-      const atipico = objetivo > 0 && qty > objetivo * 4;
+      const atipico = esBodega && objetivo > 0 && qty > objetivo * 4;
       return prisma.conteo_lineas.update({
         where: { conteo_id_product_id: { conteo_id: conteoId, product_id: BigInt(l.product_id) } },
         data: {
@@ -212,7 +225,7 @@ export async function guardarLineas(negocioId: bigint, conteoId: bigint, lineas:
   return { ok: true, guardadas: lineas.length };
 }
 
-/** Cierra el conteo (fotografía inmutable). */
+/** Cierra el conteo/pedido. Solo bodega reconcilia existencias; sucursal registra un pedido. */
 export async function cerrarConteo(negocioId: bigint, conteoId: bigint, usuarioId: bigint) {
   const conteo = await prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
@@ -221,8 +234,10 @@ export async function cerrarConteo(negocioId: bigint, conteoId: bigint, usuarioI
     where: { id: conteoId },
     data: { estado: 'cerrado', cerrado_por: usuarioId, cerrado_at: new Date() },
   });
-  // Un conteo cerrado es la verdad física: sincroniza las existencias de la ubicación.
-  await reconciliarConteo(negocioId, conteoId, usuarioId, conteo.ubicacion_id);
+  if ((await tipoUbicacion(negocioId, conteo.ubicacion_id)) === 'bodega') {
+    // Un conteo cerrado de bodega es la verdad física: sincroniza sus existencias.
+    await reconciliarConteo(negocioId, conteoId, usuarioId, conteo.ubicacion_id);
+  }
   return { ok: true };
 }
 

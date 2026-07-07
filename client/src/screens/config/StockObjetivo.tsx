@@ -19,22 +19,8 @@ interface Item {
   minimo_envio: number;
 }
 
-type Sub = 'manual' | 'motor' | 'historial';
-
 export default function StockObjetivo() {
-  const [sub, setSub] = useState<Sub>('manual');
-  return (
-    <div>
-      <div className="tabs">
-        <button className={sub === 'manual' ? 'tab tab--on' : 'tab'} onClick={() => setSub('manual')}>Manual</button>
-        <button className={sub === 'motor' ? 'tab tab--on' : 'tab'} onClick={() => setSub('motor')}>Sugerencia (motor)</button>
-        <button className={sub === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setSub('historial')}>Historial (PDFs)</button>
-      </div>
-      {sub === 'manual' && <Manual />}
-      {sub === 'motor' && <Motor />}
-      {sub === 'historial' && <Historial />}
-    </div>
-  );
+  return <Manual />;
 }
 
 // ───────────────────────── Manual (edición directa de niveles) ─────────────
@@ -46,6 +32,8 @@ function Manual() {
   const [ok, setOk] = useState('');
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const ubicActual = ubicaciones.find((u) => String(u.id) === ubicId);
+  const esBodega = ubicActual?.tipo === 'bodega';
 
   useEffect(() => {
     api<Ubicacion[]>('/ubicaciones')
@@ -64,7 +52,7 @@ function Manual() {
     setOk('');
     api<{ items: Item[] }>(`/catalogo/producto-ubicacion?ubicacion=${ubicId}`)
       .then((r) => setItems(r.items))
-      .catch(() => setError('No se pudo cargar el stock objetivo'))
+      .catch(() => setError('No se pudieron cargar los productos de la ubicación'))
       .finally(() => setCargando(false));
   }, [ubicId]);
 
@@ -93,7 +81,7 @@ function Manual() {
           })),
         },
       });
-      setOk('Stock objetivo guardado');
+      setOk('Configuración guardada');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Error al guardar');
     } finally {
@@ -114,26 +102,29 @@ function Manual() {
       ) : (
         <>
           <p className="muted">
-            Habilita los productos que usa esta ubicación y fija sus niveles (en <strong>unidad de distribución</strong>). El abastecimiento se calcula a partir del objetivo.
+            {esBodega
+              ? <>Habilita los productos de bodega y, si aplica, define mínimos operativos.</>
+              : <>Habilita los productos que esta sucursal puede pedir. Las cantidades las elige el restaurante al hacer su pedido.</>}
           </p>
-          <div className="so-grid-head">
-            <span>Producto</span><span>Usa</span><span>Objetivo</span><span>Mín</span><span>Seguridad</span><span>Múltiplo</span><span>Mín. envío</span>
+          <div className={`so-grid-head ${esBodega ? 'so-grid-head--bodega' : 'so-grid-head--simple'}`}>
+            <span>Producto</span><span>Usa</span>{esBodega && <><span>Mín</span><span>Seguridad</span></>}
           </div>
           <div className="so-rows">
             {items.map((it, idx) => (
-              <div key={it.product_id} className={`so-row ${it.habilitado ? '' : 'so-row--off'}`}>
+              <div key={it.product_id} className={`so-row ${esBodega ? 'so-row--bodega' : 'so-row--simple'} ${it.habilitado ? '' : 'so-row--off'}`}>
                 <div className="so-prod"><strong>{it.nombre}</strong><small className="muted">{it.unidad_distribucion}{it.categoria ? ` · ${it.categoria}` : ''}</small></div>
                 <label className="so-check"><input type="checkbox" checked={it.habilitado} onChange={(e) => set(idx, 'habilitado', e.target.checked)} /></label>
-                <input className="so-num" inputMode="decimal" value={it.stock_objetivo} onChange={(e) => set(idx, 'stock_objetivo', Number(e.target.value) || 0)} disabled={!it.habilitado} />
-                <input className="so-num" inputMode="decimal" value={it.stock_min} onChange={(e) => set(idx, 'stock_min', Number(e.target.value) || 0)} disabled={!it.habilitado} />
-                <input className="so-num" inputMode="decimal" value={it.stock_seguridad} onChange={(e) => set(idx, 'stock_seguridad', Number(e.target.value) || 0)} disabled={!it.habilitado} />
-                <input className="so-num" inputMode="decimal" value={it.multiplo_distribucion} onChange={(e) => set(idx, 'multiplo_distribucion', Number(e.target.value) || 1)} disabled={!it.habilitado} />
-                <input className="so-num" inputMode="decimal" value={it.minimo_envio} onChange={(e) => set(idx, 'minimo_envio', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+                {esBodega && (
+                  <>
+                    <input className="so-num" inputMode="decimal" value={it.stock_min} onChange={(e) => set(idx, 'stock_min', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+                    <input className="so-num" inputMode="decimal" value={it.stock_seguridad} onChange={(e) => set(idx, 'stock_seguridad', Number(e.target.value) || 0)} disabled={!it.habilitado} />
+                  </>
+                )}
               </div>
             ))}
           </div>
           <div className="form-actions">
-            <button className="btn btn-primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar stock objetivo'}</button>
+            <button className="btn btn-primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar configuración'}</button>
           </div>
         </>
       )}
@@ -176,7 +167,7 @@ const CONF_META: Record<Confianza, { label: string; chip: string }> = {
 const FUENTE_LABEL: Record<Fuente, string> = { consumo: 'consumo real', historico: 'histórico de pedidos', sin_datos: '—' };
 const n3 = (n: number) => (Math.round(n * 1000) / 1000).toString();
 
-function Motor() {
+export function Motor() {
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [ubicId, setUbicId] = useState('');
   const [nivel, setNivel] = useState(97.5);
@@ -369,7 +360,7 @@ function parseCSV(texto: string): Record<string, string>[] {
   });
 }
 
-function Historial() {
+export function Historial() {
   const [resumen, setResumen] = useState<ResumenHist | null>(null);
   const [texto, setTexto] = useState('');
   const [reemplazar, setReemplazar] = useState(false);

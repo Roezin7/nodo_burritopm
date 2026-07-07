@@ -16,7 +16,7 @@ const TABS: { clave: Tab; label: string }[] = [
   { clave: 'categorias', label: 'Categorías' },
   { clave: 'unidades', label: 'Unidades' },
   { clave: 'productos', label: 'Productos' },
-  { clave: 'stock', label: 'Stock objetivo' },
+  { clave: 'stock', label: 'Productos por ubicación' },
   { clave: 'operacion', label: 'Operación' },
 ];
 
@@ -30,7 +30,7 @@ const DIAS = [
   { n: 0, label: 'Dom' },
 ];
 
-/** Ajustes de operación: verificación de carga y días de inventario. */
+/** Ajustes de operación: verificación de carga y días de pedido/conteo. */
 const AUTO_CIERRE_OPCIONES = [
   { h: 0, label: 'Nunca' },
   { h: 12, label: '12 h' },
@@ -82,9 +82,9 @@ function Operacion() {
   return (
     <>
       <div className="card">
-        <strong>Días de inventario</strong>
+        <strong>Días de pedido</strong>
         <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
-          En los días marcados se habilita el inventario para todas las ubicaciones. La sucursal solo lo abre y captura.
+          En los días marcados se habilita el pedido para sucursales y el conteo físico para bodega.
         </p>
         <div className="dias-selector">
           {DIAS.map((d) => (
@@ -100,7 +100,7 @@ function Operacion() {
             </button>
           ))}
         </div>
-        {dias.length === 0 && <p className="muted" style={{ marginTop: '0.6rem' }}>Sin días: el inventario no se habilita solo (el admin puede abrirlo cuando quiera).</p>}
+        {dias.length === 0 && <p className="muted" style={{ marginTop: '0.6rem' }}>Sin días: no se habilita solo (el admin puede abrirlo cuando quiera).</p>}
       </div>
 
       <div className="card">

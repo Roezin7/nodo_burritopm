@@ -38,4 +38,4 @@ apiRouter.use('/existencias', existenciasRouter); // Bloque 8
 apiRouter.use('/incidencias', incidenciasRouter); // Bloque 11
 apiRouter.use('/negocio', negocioRouter); // settings de operación
 apiRouter.use('/push', pushRouter); // avisos web push
-apiRouter.use('/inventario', inventarioRouter); // Fase 3 — stock objetivo (motor) + historial
+apiRouter.use('/inventario', inventarioRouter); // Historial y utilidades admin

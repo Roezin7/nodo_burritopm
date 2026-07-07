@@ -1996,9 +1996,16 @@ select:disabled {
 .so-grid-head,
 .so-row {
   display: grid;
-  grid-template-columns: minmax(8rem, 2fr) 3rem repeat(5, minmax(3.5rem, 1fr));
   gap: 0.4rem;
   align-items: center;
+}
+.so-grid-head--simple,
+.so-row--simple {
+  grid-template-columns: minmax(8rem, 1fr) 3rem;
+}
+.so-grid-head--bodega,
+.so-row--bodega {
+  grid-template-columns: minmax(8rem, 2fr) 3rem repeat(2, minmax(3.5rem, 1fr));
 }
 .so-grid-head {
   font-size: 0.72rem;

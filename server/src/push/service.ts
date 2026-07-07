@@ -59,13 +59,13 @@ export async function usuariosAdmin(negocioId: bigint): Promise<bigint[]> {
   return filas.map((f) => f.id);
 }
 
-/** Avisa al admin que hay sucursales sin cerrar su inventario del día. */
+/** Avisa al admin que hay sucursales sin cerrar su pedido del día. */
 export async function avisarAdminRezagados(negocioId: bigint, pendientes: number) {
   if (!pushHabilitado || pendientes <= 0) return;
   const admins = await usuariosAdmin(negocioId);
   await enviarAUsuarios(admins, {
-    titulo: 'Inventario pendiente ⏰',
-    cuerpo: `${pendientes} sucursal${pendientes > 1 ? 'es' : ''} aún no cierra${pendientes > 1 ? 'n' : ''} su inventario de hoy.`,
+    titulo: 'Pedido pendiente ⏰',
+    cuerpo: `${pendientes} sucursal${pendientes > 1 ? 'es' : ''} aún no cierra${pendientes > 1 ? 'n' : ''} su pedido de hoy.`,
     url: '/',
   });
 }

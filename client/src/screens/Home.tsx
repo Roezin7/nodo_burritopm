@@ -28,7 +28,7 @@ function TareaHoy() {
           }
           const ses = await api<{ programado: boolean; conteo: { estado: string } | null }>(`/conteos/sesion?ubicacion=${suc.id}`);
           if (ses.programado && ses.conteo?.estado !== 'cerrado') {
-            return { titulo: 'Hoy toca inventario', sub: ses.conteo ? 'Continúa el inventario de hoy' : 'Toma el inventario de hoy', ruta: '/inventario' };
+            return { titulo: 'Hoy toca pedido', sub: ses.conteo ? 'Continúa el pedido de hoy' : 'Elige cuánto quieres recibir', ruta: '/inventario' };
           }
           return null;
         }
@@ -56,10 +56,10 @@ function TareaHoy() {
             if (f.clave === 'ruta') return { titulo: `Pedido #${dist.id} en ruta`, sub: 'Sigue el reparto y las recepciones', ruta: '/ruta' };
           }
           if (d.conteos_pendientes > 0) {
-            return { titulo: `${d.conteos_pendientes} sucursal${d.conteos_pendientes > 1 ? 'es' : ''} sin cerrar inventario`, sub: 'Aún no pueden entrar al pedido', ruta: '/inventario' };
+            return { titulo: `${d.conteos_pendientes} sucursal${d.conteos_pendientes > 1 ? 'es' : ''} sin cerrar pedido`, sub: 'Aún no pueden entrar al pedido maestro', ruta: '/inventario' };
           }
           if (d.conteos_listos > 0) {
-            return { titulo: 'Calcula la distribución', sub: 'Las sucursales ya cerraron su inventario', ruta: '/distribucion' };
+            return { titulo: 'Crea la distribución', sub: 'Las sucursales ya cerraron su pedido', ruta: '/distribucion' };
           }
           return null;
         }
@@ -95,7 +95,7 @@ interface Modulo {
 }
 
 const MODULOS: Modulo[] = [
-  { clave: 'inventario', titulo: 'Inventario', icono: 'clipboard', desc: 'Inventario físico de tu ubicación', ruta: '/inventario' },
+  { clave: 'inventario', titulo: 'Pedido / inventario', icono: 'clipboard', desc: 'Sucursal pide directo; bodega cuenta físico', ruta: '/inventario' },
   { clave: 'distribucion', titulo: 'Distribución', icono: 'trending', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
   { clave: 'bodega', titulo: 'Bodega', icono: 'package', desc: 'Surtir y cargar el camión', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Ruta', icono: 'truck', desc: 'Entregar parada por parada', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },
