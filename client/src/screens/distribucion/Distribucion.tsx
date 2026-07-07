@@ -39,11 +39,8 @@ export default function Distribucion() {
   async function calcular() {
     setCalculando(true); setError(''); setInfo('');
     try {
-      const r = await api<{ id: number; lineas: number; sin_conteo: string[]; sin_existencia: string[] }>('/distribuciones', { method: 'POST', body: {} });
-      const avisos: string[] = [];
-      if (r.sin_conteo.length) avisos.push(`Sucursales sin pedido cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
-      if (r.sin_existencia?.length) avisos.push(`Sin existencia en bodega central: ${r.sin_existencia.join(', ')}`);
-      if (avisos.length) setInfo(avisos.join(' · '));
+      const r = await api<{ id: number; lineas: number; sin_conteo: string[] }>('/distribuciones', { method: 'POST', body: {} });
+      if (r.sin_conteo.length) setInfo(`Sucursales sin pedido cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
       await cargar();
       setAbierta(r.id);
     } catch (e) {
@@ -109,8 +106,6 @@ interface SucItem {
   nombre: string;
   unidad: string;
   categoria: string | null;
-  disponible: number;
-  stock_objetivo: number;
   cantidad_sugerida: number;
   cantidad_aprobada: number | null;
   costo_unitario: number | null;
@@ -172,12 +167,11 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   async function agregarSucursal(sucId: number) {
     setBusy(true); setError('');
     try {
-      const r = await api<{ agregadas: string[]; lineas: number; sin_existencia: string[] }>(
+      const r = await api<{ agregadas: string[]; lineas: number }>(
         `/distribuciones/${id}/sucursales`, { method: 'POST', body: { ubicacion_ids: [sucId] } });
       setAgregables((a) => a.filter((s) => s.id !== sucId));
       await cargar();
-      const extra = r.sin_existencia?.length ? ` · sin stock en bodega: ${r.sin_existencia.join(', ')}` : '';
-      toast.ok(`${r.agregadas.join(', ')} agregada · ${r.lineas} líneas${extra}`);
+      toast.ok(`${r.agregadas.join(', ')} agregada · ${r.lineas} líneas`);
     } catch (e) {
       setError(mensajeError(e, 'No se pudo agregar la sucursal.'));
     } finally {
@@ -231,7 +225,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   }
 
   async function eliminar() {
-    if (!window.confirm('¿Eliminar este pedido? Se devolverá a la bodega central el inventario que las sucursales aún tengan de él y se borrarán su ruta e incidencias. No se puede deshacer.')) return;
+    if (!window.confirm('¿Eliminar este pedido? Se devolverá a la bodega central el inventario que las sucursales aún tengan de él, se borrarán su ruta e incidencias, y también el pedido capturado por cada sucursal (podrán hacer uno nuevo). No se puede deshacer.')) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'DELETE' });

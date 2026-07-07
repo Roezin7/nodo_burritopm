@@ -1,8 +1,10 @@
 # NODO · Burrito Parrilla Mexicana
 
 Sistema de **abastecimiento centralizado** (bodega central + ~15 sucursales) como **PWA**.
-La sucursal **no pide a ojo**: captura su inventario físico y el sistema calcula cuánto
-enviarle para volver a su stock objetivo, consolida un pedido maestro y el admin lo aprueba.
+Cada sucursal captura un **pedido directo** (cuánto quiere recibir, sin conteo físico ni stock
+objetivo); el sistema consolida los pedidos cerrados en un pedido maestro y el admin lo revisa
+y aprueba. La **bodega central** sí lleva inventario físico: su conteo cerrado reconcilia
+existencias y la carga del camión nunca excede lo disponible.
 UI en español · USD · `America/Chicago`.
 
 Proyecto independiente derivado del esqueleto de NODO (repo, base de datos y servicio
@@ -21,8 +23,8 @@ Monorepo con despliegue de **un solo servicio**: el servidor Node sirve la API R
 │   └── src/
 │       ├── auth/         PIN + JWT, roles, asignación de ubicación
 │       ├── ubicaciones/  bodega + sucursales
-│       ├── catalogo/     categorías, unidades, productos, stock objetivo
-│       ├── conteos/      conteo físico por ubicación (máquina de estados)
+│       ├── catalogo/     categorías, unidades, productos por ubicación
+│       ├── conteos/      pedido de sucursal / conteo físico de bodega (máquina de estados)
 │       ├── distribuciones/  abastecimiento, consolidado, aprobación (+ tests)
 │       └── dashboard/    panel del admin
 ├── client/          PWA (React + Vite + vite-plugin-pwa) → build a server/public
@@ -36,12 +38,12 @@ Organización (`negocios`, una fila) → **ubicaciones** (bodega | sucursal) →
 `(negocio_id, ubicacion_id)`. Roles: `admin`, `encargado_bodega`, `encargado_sucursal`,
 `repartidor`. Cantidades `Decimal(12,3)`; costos/factores `Decimal(12,4)`.
 
-**Flujo (Fase 1, MVP):** el encargado de cada sucursal captura su conteo físico → al cerrarlo
-es la fotografía oficial del inventario → el admin **calcula la distribución** (sugerido =
-objetivo + seguridad − disponible − en tránsito, redondeado al múltiplo de empaque, nunca
-negativo) → revisa el consolidado (por producto / por sucursal, con disponibilidad de bodega
-y faltante) → ajusta y **aprueba**. Picking, carga, entrega y recepción son Fase 2 (la máquina
-de estados ya está diseñada).
+**Flujo:** el encargado de cada sucursal captura su **pedido** (las cantidades que quiere
+recibir) y lo cierra → el admin **crea la distribución** copiando los pedidos cerrados →
+revisa el consolidado (por producto / por sucursal, con disponibilidad de bodega y faltante)
+→ ajusta y **aprueba** → bodega surte y carga (topado a sus existencias reales), reparto y
+recepción en sucursal. El conteo físico de sucursal ya no existe: solo la bodega concilia
+existencias con su conteo.
 
 ## Puesta en marcha (local)
 
@@ -73,7 +75,7 @@ de estados ya está diseñada).
 ## Pruebas
 
 ```bash
-npm test            # vitest: fórmula de abastecimiento (server/src/distribuciones/logic.test.ts)
+npm test            # vitest: lógica de rutas de entrega (server/src/distribuciones/rutas.logic.test.ts)
 ```
 
 ## Despliegue (Coolify)
@@ -113,7 +115,7 @@ Healthcheck: `/api/health`. Datos de prueba (sucursales/usuarios): scripts en `s
 - [x] Bloque 10 — Carga del camión y tránsito
 - [x] Bloque 11 — Recepción en sucursal e incidencias por diferencias
 
-Cadena de trazabilidad: conteo → cálculo → aprobación → **reserva** → preparación →
+Cadena de trazabilidad: pedido de sucursal → distribución → aprobación → **reserva** → preparación →
 **verificación (2ª persona)** → carga → **tránsito** → recepción → **incidencia**. Cada paso
 físico escribe un movimiento idempotente y actualiza `existencias` (disponible / reservada /
 tránsito) con costo promedio ponderado al recibir.
@@ -124,6 +126,7 @@ recepción en bodega, reportes financieros de inventario.
 ## Reglas de oro
 
 - Todo registro lleva `negocio_id`; el inventario se scopea además por `ubicacion_id`.
-- La sucursal **no decide** cuánto pedir: la cantidad surge del conteo + parámetros.
+- La sucursal **pide directo**: su pedido cerrado es lo que el admin revisa y aprueba; no
+  toca existencias. Solo el conteo de **bodega** reconcilia inventario.
 - Cada encargado solo opera sus ubicaciones asignadas (gating en backend, no solo UI).
-- Un conteo cerrado y una distribución aprobada no cambian en silencio.
+- Un pedido cerrado y una distribución aprobada no cambian en silencio.

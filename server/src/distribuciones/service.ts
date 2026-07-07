@@ -110,7 +110,7 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
     return d;
   });
 
-  return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinPedido, sin_existencia: [] };
+  return { id: Number(dist.id), lineas: lineasData.length, sin_conteo: sinPedido };
 }
 
 // Estados en los que el pedido aún se puede editar / ampliar (antes de aprobar y salir a bodega).
@@ -172,7 +172,7 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
   const agregadas = [...new Set(lineasData.map((l) => l.ubicacion_destino_id.toString()))]
     .map((uid) => sucursales.find((s) => s.id.toString() === uid)?.nombre)
     .filter((n): n is string => Boolean(n));
-  return { agregadas, lineas: lineasData.length, sin_conteo: sinPedido, sin_existencia: [] };
+  return { agregadas, lineas: lineasData.length, sin_conteo: sinPedido };
 }
 
 /** Control total del admin: fija el estado de la distribución a cualquier valor (override). */
@@ -220,6 +220,8 @@ export async function renombrarDistribucion(negocioId: bigint, id: bigint, nombr
  *     (min(recibido, disponible_actual)); lo que la sucursal ya consumió no se inventa.
  *   - Línea en tránsito (cargada, no recibida) → regresa de tránsito a disponible de bodega.
  *   - Línea sin cargar → no movió inventario, nada que revertir.
+ * También borra los pedidos de sucursal (conteos) que alimentaron ESTA distribución, para que
+ * cada sucursal pueda capturar uno nuevo; el resto de su historial de pedidos no se toca.
  * Todo en una sola transacción e idempotente por movimiento.
  */
 export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuarioId: bigint) {
@@ -227,6 +229,8 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
   const bodega = await bodegaDe(negocioId);
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
   const sello = Date.now(); // permite distinguir reversas si se reintenta
+  // Pedidos de sucursal que originaron las líneas (únicos, sin nulos).
+  const conteoIds = [...new Map(lineas.filter((l) => l.conteo_id != null).map((l) => [l.conteo_id!.toString(), l.conteo_id!])).values()];
 
   await prisma.$transaction(async (tx) => {
     for (const l of lineas) {
@@ -291,6 +295,20 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
     await tx.incidencias.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'distribucion', documento_id: id } });
     // La distribución arrastra por cascada: líneas, rutas y paradas.
     await tx.distribuciones.delete({ where: { id } });
+    // Se borran los pedidos de sucursal que alimentaron esta distribución (la sucursal puede
+    // capturar uno nuevo ese mismo día). Si otro pedido maestro aún referencia el mismo conteo,
+    // se conserva. Los pedidos de sucursal no mueven stock, así que no hay nada que revertir.
+    if (conteoIds.length > 0) {
+      const usados = await tx.distribucion_lineas.findMany({
+        where: { conteo_id: { in: conteoIds } },
+        select: { conteo_id: true },
+      });
+      const enUso = new Set(usados.map((u) => u.conteo_id?.toString()));
+      const borrar = conteoIds.filter((cid) => !enUso.has(cid.toString()));
+      if (borrar.length > 0) {
+        await tx.conteos.deleteMany({ where: { id: { in: borrar }, negocio_id: negocioId } });
+      }
+    }
   });
 
   return { ok: true };
