@@ -129,7 +129,16 @@ existenciasRouter.post(
         deltas: [{ ubicacionId: bodega.id, productId: producto.id, disponible: b.cantidad, costoUnitario: costo }],
       });
       if (b.costo_unitario != null) {
-        await tx.products.update({ where: { id: producto.id }, data: { ultimo_costo: b.costo_unitario } });
+        // El precio del producto sigue a la compra: último costo = lo que se pagó ahora,
+        // y el costo promedio del catálogo se alinea con el promedio ponderado de bodega.
+        const ex = await tx.existencias.findUnique({
+          where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: producto.id } },
+          select: { costo_promedio: true },
+        });
+        await tx.products.update({
+          where: { id: producto.id },
+          data: { ultimo_costo: b.costo_unitario, costo_promedio: ex?.costo_promedio ?? b.costo_unitario },
+        });
       }
     });
 

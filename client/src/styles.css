@@ -2756,14 +2756,14 @@ a.flujo-paso { text-decoration: none; }
 .btn-danger-ghost:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); border-color: var(--danger); }
 .btn-danger-ghost:disabled { opacity: 0.5; }
 
-/* ===== Acciones de bodega (dos tiles claras) ===== */
+/* ===== Acciones de bodega (tres tiles claras: entrada / salida / contar) ===== */
 .acciones-bodega {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.7rem;
   margin: 0.7rem 0 0.9rem;
 }
-@media (max-width: 460px) { .acciones-bodega { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .acciones-bodega { grid-template-columns: 1fr; } }
 .accion-tile {
   display: flex;
   align-items: center;
@@ -2791,7 +2791,8 @@ a.flujo-paso { text-decoration: none; }
   font-weight: 800;
   line-height: 1;
 }
-.accion-ico--in { background: var(--brand-tint); color: var(--brand); }
+.accion-ico--in { background: var(--success-bg); color: var(--success); }
+.accion-ico--out { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 .accion-ico--count { background: color-mix(in srgb, var(--accent, #1F8EF1) 16%, transparent); color: var(--accent, #1F8EF1); }
 .accion-tx { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .accion-tx strong { font-size: 0.96rem; }

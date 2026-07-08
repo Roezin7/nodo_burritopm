@@ -3,6 +3,7 @@ import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
 import { Icono } from '../../icons';
 import { ParadaChip, FlujoStepper, paradaLabel } from '../../flujo';
+import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 
 interface ParadaItem {
   linea_id: number;
@@ -94,9 +95,10 @@ function RutaRepartidor() {
     <div className="page conteo-page ruta-page">
       {exito && <ExitoOverlay nombre={exito} />}
       <header className="page-head">
-        <div><h1>Mi ruta</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
+        <div><h1>Bodega y reparto</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
       </header>
       <FlujoStepper activo="ruta" />
+      <BodegaRutaTabs activo="reparto" />
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
@@ -326,7 +328,7 @@ function MonitorRutas() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Rutas</h1>
+          <h1>Bodega y reparto</h1>
           <p className="page-sub">
             En vivo: dónde va cada camión y qué sucursal sigue.
             {actualizado && <> · actualizado {hora(actualizado.toISOString())}</>}
@@ -334,6 +336,7 @@ function MonitorRutas() {
         </div>
       </header>
       <FlujoStepper activo="ruta" />
+      <BodegaRutaTabs activo="reparto" />
 
       <div className="tabs">
         <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>Activas ({rutas.length})</button>

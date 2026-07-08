@@ -20,10 +20,8 @@ const ITEMS: Item[] = [
   { ruta: '/', label: 'Inicio', icono: 'home' },
   { ruta: '/inventario', label: 'Inventario', icono: 'clipboard', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
-  { ruta: '/bodega', label: 'Bodega', icono: 'package', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/ruta', label: 'Ruta', icono: 'truck', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/bodega', label: 'Bodega y reparto', icono: 'truck', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/recepcion', label: 'Recepción', icono: 'checks', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/almacen', label: 'Almacén', icono: 'salida', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'wallet', soloAdmin: true },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
 ];
@@ -44,10 +42,11 @@ export default function Shell({ children }: { children: ReactNode }) {
     return true;
   });
 
-  // Si caben todos en la barra (≤5), no hace falta "Más"; si no, dejamos 4 + "Más".
-  const hayMas = items.length > 5;
-  const primarios = hayMas ? items.slice(0, MAX_PRIMARIOS) : items;
-  const enMas = hayMas && items.slice(MAX_PRIMARIOS).some((i) => (i.ruta === '/' ? pathname === '/' : pathname.startsWith(i.ruta)));
+  // "Más" siempre visible en móvil: además del overflow, ahí viven Tema y Cerrar sesión
+  // (si no, roles con pocas secciones se quedaban sin forma de salir en el teléfono).
+  const primarios = items.length > MAX_PRIMARIOS ? items.slice(0, MAX_PRIMARIOS) : items;
+  const extras = items.length > MAX_PRIMARIOS ? items.slice(MAX_PRIMARIOS) : [];
+  const enMas = extras.some((i) => (i.ruta === '/' ? pathname === '/' : pathname.startsWith(i.ruta)));
 
   const syncChip = !online ? (
     <span className="ctx-chip ctx-chip--off">
@@ -129,18 +128,16 @@ export default function Shell({ children }: { children: ReactNode }) {
             <span>{i.label}</span>
           </NavLink>
         ))}
-        {hayMas && (
-          <button
-            type="button"
-            className={`bottom-link ${enMas || masAbierto ? 'bottom-link--on' : ''}`}
-            onClick={() => setMasAbierto(true)}
-            aria-haspopup="true"
-            aria-expanded={masAbierto}
-          >
-            <Icono name="menu" size={22} />
-            <span>Más</span>
-          </button>
-        )}
+        <button
+          type="button"
+          className={`bottom-link ${enMas || masAbierto ? 'bottom-link--on' : ''}`}
+          onClick={() => setMasAbierto(true)}
+          aria-haspopup="true"
+          aria-expanded={masAbierto}
+        >
+          <Icono name="menu" size={22} />
+          <span>Más</span>
+        </button>
       </nav>
 
       {/* Hoja "Más": resto de secciones + tema/salir, en tiles grandes y fáciles de tocar */}
@@ -148,28 +145,30 @@ export default function Shell({ children }: { children: ReactNode }) {
         <div className="mas-sheet-backdrop" onClick={() => setMasAbierto(false)} role="presentation">
           <div className="mas-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Más opciones">
             <div className="mas-sheet-handle" />
-            <div className="mas-grid">
-              {items.slice(MAX_PRIMARIOS).map((i) => (
-                <NavLink
-                  key={i.ruta}
-                  to={i.ruta}
-                  end={i.ruta === '/'}
-                  onClick={() => setMasAbierto(false)}
-                  className={({ isActive }) => (isActive ? 'mas-item mas-item--on' : 'mas-item')}
-                >
-                  <Icono name={i.icono} size={24} />
-                  <span>{i.label}</span>
-                </NavLink>
-              ))}
-            </div>
+            {extras.length > 0 && (
+              <div className="mas-grid">
+                {extras.map((i) => (
+                  <NavLink
+                    key={i.ruta}
+                    to={i.ruta}
+                    end={i.ruta === '/'}
+                    onClick={() => setMasAbierto(false)}
+                    className={({ isActive }) => (isActive ? 'mas-item mas-item--on' : 'mas-item')}
+                  >
+                    <Icono name={i.icono} size={24} />
+                    <span>{i.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            )}
             <div className="mas-sheet-foot">
               <button className="mas-item" onClick={() => { alternar(); }}>
                 <Icono name={tema === 'dark' ? 'sun' : 'moon'} size={24} />
                 <span>{tema === 'dark' ? 'Modo claro' : 'Modo oscuro'}</span>
               </button>
-              <button className="mas-item" onClick={logout}>
+              <button className="mas-item" onClick={() => { setMasAbierto(false); logout(); }}>
                 <Icono name="logout" size={24} />
-                <span>Salir</span>
+                <span>Cerrar sesión</span>
               </button>
             </div>
             <button className="btn btn-secondary btn-block mas-cerrar" onClick={() => setMasAbierto(false)}>Cerrar</button>

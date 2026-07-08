@@ -97,9 +97,7 @@ interface Modulo {
 const MODULOS: Modulo[] = [
   { clave: 'inventario', titulo: 'Pedido / inventario', icono: 'clipboard', desc: 'Sucursal pide directo; bodega cuenta físico', ruta: '/inventario' },
   { clave: 'distribucion', titulo: 'Distribución', icono: 'trending', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
-  { clave: 'bodega', titulo: 'Bodega', icono: 'package', desc: 'Surtir y cargar el camión', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
-  { clave: 'ruta', titulo: 'Ruta', icono: 'truck', desc: 'Entregar parada por parada', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },
-  { clave: 'almacen', titulo: 'Almacén', icono: 'salida', desc: 'Entradas y salidas de bodega', ruta: '/almacen', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'bodega', titulo: 'Bodega y reparto', icono: 'truck', desc: 'Surtir, cargar el camión y entregar', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },

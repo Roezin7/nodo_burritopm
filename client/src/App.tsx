@@ -7,7 +7,6 @@ import Inventario from './screens/inventario/Inventario';
 import Distribucion from './screens/distribucion/Distribucion';
 import Bodega from './screens/bodega/Bodega';
 import Ruta from './screens/ruta/Ruta';
-import Almacen from './screens/almacen/Almacen';
 import Recepcion from './screens/recepcion/Recepcion';
 import Incidencias from './screens/incidencias/Incidencias';
 import Configuracion from './screens/config/Configuracion';
@@ -52,7 +51,6 @@ function AppBody() {
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
         <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
         <Route path="/ruta" element={<SoloRol roles={['admin', 'encargado_bodega']}><Ruta /></SoloRol>} />
-        <Route path="/almacen" element={<SoloRol roles={['admin', 'encargado_bodega']}><Almacen /></SoloRol>} />
         <Route path="/recepcion" element={<SoloRol roles={['admin', 'encargado_sucursal']}><Recepcion /></SoloRol>} />
         <Route path="/incidencias" element={<SoloRol roles={['admin']}><Incidencias /></SoloRol>} />
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />

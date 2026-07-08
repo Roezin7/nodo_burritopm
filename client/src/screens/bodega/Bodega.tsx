@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { EstadoDistChip, FaseChip, FlujoStepper } from '../../flujo';
+import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 
 interface DistResumen { id: number; estado: string; creado_at: string; total_lineas: number }
 interface OpItem {
@@ -73,9 +74,10 @@ export default function Bodega() {
   return (
     <div className="page">
       <header className="page-head">
-        <div><h1>Bodega y reparto</h1><p className="page-sub">Surte la lista total y carga el camión.</p></div>
+        <div><h1>Bodega y reparto</h1><p className="page-sub">Surte la lista total, carga el camión y entrega.</p></div>
       </header>
       <FlujoStepper activo="bodega" />
+      <BodegaRutaTabs activo="bodega" />
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
