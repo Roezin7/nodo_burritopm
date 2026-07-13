@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useToast, mensajeError } from '../../toast';
 import { EstadoDistChip, FaseChip, ParadaChip, FlujoStepper } from '../../flujo';
+import Spinner from '../../components/Spinner';
 
 interface DistResumen {
   id: number;
@@ -74,7 +75,7 @@ export default function Distribucion() {
 
       <h3 className="seccion-title">Pedidos</h3>
       {cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : lista.length === 0 ? (
         <p className="muted">Aún no hay distribuciones.</p>
       ) : (

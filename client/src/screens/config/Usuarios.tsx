@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import Spinner from '../../components/Spinner';
 import { useAuth, type Rol } from '../../auth';
 import type { Ubicacion } from './Ubicaciones';
 
@@ -207,7 +208,7 @@ export default function Usuarios() {
       </form>
 
       {cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : (
         <>
           {usuarios.length > 6 && (

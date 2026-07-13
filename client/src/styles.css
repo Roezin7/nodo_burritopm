@@ -2924,3 +2924,37 @@ a.flujo-paso { text-decoration: none; }
 }
 
 .chip--muted { background: var(--surface-2); color: var(--muted); }
+
+/* ---------- 19. CARGA (indicador consistente en toda la app) ---------- */
+.spinner-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 2rem 1rem;
+}
+.spinner-wrap--sm {
+  padding: 0.5rem;
+}
+.spinner {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--brand);
+  animation: spin 0.7s linear infinite;
+}
+.spinner-wrap--sm .spinner {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+/* La regla global de #18 fuerza duración ~0 a toda animación; sin esto, el aro giraría
+   en un parpadeo constante en vez de quedar quieto. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none !important; }
+}

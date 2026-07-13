@@ -4,6 +4,7 @@ import { useAuth } from '../../auth';
 import { Icono } from '../../icons';
 import { ParadaChip, FlujoStepper, paradaLabel } from '../../flujo';
 import BodegaRutaTabs from '../../components/BodegaRutaTabs';
+import Spinner from '../../components/Spinner';
 
 interface ParadaItem {
   linea_id: number;
@@ -108,7 +109,7 @@ function RutaRepartidor() {
 
       {tab === 'activas' ? (
         cargando ? (
-          <p className="muted">Cargando…</p>
+          <Spinner />
         ) : rutas.length === 0 ? (
           <div className="card"><p className="muted">No tienes rutas asignadas por ahora. Aparecerán aquí cuando el camión salga de bodega.</p></div>
         ) : (
@@ -351,7 +352,7 @@ function MonitorRutas() {
           historial.map((r) => <MonitorRutaCard key={r.ruta_id} ruta={r} historico />)
         )
       ) : cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : rutas.length === 0 ? (
         <div className="card"><p className="muted">No hay rutas en curso ahora mismo. Aparecerán aquí cuando un camión salga de bodega.</p></div>
       ) : (

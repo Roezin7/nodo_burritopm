@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
@@ -6,6 +6,7 @@ import { useToast, mensajeError } from '../../toast';
 import { FlujoStepper } from '../../flujo';
 import { Icono } from '../../icons';
 import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPicker';
+import Spinner from '../../components/Spinner';
 
 interface InventarioResumen {
   id: number;
@@ -75,8 +76,17 @@ export default function Inventario() {
   const [searchParams] = useSearchParams();
 
   const bodega = ubicaciones.find((u) => u.tipo === 'bodega') ?? null;
-  const sucursales = ubicaciones.filter((u) => u.tipo === 'sucursal');
   const ubicActiva = ubicaciones.find((u) => String(u.id) === ubicId) ?? null;
+  // Lista de sucursales para el destino de una salida/transferencia. El admin ya trae todas las
+  // ubicaciones; bodega y reparto solo tiene asignada su bodega, así que se piden aparte.
+  const [sucursalesDestino, setSucursalesDestino] = useState<UbicacionAsignada[]>([]);
+  const sucursales = esAdmin ? ubicaciones.filter((u) => u.tipo === 'sucursal') : sucursalesDestino;
+  useEffect(() => {
+    if (esAdmin) return;
+    api<{ id: number; nombre: string; tipo: 'bodega' | 'sucursal'; activo: boolean }[]>('/ubicaciones')
+      .then((us) => setSucursalesDestino(us.filter((u) => u.activo && u.tipo === 'sucursal')))
+      .catch(() => {});
+  }, [esAdmin]);
 
   // Cargar ubicaciones disponibles según rol. El admin entra centrado en la Bodega.
   useEffect(() => {
@@ -110,17 +120,23 @@ export default function Inventario() {
     if (suc) { setModo('sucursales'); setUbicId(u); }
   }, [searchParams, ubicaciones]);
 
+  // Si el usuario cambia de ubicación rápido, ignora respuestas de peticiones ya obsoletas
+  // (si no, una respuesta lenta de la ubicación anterior podía pisar los datos de la nueva).
+  const ultimaPeticion = useRef('');
   async function cargarUbicacion(uid: string) {
     if (!uid) return;
+    ultimaPeticion.current = uid;
     setError('');
     try {
       const [ses, lista] = await Promise.all([
         api<Sesion>(`/conteos/sesion?ubicacion=${uid}`),
         api<InventarioResumen[]>(`/conteos?ubicacion=${uid}`),
       ]);
+      if (ultimaPeticion.current !== uid) return;
       setSesion(ses);
       setInventarios(lista);
     } catch (e) {
+      if (ultimaPeticion.current !== uid) return;
       setError(e instanceof ApiError ? e.message : 'Error al cargar el inventario');
     }
   }
@@ -149,7 +165,7 @@ export default function Inventario() {
     }
   }
 
-  if (cargando) return <div className="page"><p className="muted">Cargando…</p></div>;
+  if (cargando) return <div className="page"><Spinner /></div>;
 
   if (detalle) {
     return <Editor detalle={detalle} onSalir={() => { setDetalle(null); void cargarUbicacion(ubicId); }} onRecargar={() => abrir(detalle.id)} />;
@@ -254,13 +270,51 @@ export default function Inventario() {
     );
   }
 
-  // ── Sucursal / bodega-reparto: su propia ubicación ─────────────────────────
+  // ── Bodega y reparto: gestiona su bodega (sin conteo programado, es a demanda) ──────
+  const esBodegaRol = ubicActiva?.tipo === 'bodega';
+  if (esBodegaRol) {
+    return (
+      <div className="page">
+        <header className="page-head">
+          <div>
+            <h1>Inventario</h1>
+            <p className="page-sub">Registra entradas, salidas y corrige cantidades cuando haga falta.</p>
+          </div>
+        </header>
+        <FlujoStepper activo="conteo" />
+        {error && <p className="error-msg">{error}</p>}
+        <StockActual key={`${ubicId}:${stockKey}`} ubicId={ubicId} nombre={ubicActiva.nombre} abiertoDefault />
+        <AccionesBodega
+          busy={busy}
+          entradaAbierta={entradaAbierta}
+          salidaAbierta={salidaAbierta}
+          onToggleEntrada={() => { setEntradaAbierta((v) => !v); setSalidaAbierta(false); }}
+          onToggleSalida={() => { setSalidaAbierta((v) => !v); setEntradaAbierta(false); }}
+          onTomarInventario={() => void tomarHoy()}
+        />
+        <AgregarEntrada
+          abierto={entradaAbierta}
+          onClose={() => setEntradaAbierta(false)}
+          onHecho={() => { setStockKey((k) => k + 1); void cargarUbicacion(ubicId); }}
+        />
+        <RegistrarSalida
+          abierto={salidaAbierta}
+          sucursales={sucursales}
+          onClose={() => setSalidaAbierta(false)}
+          onHecho={() => { setStockKey((k) => k + 1); void cargarUbicacion(ubicId); }}
+        />
+        {renderHistorial()}
+      </div>
+    );
+  }
+
+  // ── Sucursal: su propio pedido programado ───────────────────────────────────
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>Inventario</h1>
-          <p className="page-sub">{ubicActiva?.tipo === 'sucursal' ? 'Elige cuánto producto quieres que te envíen.' : 'Captura el inventario físico de tu ubicación.'}</p>
+          <p className="page-sub">Elige cuánto producto quieres que te envíen.</p>
         </div>
       </header>
       <FlujoStepper activo="conteo" />
@@ -271,8 +325,7 @@ export default function Inventario() {
         <>
           <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
           {error && <p className="error-msg">{error}</p>}
-          {ubicId && ubicActiva?.tipo === 'bodega' && <StockActual key={ubicId} ubicId={ubicId} nombre={ubicActiva.nombre} />}
-          {renderSeccion(true, ubicActiva?.tipo === 'sucursal')}
+          {renderSeccion(true, true)}
         </>
       )}
     </div>

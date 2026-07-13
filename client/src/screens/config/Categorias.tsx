@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import Spinner from '../../components/Spinner';
 
 export interface Categoria {
   id: number;
@@ -72,7 +73,7 @@ export default function Categorias() {
         </div>
       </form>
       {cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : lista.length === 0 ? (
         <p className="muted">Aún no hay categorías.</p>
       ) : (

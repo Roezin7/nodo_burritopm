@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import Spinner from '../../components/Spinner';
 import type { Categoria } from './Categorias';
 import type { Unidad } from './Unidades';
 
@@ -218,7 +219,7 @@ export default function Productos() {
       </form>
 
       {cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : productos.length === 0 ? (
         <p className="muted">Aún no hay productos.</p>
       ) : (

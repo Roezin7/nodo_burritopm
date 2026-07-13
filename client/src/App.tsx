@@ -13,6 +13,7 @@ import Configuracion from './screens/config/Configuracion';
 import OfflineBanner from './OfflineBanner';
 import Shell from './Shell';
 import SplashIntro from './brand/SplashIntro';
+import Spinner from './components/Spinner';
 import { useState, useEffect, type JSX } from 'react';
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
@@ -36,7 +37,7 @@ function AppBody() {
   if (cargando) {
     return (
       <div className="app-shell">
-        <p className="muted">Cargando…</p>
+        <Spinner />
       </div>
     );
   }

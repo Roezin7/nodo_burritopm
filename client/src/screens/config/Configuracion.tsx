@@ -6,6 +6,7 @@ import Categorias from './Categorias';
 import Unidades from './Unidades';
 import Productos from './Productos';
 import StockObjetivo from './StockObjetivo';
+import Spinner from '../../components/Spinner';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
 type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos' | 'stock' | 'operacion';
@@ -78,7 +79,7 @@ function Operacion() {
     await guardar({ auto_cierre_horas: h });
   }
 
-  if (verif === null) return <p className="muted">Cargando…</p>;
+  if (verif === null) return <Spinner />;
   return (
     <>
       <div className="card">

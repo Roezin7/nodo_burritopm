@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { ParadaChip, FaseChip, faseDistribucion } from '../flujo';
+import Spinner from '../components/Spinner';
 
 // ── Tablero del ciclo: semáforo por sucursal (pedido / distribución / recepción) ──
 type EstadoCelda = 'cerrado' | 'abierto' | 'pendiente' | 'en' | 'sin' | 'recibido' | 'parcial' | 'na';
@@ -121,7 +122,7 @@ export default function PanelAdmin() {
   }, [p?.distribucion_actual?.id]);
 
   if (error) return <p className="error-msg">{error}</p>;
-  if (!p) return <p className="muted">Cargando panel…</p>;
+  if (!p) return <Spinner label="Cargando panel…" />;
 
   return (
     <div className="panel-admin">

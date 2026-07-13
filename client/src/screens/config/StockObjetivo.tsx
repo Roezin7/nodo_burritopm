@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import Spinner from '../../components/Spinner';
 import type { Ubicacion } from './Ubicaciones';
 import UbicacionPicker from '../../components/UbicacionPicker';
 
@@ -92,7 +93,7 @@ export default function StockObjetivo() {
       {ok && <p className="ok-msg">{ok}</p>}
 
       {cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : items.length === 0 ? (
         <p className="muted">No hay productos activos. Crea productos en la pestaña Productos.</p>
       ) : (

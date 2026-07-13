@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, fueEncolado } from '../../api';
+import Spinner from '../../components/Spinner';
 
 export interface Ubicacion {
   id: number;
@@ -143,7 +144,7 @@ export default function Ubicaciones() {
       </form>
 
       {cargando ? (
-        <p className="muted">Cargando…</p>
+        <Spinner />
       ) : lista.length === 0 ? (
         <p className="muted">Aún no hay ubicaciones. Agrega la bodega central y tus sucursales.</p>
       ) : (
