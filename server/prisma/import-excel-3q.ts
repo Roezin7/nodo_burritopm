@@ -13,6 +13,10 @@ function n(v: ExcelJS.CellValue): number {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
+function text(v: ExcelJS.CellValue): string {
+  if (v && typeof v === 'object' && 'result' in v) return text(v.result as ExcelJS.CellValue);
+  return String(v ?? '').trim();
+}
 
 const ubicacionPorEncabezado: Record<string, string> = {
   LOMBARD: 'LOMBA', NAPERVILLE: 'NAPER', 'CAROL STREAM': 'CAROL', LISLE: 'LISLE', 'GLENDALE HEIGHTS': 'GLEND',
@@ -39,6 +43,13 @@ const semanas = [
 interface LineaImportada { productId: bigint; cantidad: number; precio: Prisma.Decimal | null }
 interface PedidoImportado { ubicacionId: bigint; empresaId: bigint; linea: 'carne' | 'desechables'; entrega: Date; lineas: LineaImportada[]; semana: number; cerrada: boolean }
 
+function precioImportado(p: { precio_venta_fijo: Prisma.Decimal | null; ultimo_costo: Prisma.Decimal | null; costo_promedio: Prisma.Decimal | null; tipo_operativo: string | null; markup_caja: Prisma.Decimal }) {
+  if (p.precio_venta_fijo != null) return p.precio_venta_fijo;
+  const costo = p.ultimo_costo ?? p.costo_promedio;
+  if (costo == null) return null;
+  return new Prisma.Decimal(costo).plus(p.tipo_operativo === 'proteina' ? p.markup_caja : 0);
+}
+
 async function main() {
   const org = await prisma.negocios.findFirstOrThrow({ where: { nombre: 'Burrito Parrilla Mexicana' } });
   const admin = await prisma.usuarios.findFirstOrThrow({ where: { negocio_id: org.id, rol: 'admin', activo: true }, orderBy: { id: 'asc' } });
@@ -59,7 +70,7 @@ async function main() {
     if (!ws) throw new Error(`No existe ${sem.carne}`);
     const bloques = [...Array.from({ length: 17 }, (_, i) => 1 + i * 10), 171, 181, 191, 201];
     for (const inicio of bloques) {
-      const encabezado = String(ws.getCell(7, inicio).value ?? '').trim().toUpperCase();
+      const encabezado = text(ws.getCell(7, inicio).value).toUpperCase();
       const codigo = ubicacionPorEncabezado[encabezado];
       if (!codigo) continue;
       const ubic = porCodigo.get(codigo);
@@ -69,14 +80,14 @@ async function main() {
       for (const [col, entrega] of entregas) {
         const lineas: LineaImportada[] = [];
         for (let row = 11; row <= 29; row += 1) {
-          const nombre = String(ws.getCell(row, inicio).value ?? '').trim().toUpperCase();
+          const nombre = text(ws.getCell(row, inicio).value).toUpperCase();
           let sku = productoCarne[nombre];
           if (esTapatios && nombre === 'ALPASTOR') sku = 'MEAT-PASTOR-TAP';
           const cantidad = n(ws.getCell(row, col).value);
           if (!sku || cantidad <= 0) continue;
           const p = porSku.get(sku);
           if (!p) throw new Error(`Falta producto ${sku}`);
-          lineas.push({ productId: p.id, cantidad, precio: p.precio_venta_fijo ?? p.ultimo_costo ?? p.costo_promedio });
+          lineas.push({ productId: p.id, cantidad, precio: precioImportado(p) });
         }
         if (lineas.length) pedidos.push({ ubicacionId: ubic.id, empresaId: ubic.empresa_cliente_id, linea: 'carne', entrega: date(entrega), lineas, semana: sem.numero, cerrada: sem.cerrada });
       }
@@ -90,7 +101,7 @@ async function main() {
       if (!ubic?.empresa_cliente_id) continue;
       const lineas: LineaImportada[] = [];
       for (let row = 2; row <= 53; row += 1) {
-        const nombre = String(dw.getCell(row, 1).value ?? '').trim().toUpperCase();
+        const nombre = text(dw.getCell(row, 1).value).toUpperCase();
         const cantidad = n(dw.getCell(row, col).value);
         const p = porNombre.get(nombre);
         if (p && cantidad > 0) lineas.push({ productId: p.id, cantidad, precio: new Prisma.Decimal(n(dw.getCell(row, 7).value)) });
@@ -181,10 +192,12 @@ async function importarInventarioInicial(negocioId: bigint, adminId: bigint, por
   await dispBook.xlsx.readFile(path.join(EXCEL_DIR, '2. Disposables 2026 3Q.xlsx'));
   const dw = dispBook.getWorksheet('Week (28)')!;
   for (let row = 2; row <= 53; row += 1) {
-    const p = porNombre.get(String(dw.getCell(row, 1).value ?? '').trim().toUpperCase());
+    const p = porNombre.get(text(dw.getCell(row, 1).value).toUpperCase());
     if (!p) continue;
     const cajas = n(dw.getCell(row, 115).value);
-    const costo = n(dw.getCell(row, 117).value) || n(dw.getCell(row, 5).value);
+    // La columna 117 es el valor total del inventario (cajas × costo); existencias
+    // necesita costo unitario para no volver a multiplicarlo en dashboard/billing.
+    const costo = n(dw.getCell(row, 5).value);
     await prisma.existencias.upsert({ where: { ubicacion_id_product_id: { ubicacion_id: adison.id, product_id: p.id } }, update: { cantidad_disponible: cajas, cantidad_reservada: 0, cantidad_transito: 0, costo_promedio: costo }, create: { negocio_id: negocioId, ubicacion_id: adison.id, product_id: p.id, cantidad_disponible: cajas, costo_promedio: costo } });
   }
   const raw = [

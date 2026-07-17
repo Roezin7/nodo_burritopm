@@ -93,8 +93,9 @@ Servicio propio + PostgreSQL propio. Build con el `Dockerfile` (single-service, 
 **HTTPS con dominio es obligatorio** para PWA/push (Coolify lo da con Let's Encrypt). En
 iPhone/iPad el push solo funciona con la **PWA instalada** (Compartir → Agregar a inicio).
 
-Al arrancar, el contenedor aplica `prisma migrate deploy` y un **seed idempotente** que crea el
-admin de arranque solo si la base no tiene ninguno (admin `Admin`, PIN `1234` — cámbialo).
+Al arrancar, el contenedor aplica `prisma migrate deploy`, crea el admin si hace falta y ejecuta
+el **bootstrap operativo idempotente**. Este último completa empresas, productos, proveedores y
+rutas faltantes sin sobrescribir cambios hechos por el admin (admin inicial `Admin`, PIN `1234` — cámbialo).
 Healthcheck: `/api/health`. Datos de prueba (sucursales/usuarios): scripts en `server/scripts/`.
 
 ## Estado por bloque (Fase 1 — MVP)

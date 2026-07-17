@@ -1,211 +1,77 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import { ParadaChip, FaseChip, faseDistribucion } from '../flujo';
 import Spinner from '../components/Spinner';
 
-// ── Tablero del ciclo: semáforo por sucursal (pedido / distribución / recepción) ──
-type EstadoCelda = 'cerrado' | 'abierto' | 'pendiente' | 'en' | 'sin' | 'recibido' | 'parcial' | 'na';
-interface FilaCiclo { id: number; nombre: string; conteo: 'cerrado' | 'abierto' | 'pendiente'; pedido: 'en' | 'sin' | 'na'; recepcion: 'recibido' | 'parcial' | 'pendiente' | 'na' }
-interface Ciclo { distribucion: { id: number; estado: string; total_lineas: number } | null; sucursales: FilaCiclo[] }
-
-// Color (tono) de cada estado de celda: verde=listo, ámbar=en proceso, rojo=falta, gris=n/a.
-const TONO: Record<EstadoCelda, 'ok' | 'warn' | 'bad' | 'na'> = {
-  cerrado: 'ok', recibido: 'ok', en: 'ok',
-  abierto: 'warn', parcial: 'warn',
-  pendiente: 'bad',
-  sin: 'na', na: 'na',
-};
-const ETIQUETA: Record<EstadoCelda, string> = {
-  cerrado: 'Listo', abierto: 'Captura', pendiente: 'Falta',
-  en: 'Sí', sin: 'No', recibido: 'Recibido', parcial: 'Parcial', na: '—',
-};
-
-function Celda({ v }: { v: EstadoCelda }) {
-  return (
-    <span className={`ciclo-celda ciclo-celda--${TONO[v]}`}>
-      <span className="ciclo-dot" />
-      {ETIQUETA[v]}
-    </span>
-  );
-}
-
-function TableroCiclo() {
-  const [c, setC] = useState<Ciclo | null>(null);
-  useEffect(() => { api<Ciclo>('/dashboard/ciclo').then(setC).catch(() => {}); }, []);
-  if (!c) return null;
-
-  const fase = c.distribucion ? faseDistribucion(c.distribucion.estado) : null;
-  const faltanConteo = c.sucursales.filter((s) => s.conteo !== 'cerrado').length;
-
-  return (
-    <div className="card ciclo-card">
-      <div className="ciclo-head">
-        <div className="ciclo-titulo">
-          <strong>Estado del ciclo</strong>
-          <small className="muted">{faltanConteo > 0 ? `${faltanConteo} sin cerrar pedido` : 'Pedidos al día'}</small>
-        </div>
-        {c.distribucion ? (
-          <Link className="ciclo-pedido" to="/distribucion">
-            <FaseChip estado={c.distribucion.estado} />
-            <small className="muted">Pedido #{c.distribucion.id}</small>
-          </Link>
-        ) : (
-          <Link className="link-btn" to="/distribucion">Crear pedido →</Link>
-        )}
-      </div>
-
-      <div className="ciclo-tabla">
-        <div className="ciclo-fila ciclo-fila--head">
-          <span>Sucursal</span>
-          <span>Pedido sucursal</span>
-          <span>Pedido</span>
-          <span>Recepción</span>
-        </div>
-        {c.sucursales.map((s) => (
-          <Link key={s.id} to={`/inventario?ubicacion=${s.id}`} className="ciclo-fila ciclo-fila--link">
-            <span className="ciclo-suc">{s.nombre}</span>
-            <Celda v={s.conteo} />
-            <Celda v={s.pedido} />
-            <Celda v={s.recepcion} />
-          </Link>
-        ))}
-      </div>
-
-      {fase && (
-        <p className="muted ciclo-pie">
-          Fase actual del pedido: <strong>{fase.label}</strong>. {fase.clave === 'planeacion' ? 'Revisa y aprueba en Distribución.' : fase.clave === 'bodega' ? 'Bodega debe surtir y cargar.' : fase.clave === 'ruta' ? 'En reparto; las sucursales confirman recepción.' : 'Ciclo recibido.'}
-        </p>
-      )}
-    </div>
-  );
-}
-
-interface Panel {
-  sucursales_total: number;
-  conteos_pendientes: number;
-  conteos_listos: number;
-  sucursales_pendientes: { id: number; nombre: string }[];
-  bajo_minimo: number;
-  valor_total: number;
-  valor_por_ubicacion: { id: number; nombre: string; tipo: string; valor: number; conteo_estado: string | null }[];
-  distribucion_actual: { id: number; estado: string; creado_at: string; total_lineas: number } | null;
+interface Panorama {
+  periodo: { anio: number; semana: number; inicia_at: string; termina_at: string; estado: string };
+  ventas: { fuente: 'facturado' | 'proyectado'; total: number; carne: number; desechables: number; markup_proteina: number; por_empresa: { codigo: string; nombre: string; carne: number; desechables: number; total: number }[] };
+  inventario: { total: number; materia_prima_fresca: number; materia_prima_congelada: number; carne_terminada: number; desechables: number };
+  cartera: { por_cobrar: number; vencido_cobrar: number; facturas_pendientes: number; por_pagar: number; vencido_pagar: number; compras_pendientes: number; balance_neto: number };
+  produccion: { costo: number; cajas: number; yield: number; compras_semana: number };
+  operacion: { pedidos_confirmados: number; pedidos_borrador: number; distribuciones_abiertas: number; paradas_pendientes: number; productos_bajo_minimo: number };
+  alertas: { tipo: string; titulo: string; detalle: string; ruta: string }[];
 }
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const fecha = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { month: 'short', day: 'numeric' });
 
-interface RutaParada {
-  parada_id: number;
-  ubicacion: { id: number; nombre: string };
-  orden: number;
-  estado: string;
-}
-interface RutaDetalle {
-  ruta_id: number;
-  estado: string;
-  repartidor: { id: number; nombre: string } | null;
-  paradas: RutaParada[];
+function Desglose({ filas }: { filas: { label: string; valor: number; tono?: string }[] }) {
+  const max = Math.max(1, ...filas.map((f) => f.valor));
+  return <div className="overview-breakdown">{filas.map((f) => <div className="overview-row" key={f.label}><div className="overview-row-head"><span>{f.label}</span><strong>{usd(f.valor)}</strong></div><div className="overview-track"><span className={f.tono ?? ''} style={{ width: `${Math.max(f.valor > 0 ? 2 : 0, (f.valor / max) * 100)}%` }} /></div></div>)}</div>;
 }
 
 export default function PanelAdmin() {
-  const [p, setP] = useState<Panel | null>(null);
-  const [ruta, setRuta] = useState<RutaDetalle | null>(null);
+  const [p, setP] = useState<Panorama | null>(null);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    api<Panel>('/dashboard').then(setP).catch(() => setError('No se pudo cargar el panel'));
-  }, []);
-
-  useEffect(() => {
-    if (!p?.distribucion_actual) { setRuta(null); return; }
-    api<RutaDetalle | null>(`/distribuciones/${p.distribucion_actual.id}/ruta`).then(setRuta).catch(() => setRuta(null));
-  }, [p?.distribucion_actual?.id]);
-
+  useEffect(() => { api<Panorama>('/dashboard/general').then(setP).catch(() => setError('No se pudo cargar el panorama general.')); }, []);
   if (error) return <p className="error-msg">{error}</p>;
-  if (!p) return <Spinner label="Cargando panel…" />;
+  if (!p) return <Spinner label="Calculando panorama…" />;
 
-  return (
-    <div className="panel-admin">
-      <TableroCiclo />
-
-      <div className="kpi-grid">
-        <div className="kpi-card">
-          <span className="kpi-label">Pedidos listos</span>
-          <span className="big-number">{p.conteos_listos}<small className="muted">/{p.sucursales_total}</small></span>
-        </div>
-        <div className={`kpi-card ${p.conteos_pendientes > 0 ? 'kpi-card--warn' : ''}`}>
-          <span className="kpi-label">Pedidos pendientes</span>
-          <span className="big-number">{p.conteos_pendientes}</span>
-        </div>
-        <div className={`kpi-card ${p.bajo_minimo > 0 ? 'kpi-card--warn' : ''}`}>
-          <span className="kpi-label">Productos bajo mínimo</span>
-          <span className="big-number">{p.bajo_minimo}</span>
-        </div>
-        <div className="kpi-card">
-          <span className="kpi-label">Valor de inventario</span>
-          <span className="big-number">{usd(p.valor_total)}</span>
-        </div>
-      </div>
-
-      {p.conteos_pendientes > 0 && (
-        <div className="card card--falt">
-          <strong>Sucursales sin pedido cerrado</strong>
-          <div className="dist-suc-mini">
-            {p.sucursales_pendientes.map((s) => <span key={s.id}>{s.nombre}</span>)}
-          </div>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="card-head">
-          <strong>Pedido actual</strong>
-          <Link className="link-btn" to="/distribucion">Ir a Distribución →</Link>
-        </div>
-        {p.distribucion_actual ? (
-          <div className="dist-actual-row">
-            <FaseChip estado={p.distribucion_actual.estado} />
-            <span className="muted">
-              Pedido #{p.distribucion_actual.id} · {p.distribucion_actual.total_lineas} líneas ·{' '}
-              {new Date(p.distribucion_actual.creado_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago' })}
-            </span>
-          </div>
-        ) : (
-          <p className="muted">Aún no hay pedidos. Crea uno cuando las sucursales cierren su pedido.</p>
-        )}
-      </div>
-
-      {ruta && ruta.paradas.length > 0 && (
-        <div className="card">
-          <div className="card-head">
-            <strong>Avance de la ruta</strong>
-            <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}</span>
-          </div>
-          <div className="ruta-tablero">
-            {[...ruta.paradas].sort((a, b) => a.orden - b.orden).map((p) => (
-              <div key={p.parada_id} className="ruta-parada-fila">
-                <span className={`ruta-dot ruta-dot--${p.estado}`} />
-                <span><strong>{p.orden}. {p.ubicacion.nombre}</strong></span>
-                <ParadaChip estado={p.estado} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="card-head"><strong>Valor por ubicación</strong></div>
-        <div className="lista-ubicaciones">
-          {p.valor_por_ubicacion.map((u) => (
-            <div key={u.id} className="ubic-row">
-              <div>
-                {u.nombre} <span className={`chip ${u.tipo === 'bodega' ? 'chip--info' : 'chip--ok'}`}>{u.tipo}</span>
-                {u.tipo === 'sucursal' && u.conteo_estado !== 'cerrado' && <span className="chip chip--warn">sin pedido cerrado</span>}
-              </div>
-              <div className="dist-valor">{usd(u.valor)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+  const maxEmpresa = Math.max(1, ...p.ventas.por_empresa.map((e) => e.total));
+  return <div className="panel-admin overview">
+    <div className="overview-head">
+      <div><h2>Panorama semanal</h2><p className="muted">Semana {p.periodo.semana} · {fecha(p.periodo.inicia_at)}–{fecha(p.periodo.termina_at)} · {p.periodo.estado}</p></div>
+      <span className={`chip ${p.ventas.fuente === 'facturado' ? 'chip--ok' : 'chip--info'}`}>{p.ventas.fuente === 'facturado' ? 'Facturado' : 'Proyección en curso'}</span>
     </div>
-  );
+
+    {p.alertas.length > 0 && <div className="overview-alerts">{p.alertas.map((a) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>)}</div>}
+
+    <div className="kpi-grid overview-kpis">
+      <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
+      <div className="kpi-card"><span className="kpi-label">Markup de proteína</span><span className="big-number">{usd(p.ventas.markup_proteina)}</span><small>$15 por caja producida vendida</small></div>
+      <div className="kpi-card"><span className="kpi-label">Inventario disponible</span><span className="big-number">{usd(p.inventario.total)}</span><small>Carne, materia prima y desechables</small></div>
+      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + 3 semanas por cobrar − por pagar</small></div>
+    </div>
+
+    <div className="overview-grid">
+      <section className="card overview-card">
+        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Quién genera la venta de la semana</div></div><Link className="link-btn" to="/pedidos">Ver pedidos →</Link></div>
+        {p.ventas.por_empresa.map((e) => <div className="company-sale" key={e.codigo}><div className="overview-row-head"><span><strong>{e.codigo}</strong> · {e.nombre}</span><strong>{usd(e.total)}</strong></div><div className="company-track"><span className="company-meat" style={{ width: `${(e.carne / maxEmpresa) * 100}%` }} /><span className="company-disposable" style={{ width: `${(e.desechables / maxEmpresa) * 100}%` }} /></div><small>Carne {usd(e.carne)} · Desechables {usd(e.desechables)}</small></div>)}
+      </section>
+
+      <section className="card overview-card">
+        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Solo Bodega Adison y Carnicería</div></div><Link className="link-btn" to="/inventario">Revisar →</Link></div>
+        <Desglose filas={[{ label: 'Materia prima fresca', valor: p.inventario.materia_prima_fresca }, { label: 'Materia prima congelada', valor: p.inventario.materia_prima_congelada, tono: 'bar-frozen' }, { label: 'Carne terminada', valor: p.inventario.carne_terminada, tono: 'bar-meat' }, { label: 'Desechables', valor: p.inventario.desechables, tono: 'bar-disposable' }]} />
+      </section>
+
+      <section className="card overview-card">
+        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente, no historial completo</div></div><Link className="link-btn" to="/operacion">Abrir cierre →</Link></div>
+        <div className="cash-grid"><div><small>Por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Cobro vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>requiere seguimiento</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>Pago vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere seguimiento</span></div></div>
+      </section>
+
+      <section className="card overview-card">
+        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Resultado acumulado de la semana</div></div><Link className="link-btn" to="/operacion">Registrar →</Link></div>
+        <div className="production-summary"><div><small>Costo procesado</small><strong>{usd(p.produccion.costo)}</strong></div><div><small>Cajas producidas</small><strong>{p.produccion.cajas.toLocaleString('es-MX')}</strong></div><div><small>Yield</small><strong>{p.produccion.yield.toFixed(1)}%</strong></div><div><small>Compras</small><strong>{usd(p.produccion.compras_semana)}</strong></div></div>
+      </section>
+    </div>
+
+    <section className="card overview-card operation-strip">
+      <div><small>Pedidos confirmados</small><strong>{p.operacion.pedidos_confirmados}</strong></div>
+      <div className={p.operacion.pedidos_borrador ? 'strip-warn' : ''}><small>Sin confirmar</small><strong>{p.operacion.pedidos_borrador}</strong></div>
+      <div><small>Distribuciones abiertas</small><strong>{p.operacion.distribuciones_abiertas}</strong></div>
+      <div className={p.operacion.paradas_pendientes ? 'strip-warn' : ''}><small>Paradas pendientes</small><strong>{p.operacion.paradas_pendientes}</strong></div>
+      <div className={p.operacion.productos_bajo_minimo ? 'strip-warn' : ''}><small>Bajo mínimo</small><strong>{p.operacion.productos_bajo_minimo}</strong></div>
+    </section>
+  </div>;
 }

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, type Rol } from '../auth';
-import { faseDistribucion } from '../flujo';
 import { Icono } from '../icons';
 import ActivarAvisos from '../components/ActivarAvisos';
 import PanelAdmin from './PanelAdmin';
@@ -41,26 +40,10 @@ function TareaHoy() {
           return null;
         }
         if (usuario.rol === 'admin') {
-          // Próxima acción del admin según dónde está atorado el ciclo.
-          const d = await api<{
-            conteos_pendientes: number;
-            conteos_listos: number;
-            distribucion_actual: { id: number; estado: string } | null;
-          }>('/dashboard');
-          const dist = d.distribucion_actual;
-          const cerrado = dist && ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'].includes(dist.estado);
-          if (dist && !cerrado) {
-            const f = faseDistribucion(dist.estado);
-            if (f.clave === 'planeacion') return { titulo: `Revisa y aprueba el pedido #${dist.id}`, sub: 'Ajusta cantidades y aprueba', ruta: '/distribucion' };
-            if (f.clave === 'bodega') return { titulo: `Pedido #${dist.id} en bodega`, sub: 'Surte y carga el camión', ruta: '/bodega' };
-            if (f.clave === 'ruta') return { titulo: `Pedido #${dist.id} en ruta`, sub: 'Sigue el reparto y las recepciones', ruta: '/ruta' };
-          }
-          if (d.conteos_pendientes > 0) {
-            return { titulo: `${d.conteos_pendientes} sucursal${d.conteos_pendientes > 1 ? 'es' : ''} sin cerrar pedido`, sub: 'Aún no pueden entrar al pedido maestro', ruta: '/inventario' };
-          }
-          if (d.conteos_listos > 0) {
-            return { titulo: 'Crea la distribución', sub: 'Las sucursales ya cerraron su pedido', ruta: '/distribucion' };
-          }
+          const d = await api<{ operacion: { pedidos_borrador: number; distribuciones_abiertas: number; paradas_pendientes: number; productos_bajo_minimo: number }; alertas: { titulo: string; detalle: string; ruta: string }[] }>('/dashboard/general');
+          const alerta = d.alertas[0];
+          if (alerta) return { titulo: alerta.titulo, sub: alerta.detalle, ruta: alerta.ruta };
+          if (d.operacion.distribuciones_abiertas > 0) return { titulo: 'Distribuciones en proceso', sub: 'Revisa preparación, carga y reparto', ruta: '/bodega' };
           return null;
         }
         return null;
