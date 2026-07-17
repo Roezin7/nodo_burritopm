@@ -263,6 +263,7 @@ export async function eliminarConteo(negocioId: bigint, conteoId: bigint) {
     where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId },
     select: { product_id: true, tipo: true, cantidad: true },
   });
+  const ajustesLote = await prisma.conteo_ajustes_lote.findMany({ where: { conteo_id: conteoId } });
   // Neto firmado que el conteo aplicó a existencias por producto (+ sumó, − restó).
   const neto = new Map<string, number>();
   for (const m of movs) {
@@ -274,14 +275,30 @@ export async function eliminarConteo(negocioId: bigint, conteoId: bigint) {
   await prisma.$transaction(async (tx) => {
     for (const [pid, d] of neto) {
       if (d === 0) continue;
-      // updateMany no lanza si la existencia ya no existe (no descuadra).
+      const existencia = await tx.existencias.findUnique({
+        where: { ubicacion_id_product_id: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) } },
+      });
+      const siguiente = num0(existencia?.cantidad_disponible) - d;
+      if (siguiente < -0.0001) {
+        throw new HttpError(409, 'Este inventario ya fue utilizado. Revierte primero las operaciones posteriores para no dejar existencias negativas.');
+      }
       await tx.existencias.updateMany({
         where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) },
-        data: { cantidad_disponible: { decrement: d } },
+        data: { cantidad_disponible: Math.max(0, siguiente) },
+      });
+    }
+    for (const ajuste of ajustesLote) {
+      await tx.lotes_materia_prima.update({
+        where: { id: ajuste.lote_id },
+        data: {
+          cajas_disponibles: { increment: ajuste.cajas },
+          peso_disponible_lb: { increment: ajuste.peso_lb },
+          costo_disponible: { increment: ajuste.costo },
+        },
       });
     }
     await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId } });
     await tx.conteos.delete({ where: { id: conteoId } });
-  });
+  }, { isolationLevel: 'Serializable' });
   return { ok: true };
 }

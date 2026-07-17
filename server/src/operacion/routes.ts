@@ -86,6 +86,18 @@ operacionRouter.put('/inventario-final', soloAdmin, asyncHandler(async (req, res
   res.json(await svc.guardarInventarioFinal(req.auth!.negocioId, req.auth!.usuarioId, b));
 }));
 
+/** Historial de inventarios finales, incluidos los ajustes creados por la versión anterior. */
+operacionRouter.get('/inventarios-finales', soloAdmin, asyncHandler(async (req, res) => {
+  const q = z.object({ ubicacion_id: id.optional() }).parse(req.query);
+  res.json(await svc.listarInventariosFinales(req.auth!.negocioId, q.ubicacion_id ? BigInt(q.ubicacion_id) : undefined));
+}));
+
+/** Revierte y elimina una captura completa sin dejar saldos negativos. */
+operacionRouter.delete('/inventarios-finales/:token', soloAdmin, asyncHandler(async (req, res) => {
+  const token = z.string().regex(/^(conteo|legacy)-\d+$/).parse(req.params.token);
+  res.json(await svc.eliminarInventarioFinal(req.auth!.negocioId, token));
+}));
+
 operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     ubicacion_id: id, materia_prima_id: id, fecha, cajas_materia_prima: z.coerce.number().positive(), notas: z.string().trim().max(500).nullable().optional(),

@@ -368,23 +368,41 @@ model historial_pedidos {
 }
 
 model conteos {
-  id           BigInt          @id @default(autoincrement())
+  id           BigInt                @id @default(autoincrement())
   negocio_id   BigInt
   ubicacion_id BigInt
-  estado       EstadoConteo    @default(en_captura)
+  estado       EstadoConteo          @default(en_captura)
   // Día de inventario al que pertenece (sesión por fecha). Una sesión por ubicación por día.
-  fecha        DateTime?       @db.Date
+  fecha        DateTime?             @db.Date
   creado_por   BigInt
-  creado_at    DateTime        @default(now()) @db.Timestamptz(6)
+  creado_at    DateTime              @default(now()) @db.Timestamptz(6)
   cerrado_por  BigInt?
-  cerrado_at   DateTime?       @db.Timestamptz(6)
+  cerrado_at   DateTime?             @db.Timestamptz(6)
   notas        String?
-  ubicaciones  ubicaciones     @relation(fields: [ubicacion_id], references: [id])
+  ubicaciones  ubicaciones           @relation(fields: [ubicacion_id], references: [id])
   lineas       conteo_lineas[]
+  ajustes_lote conteo_ajustes_lote[]
 
   @@index([negocio_id, ubicacion_id])
   @@index([ubicacion_id, estado])
   @@index([ubicacion_id, fecha])
+}
+
+// Cuando un inventario físico de Carnicería encuentra menos materia prima que la
+// registrada, conserva exactamente qué lotes, peso y costo se dieron de baja. Así
+// el inventario puede eliminarse/revertirse sin perder la trazabilidad de compras.
+model conteo_ajustes_lote {
+  conteo_id BigInt
+  lote_id   BigInt
+  cajas     Decimal @db.Decimal(12, 3)
+  peso_lb   Decimal @db.Decimal(12, 3)
+  costo     Decimal @db.Decimal(12, 2)
+
+  conteo conteos             @relation(fields: [conteo_id], references: [id], onDelete: Cascade)
+  lote   lotes_materia_prima @relation(fields: [lote_id], references: [id])
+
+  @@id([conteo_id, lote_id])
+  @@index([lote_id])
 }
 
 model conteo_lineas {
@@ -780,6 +798,7 @@ model lotes_materia_prima {
   producto     products                   @relation(fields: [product_id], references: [id])
   compra_linea compra_lineas?             @relation(fields: [compra_linea_id], references: [id], onDelete: SetNull)
   consumos     produccion_consumos_lote[]
+  ajustes      conteo_ajustes_lote[]
 
   @@index([negocio_id, product_id, congelado])
   @@index([ubicacion_id, fecha])

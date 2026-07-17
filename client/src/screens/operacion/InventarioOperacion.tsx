@@ -32,6 +32,13 @@ interface Stock {
   items: Existencia[];
   valor_total: number;
 }
+interface InventarioGuardado {
+  id: string;
+  fecha: string;
+  ubicacion: string;
+  ajustes: number;
+  tipo: 'trazable' | 'anterior';
+}
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
@@ -51,6 +58,7 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
   const [fecha, setFecha] = useState(hoy());
   const [busy, setBusy] = useState(false);
+  const [historial, setHistorial] = useState<InventarioGuardado[]>([]);
 
   useEffect(() => {
     api<{ ubicaciones: Almacen[] }>('/operacion/catalogo').then((c) => {
@@ -65,10 +73,22 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
   useEffect(() => {
     if (!almacenId) return;
     setStock(null); setError('');
-    api<Stock>(`/existencias?ubicacion=${almacenId}`)
-      .then(setStock)
+    Promise.all([
+      api<Stock>(`/existencias?ubicacion=${almacenId}`),
+      admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
+    ])
+      .then(([existencias, inventarios]) => { setStock(existencias); setHistorial(inventarios); })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'));
-  }, [almacenId]);
+  }, [almacenId, admin]);
+
+  async function recargar() {
+    if (!almacenId) return;
+    const [existencias, inventarios] = await Promise.all([
+      api<Stock>(`/existencias?ubicacion=${almacenId}`),
+      admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
+    ]);
+    setStock(existencias); setHistorial(inventarios);
+  }
 
   const filas = useMemo(() => {
     const q = buscar.trim().toLowerCase();
@@ -99,10 +119,21 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
         method: 'PUT',
         body: { ubicacion_id: Number(almacenId), fecha, lineas: stock.items.map((i) => ({ product_id: i.product_id, cantidad: Number(cantidades[i.product_id] || 0) })) },
       });
-      setStock(await api<Stock>(`/existencias?ubicacion=${almacenId}`));
+      await recargar();
       setEditando(false);
       toast.ok(`Inventario guardado · ${r.ajustes} ajustes.`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar el inventario.'); }
+    finally { setBusy(false); }
+  }
+
+  async function eliminarInventario(inventario: InventarioGuardado) {
+    if (!window.confirm(`¿Eliminar el inventario del ${inventario.fecha}? Se revertirán todos sus ajustes.`)) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/operacion/inventarios-finales/${inventario.id}`, { method: 'DELETE' });
+      await recargar();
+      toast.ok('Inventario eliminado y saldos restaurados.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar el inventario.'); }
     finally { setBusy(false); }
   }
 
@@ -149,6 +180,7 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
       </section>
+      {admin && historial.length > 0 && <section className="workspace-card inventory-history"><div className="workspace-card-head"><div><h2>Inventarios guardados</h2><p>Elimina una captura completa para regresar al saldo anterior.</p></div><span>{historial.length}</span></div><div className="record-list">{historial.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.tipo === 'anterior' && <small>Captura de la versión anterior; también puede revertirse.</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div></section>}
       {editando && <div className="inventory-capture-actions"><label className="field"><span>Fecha</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
       {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}

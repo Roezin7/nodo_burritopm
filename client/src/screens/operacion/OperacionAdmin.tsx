@@ -129,8 +129,15 @@ function Produccion({ catalogo, resumen, busy, setBusy, onDone, setError }: { ca
   const recetas: Record<string, string[]> = { 'RAW-INSIDE-SKIRT': ['MEAT-STEAK'], 'RAW-CHICKEN': ['MEAT-CHICKEN'], 'RAW-PORK-BUTT': ['MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP'], 'RAW-OUTSIDE-SKIRT': ['MEAT-ASADA', 'MEAT-FAJITAS'], 'RAW-INSIDE-ROUND': ['MEAT-MILANESA'], 'RAW-TAPATIOS-TACO': ['MEAT-TAPATIOS-TACO'] };
   const materiaActual = materias.find((p) => String(p.id) === materia);
   const terminados = catalogo.productos.filter((p) => p.linea === 'carne' && p.tipo === 'proteina' && (recetas[materiaActual?.sku ?? ''] ?? []).includes(p.sku));
-  const pesoEntradaEstimado = Number(entrada || 0) * (materias.find((p) => String(p.id) === materia)?.peso_caja_lb ?? 0);
+  const lotesMateria = resumen.lotes.filter((l) => String(l.product_id) === materia);
+  const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= fecha);
+  const cajasFrescas = lotesFrescos.reduce((a, l) => a + l.cajas, 0);
+  const cajasCongeladas = lotesMateria.filter((l) => l.congelado).reduce((a, l) => a + l.cajas, 0);
+  const pesoFresco = lotesFrescos.reduce((a, l) => a + l.peso_lb, 0);
+  const pesoCajaDisponible = cajasFrescas > 0 ? pesoFresco / cajasFrescas : (materiaActual?.peso_caja_lb ?? 0);
+  const pesoEntradaEstimado = Number(entrada || 0) * pesoCajaDisponible;
   const pesoSalida = terminados.reduce((a, p) => a + Number(salidas[p.id] || 0) * (p.peso_caja_lb ?? 0), 0);
+  const insuficiente = Number(entrada || 0) > cajasFrescas + 0.0001;
   async function guardar() {
     if (!carniceria) { setError('Falta crear la ubicación Carnicería.'); return; }
     setBusy(true); setError('');
@@ -146,14 +153,16 @@ function Produccion({ catalogo, resumen, busy, setBusy, onDone, setError }: { ca
         <div className="workspace-card-head"><h2>Nueva producción</h2></div>
         <div className="form-grid form-grid--batch">
           <label className="field"><span>Fecha de producción</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => <option key={p.id} value={p.id}>{p.nombre} · {p.peso_caja_lb ?? '?'} lb comprada</option>)}</select></label>
+          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= fecha).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} cajas frescas</option>; })}</select></label>
           <label className="field field--number"><span>Cajas de materia prima</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={entrada} onChange={(e) => setEntrada(e.target.value)} /></label>
         </div>
-        <div className="production-weight-flow"><span><strong>Entrada</strong>{materiaActual?.peso_caja_lb ?? '?'} lb por caja comprada</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
+        <div className={`production-stock-link ${insuficiente ? 'is-alert' : ''}`}><span><strong>Disponible para producir</strong>{cajasFrescas.toLocaleString('es-MX')} cajas frescas · {pesoFresco.toLocaleString('es-MX')} lb</span><span>{cajasCongeladas > 0 ? `${cajasCongeladas.toLocaleString('es-MX')} congeladas (descongela antes de usar)` : 'Sin cajas congeladas'}</span></div>
+        {insuficiente && <p className="error-msg">La producción excede las compras frescas disponibles.</p>}
+        <div className="production-weight-flow"><span><strong>Entrada</strong>{pesoCajaDisponible ? pesoCajaDisponible.toFixed(2) : '?'} lb promedio por caja comprada</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
         <div className="form-divider"><span>Cajas terminadas producidas</span></div>
         <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>Caja terminada de {p.peso_caja_lb ?? '?'} lb · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
         {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima o revisa el catálogo.</span></div>}
-        <div className="form-submit"><button className="btn btn-primary" disabled={busy || !entrada || pesoSalida <= 0} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar producción'}</button></div>
+        <div className="form-submit"><button className="btn btn-primary" disabled={busy || !entrada || pesoSalida <= 0 || insuficiente} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar producción'}</button></div>
       </section>
       <aside className="calculation-card calculation-card--yield">
         <span className="eyebrow">Resultado</span><h3>Yield</h3>
