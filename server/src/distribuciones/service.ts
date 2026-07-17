@@ -198,6 +198,8 @@ export async function listarDistribuciones(negocioId: bigint) {
     id: Number(d.id),
     nombre: d.nombre,
     estado: d.estado,
+    linea: d.linea_operacion,
+    fecha_entrega: d.fecha_entrega?.toISOString().slice(0, 10) ?? null,
     creado_at: d.creado_at.toISOString(),
     aprobado_at: d.aprobado_at?.toISOString() ?? null,
     total_lineas: d._count.lineas,
@@ -531,6 +533,30 @@ export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuario
     }),
   ]);
   return { ok: true };
+}
+
+/** Aprueba juntas todas las preparaciones editables de un rango semanal. */
+export async function aprobarDistribucionesEnRango(
+  negocioId: bigint,
+  usuarioId: bigint,
+  desde: string,
+  hasta: string,
+) {
+  const inicio = new Date(`${desde}T00:00:00.000Z`);
+  const fin = new Date(`${hasta}T00:00:00.000Z`);
+  const preparaciones = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      fecha_entrega: { gte: inicio, lte: fin },
+      estado: { in: ['calculada', 'en_revision'] },
+    },
+    select: { id: true },
+    orderBy: { fecha_entrega: 'asc' },
+  });
+  for (const preparacion of preparaciones) {
+    await aprobarDistribucion(negocioId, preparacion.id, usuarioId);
+  }
+  return { aprobadas: preparaciones.length };
 }
 
 /**

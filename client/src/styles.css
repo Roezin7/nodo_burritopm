@@ -3257,6 +3257,7 @@ textarea { resize: vertical; }
 .order-summary > p { margin: 0.25rem 0 1rem; color: var(--ink-3); }
 .order-summary > small { display: block; margin: 0.8rem 0; color: var(--ink-3); line-height: 1.4; }
 .order-actions { display: grid; gap: 0.5rem; }
+.order-confirm-all { margin-top: 0.5rem; }
 .order-print-actions { display: grid; gap: 0.45rem; margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--border); }
 .order-print-actions > span { color: var(--ink-3); font-size: 0.72rem; font-weight: 700; }
 
@@ -3267,6 +3268,7 @@ textarea { resize: vertical; }
 .history-toolbar > div:first-child p { margin: 0.15rem 0 0; color: var(--ink-3); font-size: 0.72rem; }
 .history-week-controls { display: flex; align-items: center; gap: 0.35rem; }
 .history-week-controls select { width: 270px; min-height: 40px; }
+.history-primary-actions { display: flex; gap: 0.45rem; }
 .history-day { display: flex; flex-direction: column; gap: 0.7rem; }
 .history-location-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
 .history-order-card { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--sh-sm); }
@@ -3299,6 +3301,22 @@ textarea { resize: vertical; }
 .print-order-day h3 { margin: 0 0 0.35rem; padding: 0.4rem 0.55rem; border-radius: 6px; background: var(--surface-2); font-size: 0.9rem; text-transform: capitalize; }
 .print-location { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 0.3rem 0.8rem; padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.78rem; }
 .print-location small { grid-column: 2; color: var(--ink-3); }
+.route-order-print { width: min(1380px, 100%); }
+.route-order-page { page: route-order; margin: 1rem 0; padding: 0.75rem; border: 1px solid #bbb; background: #fff; color: #111; break-after: page; }
+.route-order-page:last-of-type { break-after: auto; }
+.route-order-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem; padding-bottom: 0.4rem; border-bottom: 2px solid #111; text-transform: uppercase; }
+.route-order-heading > div { display: flex; flex-direction: column; }
+.route-order-heading > div:last-child { align-items: flex-end; }
+.route-order-heading span { font-size: 0.62rem; letter-spacing: 0.05em; }
+.route-order-heading strong { font-size: 1.25rem; }
+.route-order-grid { display: grid; align-items: start; gap: 0.55rem; overflow-x: auto; }
+.route-order-table th:first-child, .route-order-table td:first-child { width: auto; }
+.route-order-table th:last-child, .route-order-table td:last-child { width: 24%; }
+.route-order-table thead tr:first-child th { height: 36px; font-size: 0.82rem; }
+.route-order-table thead small { display: block; margin-top: 0.1rem; font-size: 0.58rem; font-weight: 600; }
+.route-order-table tfoot th { height: 28px; }
+.route-order-page > footer { display: flex; gap: 0.35rem; margin-top: 0.5rem; font-size: 0.64rem; }
+.route-order-page > footer span { margin-left: auto; white-space: nowrap; }
 
 /* Inventario nuevo */
 .workspace-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; margin-bottom: 1rem; }
@@ -3323,7 +3341,13 @@ textarea { resize: vertical; }
 .preparation-builder p { max-width: 660px; margin: 0; color: var(--ink-3); font-size: 0.8rem; line-height: 1.45; }
 .preparation-builder__controls { display: grid; grid-template-columns: auto minmax(165px, 190px) auto; align-items: end; gap: 0.65rem; }
 .preparation-builder__controls .segmented { margin: 0; }
+.preparation-batch-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.preparation-batch-actions span { margin-right: auto; color: var(--ink-3); font-size: 0.72rem; font-weight: 700; }
 .preparation-orders-link { width: fit-content; color: var(--brand); font-size: 0.76rem; font-weight: 700; }
+.generated-route-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.generated-route .card-head > div { display: flex; flex-direction: column; }
+.generated-route .card-head strong { margin-top: 0.15rem; }
+.generated-route .ruta-tablero { padding: 0 1rem 0.5rem; }
 
 /* Configuración de rutas */
 .route-template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
@@ -3393,6 +3417,7 @@ textarea { resize: vertical; }
   .operation-entry-grid, .order-workspace { grid-template-columns: minmax(0, 1fr) 250px; }
   .preparation-builder { grid-template-columns: 1fr; }
   .route-template-grid { grid-template-columns: 1fr; }
+  .generated-route-grid { grid-template-columns: 1fr; }
   .quick-actions { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -3445,6 +3470,8 @@ textarea { resize: vertical; }
   .preparation-builder__controls { grid-template-columns: 1fr; }
   .preparation-builder__controls .segmented, .preparation-builder__controls .btn { width: 100%; }
   .preparation-builder__controls .tab { flex: 1; }
+  .preparation-batch-actions { align-items: stretch; flex-direction: column; }
+  .preparation-batch-actions span { margin-right: 0; }
   .week-card > header { align-items: flex-start; }
   .quick-actions { grid-template-columns: 1fr; }
   .metric-strip--four, .metric-strip--five { grid-template-columns: 1fr 1fr; }
@@ -3457,6 +3484,7 @@ textarea { resize: vertical; }
 }
 
 @media print {
+  @page route-order { size: landscape; margin: 7mm; }
   .operation-order-print { position: absolute; inset: 0; overflow: visible; padding: 0; color: #111; background: white; }
   .operation-order-print .print-order-day { break-inside: avoid; }
   .operation-order-print .operation-order-sheet { font-size: 9pt; }
@@ -3464,6 +3492,14 @@ textarea { resize: vertical; }
   .operation-order-print .print-order-detail { break-before: page; }
   .operation-order-print .print-order-totals > div, .operation-order-print .print-location { border-color: #bbb; }
   .operation-order-print .print-order-day h3 { background: #eee; }
+  .route-order-print { width: 100%; max-width: none; }
+  .route-order-page { min-height: 0; margin: 0; padding: 0; border: 0; }
+  .route-order-grid { overflow: visible; gap: 4px; }
+  .route-order-page--desechables .operation-order-sheet { font-size: 6.5pt; }
+  .route-order-page--desechables .operation-order-sheet th, .route-order-page--desechables .operation-order-sheet td { height: 12px; padding: 0 2px; }
+  .route-order-page--desechables .route-order-table thead tr:first-child th { height: 22px; }
+  .route-order-page--desechables .route-order-table tfoot th { height: 14px; }
+  .route-order-page > footer { font-size: 6pt; }
 }
 
 /* Flujo semanal continuo */

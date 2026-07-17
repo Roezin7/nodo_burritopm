@@ -110,7 +110,7 @@ export async function crearOActualizarRuta(
 
 /** Detalle por ruta concreta. Varias rutas pueden compartir una distribución. */
 async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnType<typeof rutaDeDist>>>) {
-  const [dist, paradas, lineas, repartidor] = await Promise.all([
+  const [dist, paradas, lineas, repartidor, plantilla] = await Promise.all([
     cargarDist(negocioId, ruta.distribucion_id),
     prisma.ruta_paradas.findMany({
       where: { ruta_id: ruta.id },
@@ -123,6 +123,9 @@ async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnTy
     }),
     ruta.repartidor_id
       ? prisma.usuarios.findUnique({ where: { id: ruta.repartidor_id }, select: { id: true, nombre: true } })
+      : Promise.resolve(null),
+    ruta.plantilla_id
+      ? prisma.plantillas_ruta.findUnique({ where: { id: ruta.plantilla_id }, select: { conductor: true } })
       : Promise.resolve(null),
   ]);
 
@@ -148,6 +151,7 @@ async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnTy
     ruta_id: Number(ruta.id),
     distribucion_id: Number(ruta.distribucion_id),
     nombre: ruta.nombre,
+    conductor: plantilla?.conductor ?? repartidor?.nombre ?? null,
     linea,
     estado: ruta.estado,
     repartidor: repartidor ? { id: Number(repartidor.id), nombre: repartidor.nombre } : null,

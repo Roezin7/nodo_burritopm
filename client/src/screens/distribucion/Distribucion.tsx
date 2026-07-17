@@ -10,6 +10,8 @@ interface DistResumen {
   id: number;
   nombre: string | null;
   estado: string;
+  linea: 'carne' | 'desechables' | null;
+  fecha_entrega: string | null;
   creado_at: string;
   aprobado_at: string | null;
   total_lineas: number;
@@ -18,6 +20,13 @@ interface DistResumen {
 const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Pedido #${d.id}`;
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
+function rangoSemana(valor: string) {
+  const d = new Date(`${valor}T12:00:00`);
+  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()));
+  const inicio = d.toLocaleDateString('en-CA');
+  d.setDate(d.getDate() + 5);
+  return { inicio, fin: d.toLocaleDateString('en-CA') };
+}
 
 export default function Distribucion({ integrado = false }: { integrado?: boolean }) {
   const toast = useToast();
@@ -45,17 +54,41 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
     setCreando(true);
     setError('');
     try {
-      const resultado = await api<{ id: number; pedidos: number }>('/operacion/distribuciones', {
+      const resultado = await api<{ id: number; pedidos: number; rutas: number }>('/operacion/distribuciones', {
         method: 'POST',
         body: { linea, fecha_entrega: fecha },
       });
-      toast.ok(`Preparación #${resultado.id} creada con ${resultado.pedidos} pedidos confirmados.`);
+      toast.ok(`Preparación #${resultado.id}: ${resultado.pedidos} pedidos y ${resultado.rutas} rutas creadas.`);
       setAbierta(resultado.id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo crear la preparación.');
     } finally {
       setCreando(false);
     }
+  }
+
+  async function crearTodas() {
+    const rango = rangoSemana(fecha);
+    setCreando(true); setError('');
+    try {
+      const r = await api<{ creadas: { id: number; linea: string; fecha: string; pedidos: number; rutas: number }[]; existentes: number; borradores_omitidos: number }>('/operacion/distribuciones/crear-todas', {
+        method: 'POST', body: { desde: rango.inicio, hasta: rango.fin },
+      });
+      toast.ok(`${r.creadas.length} preparaciones creadas${r.existentes ? ` · ${r.existentes} ya existían` : ''}${r.borradores_omitidos ? ` · ${r.borradores_omitidos} borradores omitidos` : ''}.`);
+      await cargar();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron crear las preparaciones de la semana.'); }
+    finally { setCreando(false); }
+  }
+
+  async function aprobarTodas() {
+    const rango = rangoSemana(fecha);
+    setCreando(true); setError('');
+    try {
+      const r = await api<{ aprobadas: number }>('/distribuciones/aprobar-todas', { method: 'POST', body: { desde: rango.inicio, hasta: rango.fin } });
+      toast.ok(`${r.aprobadas} preparaciones aprobadas.`);
+      await cargar();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron aprobar las preparaciones.'); }
+    finally { setCreando(false); }
   }
 
   if (abierta != null) {
@@ -80,7 +113,7 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
         <div>
           <span className="eyebrow">Nueva preparación</span>
           <h2>Consolidar pedidos</h2>
-          <p>Reúne únicamente los pedidos confirmados de la línea y fecha elegidas; las rutas del día se generan al mismo tiempo.</p>
+          <p>Solo entran pedidos confirmados. Al crearla se generan juntas las rutas de Pablo y MH que correspondan al día.</p>
         </div>
         <div className="preparation-builder__controls">
           <div className="segmented order-line-switch">
@@ -88,8 +121,9 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
             <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
           </div>
           <label className="field"><span>Fecha de entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear preparación'}</button>
+          <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear esta preparación'}</button>
         </div>
+        <div className="preparation-batch-actions"><span>Semana {rangoSemana(fecha).inicio} al {rangoSemana(fecha).fin}</span><button className="btn btn-secondary" disabled={creando} onClick={() => void crearTodas()}>Crear todas</button><button className="btn btn-secondary" disabled={creando} onClick={() => void aprobarTodas()}>Aprobar todas</button></div>
         <Link className="preparation-orders-link" to="/semana/pedidos">Revisar o capturar pedidos →</Link>
       </section>
 
@@ -106,7 +140,7 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
                 <div>
                   <strong>{tituloDist(d)}</strong> <FaseChip estado={d.estado} />
                   <div className="muted">
-                    {new Date(d.creado_at).toLocaleString('es-MX', { timeZone: 'America/Chicago' })} · {d.total_lineas} líneas
+                    {d.fecha_entrega ?? new Date(d.creado_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })} · {d.linea ?? 'operación'} · {d.total_lineas} líneas
                   </div>
                 </div>
                 <span className="muted">›</span>
@@ -472,150 +506,38 @@ interface RutaParada {
 }
 interface RutaDetalle {
   ruta_id: number;
+  nombre: string;
+  conductor: string | null;
   estado: string;
   repartidor: { id: number; nombre: string } | null;
   paradas: RutaParada[];
 }
-interface UsuarioBasico { id: number; nombre: string; rol: string }
-interface Sucursal { id: number; nombre: string }
 
 function RutaPlanner({ id }: { id: number }) {
-  const [ruta, setRuta] = useState<RutaDetalle | null>(null);
-  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
-  const [repartidores, setRepartidores] = useState<UsuarioBasico[]>([]);
-  const [orden, setOrden] = useState<Sucursal[]>([]); // sucursales seleccionadas, en orden
-  const [repartidorId, setRepartidorId] = useState<string>('');
+  const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [cargando, setCargando] = useState(true);
 
   async function cargar() {
     setError('');
     try {
-      const [r, sucCons, usuarios] = await Promise.all([
-        api<RutaDetalle | null>(`/distribuciones/${id}/ruta`),
-        api<VistaSucursal>(`/distribuciones/${id}/consolidado?vista=sucursal`),
-        api<UsuarioBasico[]>('/auth/usuarios?negocio=1', { auth: false }),
-      ]);
-      const sucs = sucCons.grupos.map((g) => ({ id: g.ubicacion.id, nombre: g.ubicacion.nombre }));
-      setSucursales(sucs);
-      setRepartidores(usuarios.filter((u) => u.rol === 'encargado_bodega'));
-      setRuta(r);
-      if (r) {
-        setOrden(r.paradas.sort((a, b) => a.orden - b.orden).map((p) => ({ id: p.ubicacion.id, nombre: p.ubicacion.nombre })));
-        setRepartidorId(r.repartidor ? String(r.repartidor.id) : '');
-      } else {
-        setOrden(sucs); // por defecto, todas en el orden del consolidado
-      }
+      setRutas(await api<RutaDetalle[]>(`/distribuciones/${id}/rutas`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al cargar la ruta');
+      setError(e instanceof ApiError ? e.message : 'Error al cargar las rutas');
+    } finally {
+      setCargando(false);
     }
   }
   useEffect(() => { void cargar(); /* eslint-disable-next-line */ }, [id]);
 
-  const bloqueada = ruta != null && ruta.estado !== 'planificada';
-  const seleccionadas = new Set(orden.map((s) => s.id));
-  const disponibles = sucursales.filter((s) => !seleccionadas.has(s.id));
-
-  function mover(i: number, dir: -1 | 1) {
-    const j = i + dir;
-    if (j < 0 || j >= orden.length) return;
-    const next = [...orden];
-    [next[i], next[j]] = [next[j], next[i]];
-    setOrden(next);
-  }
-  const quitar = (sid: number) => setOrden(orden.filter((s) => s.id !== sid));
-  const agregar = (s: Sucursal) => setOrden([...orden, s]);
-
-  async function guardar() {
-    if (orden.length === 0) { setError('Agrega al menos una parada'); return; }
-    setBusy(true); setError(''); setInfo('');
-    try {
-      await api(`/distribuciones/${id}/ruta`, {
-        method: 'PUT',
-        body: {
-          repartidor_id: repartidorId ? Number(repartidorId) : null,
-          paradas: orden.map((s, i) => ({ ubicacion_id: s.id, orden: i + 1 })),
-        },
-      });
-      setInfo('Ruta guardada');
-      await cargar();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudo guardar la ruta');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (bloqueada && ruta) {
-    // Ruta despachada o completada: tablero de solo lectura.
-    return (
-      <div className="card">
-        <div className="card-head">
-          <strong>Ruta {ruta.estado === 'completada' ? 'completada' : 'en curso'}</strong>
-          <span className="muted">{ruta.repartidor?.nombre ?? 'sin repartidor'}</span>
-        </div>
-        <div className="ruta-tablero">
-          {ruta.paradas.sort((a, b) => a.orden - b.orden).map((p) => (
-            <div key={p.parada_id} className="ruta-parada-fila">
-              <span className={`ruta-dot ruta-dot--${p.estado}`} />
-              <span><strong>{p.orden}. {p.ubicacion.nombre}</strong></span>
-              <ParadaChip estado={p.estado} />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       {error && <p className="error-msg">{error}</p>}
-      {info && <p className="muted">{info}</p>}
-
-      <div className="card">
-        <label className="so-ubic">Repartidor (Bodega y reparto)
-          <select value={repartidorId} onChange={(e) => setRepartidorId(e.target.value)}>
-            <option value="">— Sin asignar —</option>
-            {repartidores.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
-          </select>
-        </label>
-        {repartidores.length === 0 && <p className="muted">No hay usuarios de Bodega y reparto. Créalos en Configuración.</p>}
-      </div>
-
-      <div className="card">
-        <div className="card-head"><strong>Orden de entrega</strong><span className="muted">{orden.length} paradas</span></div>
-        {orden.length === 0 ? (
-          <p className="muted">Agrega sucursales desde la lista de abajo.</p>
-        ) : (
-          orden.map((s, i) => (
-            <div key={s.id} className="ruta-parada-fila">
-              <span className="parada-orden" style={{ width: '2rem', height: '2rem', fontSize: '1rem' }}>{i + 1}</span>
-              <span><strong>{s.nombre}</strong></span>
-              <span style={{ display: 'flex', gap: '0.3rem' }}>
-                <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={i === 0} onClick={() => mover(i, -1)}>↑</button>
-                <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={i === orden.length - 1} onClick={() => mover(i, 1)}>↓</button>
-                <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} onClick={() => quitar(s.id)}>✕</button>
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-
-      {disponibles.length > 0 && (
-        <div className="card">
-          <div className="card-head"><strong>Sucursales fuera de la ruta</strong></div>
-          <div className="dist-suc-mini">
-            {disponibles.map((s) => (
-              <button key={s.id} className="chip chip--info" style={{ cursor: 'pointer', border: 0 }} onClick={() => agregar(s)}>+ {s.nombre}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="action-bar">
-        <button className="btn btn-primary" disabled={busy} onClick={() => void guardar()}>Guardar ruta</button>
-      </div>
+      {cargando ? <Spinner label="Cargando rutas…" /> : rutas.length === 0 ? <div className="empty-state"><strong>No hay rutas generadas</strong></div> : <div className="generated-route-grid">{rutas.map((ruta) => <section className="card generated-route" key={ruta.ruta_id}>
+        <div className="card-head"><div><span className="eyebrow">{ruta.conductor ?? 'Por asignar'}</span><strong>{ruta.nombre}</strong></div><span className="order-status">{ruta.estado}</span></div>
+        <div className="ruta-tablero">{ruta.paradas.length ? [...ruta.paradas].sort((a, b) => a.orden - b.orden).map((p) => <div key={p.parada_id} className="ruta-parada-fila"><span className="parada-orden">{p.orden}</span><span><strong>{p.ubicacion.nombre}</strong></span><ParadaChip estado={p.estado} /></div>) : <p className="muted">Ruta creada; todavía no tiene pedidos confirmados asignados.</p>}</div>
+      </section>)}</div>}
+      <p className="operation-footnote">El orden permanente se modifica en <Link to="/rutas">Configuración de rutas</Link>.</p>
     </>
   );
 }

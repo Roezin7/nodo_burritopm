@@ -65,6 +65,17 @@ distribucionesRouter.get(
   }),
 );
 
+/** Aprueba todas las preparaciones editables de una semana. */
+distribucionesRouter.post(
+  '/aprobar-todas',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    const b = z.object({ desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
+    res.json(await svc.aprobarDistribucionesEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta));
+  }),
+);
+
 /** POST /distribuciones { ubicacion_ids? } — calcula y crea el consolidado. */
 distribucionesRouter.post(
   '/',

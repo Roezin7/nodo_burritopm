@@ -189,6 +189,73 @@ export async function guardarPedido(
   return { id: Number(result.id), estado: result.estado };
 }
 
+/**
+ * Confirma en un solo paso todos los borradores que sí contienen cantidades.
+ * Los borradores vacíos se conservan como borrador y nunca pasan a preparación.
+ */
+export async function confirmarPedidosEnRango(
+  negocioId: bigint,
+  linea: LineaOperacion,
+  desde: string,
+  hasta: string,
+) {
+  const rango = { gte: fecha(desde), lte: fecha(hasta) };
+  const borradores = await prisma.pedidos_operativos.findMany({
+    where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: rango, estado: 'borrador' },
+    select: { id: true, lineas: { select: { id: true }, take: 1 } },
+  });
+  const conPedido = borradores.filter((p) => p.lineas.length > 0).map((p) => p.id);
+  if (conPedido.length) {
+    await prisma.pedidos_operativos.updateMany({
+      where: { id: { in: conPedido }, estado: 'borrador' },
+      data: { estado: 'confirmado', confirmado_at: new Date() },
+    });
+  }
+
+  // BPM opera con todas sus sucursales activas. La cobertura no inventa cantidades:
+  // hace visible cualquier restaurante que aún no tenga un pedido confirmado.
+  const bpm = await prisma.empresas_clientes.findFirst({
+    where: { negocio_id: negocioId, codigo: 'BPM', activo: true },
+    select: { id: true },
+  });
+  const sucursalesBpm = bpm
+    ? await prisma.ubicaciones.findMany({
+        where: { negocio_id: negocioId, empresa_cliente_id: bpm.id, tipo: 'sucursal', activo: true },
+        select: { id: true, nombre: true },
+        orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
+      })
+    : [];
+  const fechasEsperadas: Date[] = [];
+  for (let cursor = fecha(desde); cursor <= fecha(hasta); cursor = sumarDias(cursor, 1)) {
+    const dia = cursor.getUTCDay();
+    if ((linea === 'carne' && [3, 6].includes(dia)) || (linea === 'desechables' && dia === 3)) fechasEsperadas.push(cursor);
+  }
+  const pedidosBpm = sucursalesBpm.length && fechasEsperadas.length
+    ? await prisma.pedidos_operativos.findMany({
+        where: {
+          negocio_id: negocioId,
+          linea_operacion: linea,
+          ubicacion_id: { in: sucursalesBpm.map((u) => u.id) },
+          fecha_entrega: { in: fechasEsperadas },
+          estado: { notIn: ['borrador', 'cancelado'] },
+          lineas: { some: {} },
+        },
+        select: { ubicacion_id: true, fecha_entrega: true },
+      })
+    : [];
+  const presentes = new Set(pedidosBpm.map((p) => `${iso(p.fecha_entrega)}:${p.ubicacion_id}`));
+  const cobertura_bpm = fechasEsperadas.map((dia) => {
+    const pendientes = sucursalesBpm.filter((u) => !presentes.has(`${iso(dia)}:${u.id}`)).map((u) => u.nombre);
+    return { fecha: iso(dia), total: sucursalesBpm.length, confirmados: sucursalesBpm.length - pendientes.length, pendientes };
+  });
+
+  return {
+    confirmados: conPedido.length,
+    borradores_vacios: borradores.length - conPedido.length,
+    cobertura_bpm,
+  };
+}
+
 export async function guardarPlantilla(
   negocioId: bigint,
   id: bigint,
@@ -234,7 +301,7 @@ export async function crearDistribucionOperativa(
   });
   const rep = await prisma.usuarios.findFirst({ where: { negocio_id: negocioId, rol: 'encargado_bodega', activo: true }, orderBy: { id: 'asc' } });
 
-  const dist = await prisma.$transaction(async (tx) => {
+  const resultado = await prisma.$transaction(async (tx) => {
     const d = await tx.distribuciones.create({
       data: { negocio_id: negocioId, creado_por: usuarioId, estado: 'calculada', linea_operacion: linea, fecha_entrega: entrega, nombre: `${linea === 'carne' ? 'Carne' : 'Desechables'} · ${fechaEntrega}` },
     });
@@ -248,13 +315,14 @@ export async function crearDistribucionOperativa(
 
     const destinosFisicos = new Set(pedidos.map((p) => (p.ubicacion.entrega_en_ubicacion_id ?? p.ubicacion_id).toString()));
     const asignados = new Set<string>();
+    let rutasCreadas = 0;
     for (const plantilla of plantillas) {
       const paradas = plantilla.paradas.filter((p) => destinosFisicos.has(p.ubicacion_id.toString()));
-      if (!paradas.length) continue;
       const ruta = await tx.rutas.create({
         data: { negocio_id: negocioId, distribucion_id: d.id, plantilla_id: plantilla.id, fecha_entrega: entrega, nombre: plantilla.nombre, repartidor_id: rep?.id ?? null, creado_por: usuarioId },
       });
-      await tx.ruta_paradas.createMany({ data: paradas.map((p, i) => ({ ruta_id: ruta.id, ubicacion_id: p.ubicacion_id, orden: i + 1 })) });
+      rutasCreadas += 1;
+      if (paradas.length) await tx.ruta_paradas.createMany({ data: paradas.map((p, i) => ({ ruta_id: ruta.id, ubicacion_id: p.ubicacion_id, orden: i + 1 })) });
       paradas.forEach((p) => asignados.add(p.ubicacion_id.toString()));
     }
     const faltantes = [...destinosFisicos].filter((id) => !asignados.has(id));
@@ -262,11 +330,57 @@ export async function crearDistribucionOperativa(
       const us = await tx.ubicaciones.findMany({ where: { id: { in: faltantes.map(BigInt) } }, orderBy: { nombre: 'asc' } });
       const ruta = await tx.rutas.create({ data: { negocio_id: negocioId, distribucion_id: d.id, fecha_entrega: entrega, nombre: 'Ruta por asignar', repartidor_id: rep?.id ?? null, creado_por: usuarioId } });
       await tx.ruta_paradas.createMany({ data: us.map((u, i) => ({ ruta_id: ruta.id, ubicacion_id: u.id, orden: i + 1 })) });
+      rutasCreadas += 1;
     }
     await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'en_preparacion' } });
-    return d;
+    return { d, rutasCreadas };
   });
-  return { id: Number(dist.id), pedidos: pedidos.length, rutas: plantillas.length };
+  return { id: Number(resultado.d.id), pedidos: pedidos.length, rutas: resultado.rutasCreadas };
+}
+
+/** Crea de una vez todas las preparaciones de la semana que tengan pedidos confirmados. */
+export async function crearPreparacionesEnRango(
+  negocioId: bigint,
+  usuarioId: bigint,
+  desde: string,
+  hasta: string,
+  linea?: LineaOperacion,
+) {
+  const grupos = await prisma.pedidos_operativos.findMany({
+    where: {
+      negocio_id: negocioId,
+      linea_operacion: linea,
+      fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+      estado: 'confirmado',
+      lineas: { some: {} },
+    },
+    select: { linea_operacion: true, fecha_entrega: true },
+    distinct: ['linea_operacion', 'fecha_entrega'],
+    orderBy: [{ fecha_entrega: 'asc' }, { linea_operacion: 'asc' }],
+  });
+  const borradores_omitidos = await prisma.pedidos_operativos.count({
+    where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) }, estado: 'borrador' },
+  });
+  const creadas: { id: number; linea: LineaOperacion; fecha: string; pedidos: number; rutas: number }[] = [];
+  let existentes = 0;
+  for (const grupo of grupos) {
+    const ya = await prisma.distribuciones.findFirst({
+      where: {
+        negocio_id: negocioId,
+        linea_operacion: grupo.linea_operacion,
+        fecha_entrega: grupo.fecha_entrega,
+        estado: { not: 'cancelada' },
+      },
+      select: { id: true },
+    });
+    if (ya) {
+      existentes += 1;
+      continue;
+    }
+    const creada = await crearDistribucionOperativa(negocioId, usuarioId, grupo.linea_operacion, iso(grupo.fecha_entrega));
+    creadas.push({ ...creada, linea: grupo.linea_operacion, fecha: iso(grupo.fecha_entrega) });
+  }
+  return { creadas, existentes, borradores_omitidos };
 }
 
 export interface CompraInput {

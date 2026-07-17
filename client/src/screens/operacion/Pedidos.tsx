@@ -9,6 +9,7 @@ type Linea = 'carne' | 'desechables';
 interface Catalogo {
   ubicaciones: { id: number; nombre: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
   productos: { id: number; sku: string; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; peso_caja_lb: number | null }[];
+  plantillas: { id: number; nombre: string; codigo: string; linea: Linea; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
   semanas: { id: number; anio: number; semana: number; inicia_at: string; termina_at: string; estado: string }[];
 }
 interface Pedido {
@@ -38,6 +39,11 @@ function rangoSemana(valor: string) {
   d.setDate(d.getDate() + 5);
   return { inicio, fin: d.toLocaleDateString('en-CA') };
 }
+interface ResultadoConfirmacion {
+  confirmados: number;
+  borradores_vacios: number;
+  cobertura_bpm: { fecha: string; total: number; confirmados: number; pendientes: string[] }[];
+}
 
 export default function Pedidos({ integrado = false }: { integrado?: boolean }) {
   const { usuario } = useAuth();
@@ -60,6 +66,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   const [estado, setEstado] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [refrescoHistorial, setRefrescoHistorial] = useState(0);
 
   useEffect(() => {
     api<Catalogo>('/operacion/catalogo').then((c) => {
@@ -102,7 +109,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
       .then(setHistorial)
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el historial.'))
       .finally(() => setCargandoHistorial(false));
-  }, [admin, vista, fechaHistorial, linea]);
+  }, [admin, vista, fechaHistorial, linea, refrescoHistorial]);
 
   async function guardar(confirmar: boolean) {
     if (!ubicacionId) return;
@@ -126,6 +133,24 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
       setImpresion({ linea: lineaObjetivo, ...rango, pedidos: rows.filter((p) => !['borrador', 'cancelado'].includes(p.estado)) });
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo preparar la orden para imprimir.'); }
     finally { setCargandoImpresion(false); }
+  }
+
+  async function confirmarTodos(desde: string, hasta: string) {
+    setBusy(true); setError('');
+    try {
+      const r = await api<ResultadoConfirmacion>('/operacion/pedidos/confirmar-todos', {
+        method: 'POST', body: { linea, desde, hasta },
+      });
+      const pendientes = r.cobertura_bpm.flatMap((c) => c.pendientes.map((nombre) => `${c.fecha}: ${nombre}`));
+      const detalle = pendientes.length ? ` · BPM pendiente: ${pendientes.slice(0, 3).join(', ')}${pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : ''}` : ' · BPM completo';
+      toast.ok(`${r.confirmados} pedidos confirmados${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}`);
+      setRefrescoHistorial((n) => n + 1);
+      if (desde === hasta && ubicacionId) {
+        const rows = await api<Pedido[]>(`/operacion/pedidos?ubicacion_id=${ubicacionId}&linea=${linea}&desde=${desde}&hasta=${hasta}`);
+        setEstado(rows[0]?.estado ?? null);
+      }
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron confirmar los pedidos.'); }
+    finally { setBusy(false); }
   }
 
   if (!catalogo) return <div className="page"><Spinner /><p className="error-msg">{error}</p></div>;
@@ -167,17 +192,18 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
           <span className="eyebrow">Resumen del pedido</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha} · {linea}</p>
           <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total</dt><dd>{usd(total)}</dd></div></dl>
           <div className="order-actions"><button className="btn btn-secondary" disabled={busy || !ubicacionId} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || !ubicacionId || unidades <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar'}</button></div>
+          {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={busy} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
           {admin && <div className="order-print-actions"><span>Orden semanal consolidada</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne', fecha)}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables', fecha)}>Imprimir desechables</button></div>}
         </aside>
-      </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} semanas={catalogo.semanas} onPrint={() => void abrirImpresion(linea, fechaHistorial)} />}
+      </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} semanas={catalogo.semanas} onPrint={() => void abrirImpresion(linea, fechaHistorial)} onConfirmar={() => { const rango = rangoSemana(fechaHistorial); void confirmarTodos(rango.inicio, rango.fin); }} confirmando={busy} />}
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}
     </div>
   );
 }
 
-function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion, setUbicacion, ubicaciones, semanas, onPrint }: {
+function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion, setUbicacion, ubicaciones, semanas, onPrint, onConfirmar, confirmando }: {
   pedidos: Pedido[]; cargando: boolean; linea: Linea; fecha: string; setFecha: (v: string) => void; ubicacion: string; setUbicacion: (v: string) => void;
-  ubicaciones: Catalogo['ubicaciones']; semanas: Catalogo['semanas']; onPrint: () => void;
+  ubicaciones: Catalogo['ubicaciones']; semanas: Catalogo['semanas']; onPrint: () => void; onConfirmar: () => void; confirmando: boolean;
 }) {
   const rango = rangoSemana(fecha);
   const indiceSemana = semanas.findIndex((s) => s.inicia_at === fecha);
@@ -193,7 +219,7 @@ function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion
       <div><span className="eyebrow">Periodo</span><h2>Semana {semanaActual?.semana ?? '—'}</h2><p>{rango.inicio} al {rango.fin}</p></div>
       <div className="history-week-controls"><button className="icon-btn" disabled={!anterior} aria-label="Semana anterior" onClick={() => anterior && setFecha(anterior.inicia_at)}>←</button><select aria-label="Semana" value={semanaActual?.inicia_at ?? fecha} onChange={(e) => setFecha(e.target.value)}>{semanas.map((s) => <option key={s.id} value={s.inicia_at}>Semana {s.semana} · {s.inicia_at} al {s.termina_at}</option>)}</select><button className="icon-btn" disabled={!siguiente} aria-label="Semana siguiente" onClick={() => siguiente && setFecha(siguiente.inicia_at)}>→</button></div>
       <label className="field"><span>Sucursal</span><select value={ubicacion} onChange={(e) => setUbicacion(e.target.value)}><option value="todas">Todas las sucursales</option>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}</select></label>
-      <button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir orden total</button>
+      <div className="history-primary-actions"><button className="btn btn-secondary" disabled={cargando || confirmando} onClick={onConfirmar}>{confirmando ? 'Confirmando…' : 'Confirmar todos'}</button><button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir por ruta</button></div>
     </section>
     {cargando ? <Spinner label="Cargando pedidos…" /> : <>
       <div className="metric-strip metric-strip--four"><div><span>Sucursales</span><strong>{new Set(filtrados.map((p) => p.ubicacion.id)).size}</strong></div><div><span>Pedidos</span><strong>{filtrados.length}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(total)}</strong></div></div>
@@ -208,22 +234,98 @@ function PedidoHistorico({ pedido }: { pedido: Pedido }) {
   return <article className="history-order-card"><header><div><strong>{pedido.ubicacion.nombre}</strong><small>{pedido.empresa.nombre}</small></div><span className={`order-status order-status--${pedido.estado}`}>{pedido.estado.replaceAll('_', ' ')}</span></header><div>{pedido.lineas.map((l) => <div className="history-order-line" key={l.id}><span><strong>{nombreEnOrden(l.sku, l.nombre, pedido.linea)}</strong><small>{l.sku}</small></span><span>{l.cantidad.toLocaleString('es-MX')} × {usd(l.precio)}</span><strong>{usd(l.cantidad * (l.precio ?? 0))}</strong></div>)}</div><footer><span>{pedido.notas ?? ''}</span><strong>{usd(total)}</strong></footer></article>;
 }
 
-function OrdenImprimible({ datos, catalogo, onClose }: { datos: { linea: Linea; inicio: string; fin: string; pedidos: Pedido[] }; catalogo: Catalogo; onClose: () => void }) {
-  const porSku = new Map(catalogo.productos.map((p) => [p.sku, p]));
-  const lineas = datos.pedidos.flatMap((o) => o.lineas);
-  const totales = filasOrden(datos.linea, catalogo.productos).map((fila) => ({
+interface HojaRuta {
+  clave: string;
+  nombre: string;
+  conductor: string;
+  fechas: string[];
+  paradas: string[];
+  pedidos: Pedido[];
+}
+
+const familiaPlantilla = (codigo: string) => codigo.replace(/-(MIE|SAB|LUN|JUE)$/i, '');
+const sumarFecha = (iso: string, dias: number) => {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + dias);
+  return d.toLocaleDateString('en-CA');
+};
+const diaCorto = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+const fechaCorta = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' }).toUpperCase();
+
+function construirHojasRuta(datos: { linea: Linea; inicio: string; fin: string; pedidos: Pedido[] }, catalogo: Catalogo): HojaRuta[] {
+  const hojas = new Map<string, HojaRuta>();
+  const plantillas = catalogo.plantillas.filter((p) => p.linea === datos.linea);
+  for (let dia = datos.inicio; dia <= datos.fin; dia = sumarFecha(dia, 1)) {
+    const numeroDia = new Date(`${dia}T12:00:00`).getDay();
+    for (const plantilla of plantillas.filter((p) => p.dia_semana === numeroDia)) {
+      const clave = familiaPlantilla(plantilla.codigo);
+      const hoja = hojas.get(clave) ?? {
+        clave,
+        nombre: plantilla.nombre.replace(/\s*·\s*(lunes|martes|miércoles|jueves|viernes|sábado|domingo)$/i, ''),
+        conductor: plantilla.conductor,
+        fechas: [],
+        paradas: [],
+        pedidos: [],
+      };
+      if (!hoja.fechas.includes(dia)) hoja.fechas.push(dia);
+      for (const parada of plantilla.paradas) if (!hoja.paradas.includes(parada.nombre)) hoja.paradas.push(parada.nombre);
+      hojas.set(clave, hoja);
+    }
+  }
+
+  for (const pedido of datos.pedidos) {
+    const numeroDia = new Date(`${pedido.fecha_entrega}T12:00:00`).getDay();
+    const destino = pedido.ubicacion.entrega_en?.id ?? pedido.ubicacion.id;
+    const plantilla = plantillas.find((p) => p.dia_semana === numeroDia && p.paradas.some((parada) => parada.ubicacion_id === destino));
+    const clave = plantilla ? familiaPlantilla(plantilla.codigo) : 'SIN-RUTA';
+    if (!hojas.has(clave)) {
+      hojas.set(clave, { clave, nombre: 'Sin ruta asignada', conductor: 'POR ASIGNAR', fechas: [], paradas: [], pedidos: [] });
+    }
+    const hoja = hojas.get(clave)!;
+    if (!hoja.fechas.includes(pedido.fecha_entrega)) hoja.fechas.push(pedido.fecha_entrega);
+    if (!hoja.paradas.includes(pedido.ubicacion.entrega_en?.nombre ?? pedido.ubicacion.nombre)) hoja.paradas.push(pedido.ubicacion.entrega_en?.nombre ?? pedido.ubicacion.nombre);
+    hoja.pedidos.push(pedido);
+  }
+
+  return [...hojas.values()]
+    .filter((hoja) => hoja.pedidos.length > 0)
+    .map((hoja) => ({ ...hoja, fechas: hoja.fechas.sort() }))
+    .sort((a, b) => {
+      const prioridad = (nombre: string) => nombre.toLowerCase() === 'pablo' ? 0 : nombre.toLowerCase() === 'mh' ? 1 : 2;
+      return prioridad(a.conductor) - prioridad(b.conductor) || a.nombre.localeCompare(b.nombre, 'es');
+    });
+}
+
+function cantidadesHoja(hoja: HojaRuta, linea: Linea, catalogo: Catalogo, fechaObjetivo?: string) {
+  const productosPorSku = new Map(catalogo.productos.map((p) => [p.sku, p.id]));
+  const pedidos = fechaObjetivo ? hoja.pedidos.filter((p) => p.fecha_entrega === fechaObjetivo) : hoja.pedidos;
+  const lineas = pedidos.flatMap((p) => p.lineas);
+  return filasOrden(linea, catalogo.productos).map((fila) => ({
     nombre: fila.nombre,
     cantidad: fila.skus.reduce((total, sku) => {
-      const producto = porSku.get(sku);
-      return total + (producto ? lineas.filter((l) => l.product_id === producto.id).reduce((a, l) => a + l.cantidad, 0) : 0);
+      const productoId = productosPorSku.get(sku);
+      return total + (productoId ? lineas.filter((l) => l.product_id === productoId).reduce((a, l) => a + l.cantidad, 0) : 0);
     }, 0),
   }));
-  const fechas = [...new Set(datos.pedidos.map((p) => p.fecha_entrega))].sort();
-  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card invoice-print operation-order-print" onClick={(e) => e.stopPropagation()}>
-    <header className="print-order-head"><div><span className="eyebrow">M&amp;G Management and Logistics Inc.</span><h1>Orden total de {datos.linea}</h1><p>{datos.inicio} al {datos.fin}</p></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
-    <section className="print-order-totals"><h2>Orden consolidada</h2><table className="operation-order-sheet"><thead><tr><th>ITEM</th><th>QTY</th></tr></thead><tbody>{totales.map((p) => <tr key={p.nombre}><td>{p.nombre}</td><td>{p.cantidad > 0 ? p.cantidad.toLocaleString('es-MX') : ''}</td></tr>)}</tbody></table></section>
-    <section className="print-order-detail"><h2>Detalle por sucursal</h2>{fechas.map((dia) => <div className="print-order-day" key={dia}><h3>{fechaLarga(dia)}</h3>{datos.pedidos.filter((p) => p.fecha_entrega === dia).map((p) => <div className="print-location" key={p.id}><strong>{p.ubicacion.nombre}</strong><span>{p.lineas.map((l) => `${nombreEnOrden(l.sku, l.nombre, datos.linea)}: ${l.cantidad.toLocaleString('es-MX')}`).join(' · ')}</span>{p.notas && <small>{p.notas}</small>}</div>)}</div>)}</section>
-    {!datos.pedidos.length && <div className="empty-state"><strong>No hay pedidos confirmados en esta semana</strong></div>}
-    <button className="btn btn-primary btn-block" disabled={!datos.pedidos.length} onClick={() => window.print()}>Imprimir / guardar PDF</button>
+}
+
+function TablaRuta({ titulo, subtitulo, filas }: { titulo: string; subtitulo?: string; filas: { nombre: string; cantidad: number }[] }) {
+  return <table className="operation-order-sheet route-order-table"><thead><tr><th colSpan={2}>{titulo}{subtitulo && <small>{subtitulo}</small>}</th></tr><tr><th>ITEM</th><th>QTY</th></tr></thead><tbody>{filas.map((fila) => <tr key={fila.nombre}><td>{fila.nombre}</td><td>{fila.cantidad > 0 ? fila.cantidad.toLocaleString('es-MX') : ''}</td></tr>)}</tbody><tfoot><tr><th>TOTAL</th><th>{filas.reduce((a, fila) => a + fila.cantidad, 0).toLocaleString('es-MX')}</th></tr></tfoot></table>;
+}
+
+function OrdenImprimible({ datos, catalogo, onClose }: { datos: { linea: Linea; inicio: string; fin: string; pedidos: Pedido[] }; catalogo: Catalogo; onClose: () => void }) {
+  const hojas = construirHojasRuta(datos, catalogo);
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card invoice-print operation-order-print route-order-print" onClick={(e) => e.stopPropagation()}>
+    <header className="print-order-head no-print"><div><span className="eyebrow">M&amp;G Management and Logistics Inc.</span><h1>Orden de {datos.linea} por ruta</h1><p>{datos.inicio} al {datos.fin} · {hojas.length} hojas</p></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
+    {hojas.map((hoja) => <section className={`route-order-page route-order-page--${datos.linea}`} key={hoja.clave}>
+      <header className="route-order-heading"><div><span>M&amp;G Management and Logistics Inc.</span><strong>{hoja.conductor}</strong></div><div><span>{datos.linea}</span><strong>{hoja.nombre}</strong></div></header>
+      <div className="route-order-grid" style={{ gridTemplateColumns: `repeat(${hoja.fechas.length + 1}, minmax(190px, 1fr))` }}>
+        {hoja.fechas.map((dia) => <TablaRuta key={dia} titulo={diaCorto(dia)} subtitulo={fechaCorta(dia)} filas={cantidadesHoja(hoja, datos.linea, catalogo, dia)} />)}
+        <TablaRuta titulo="TOTAL" subtitulo="SEMANA" filas={cantidadesHoja(hoja, datos.linea, catalogo)} />
+      </div>
+      <footer><strong>Ruta:</strong> {hoja.paradas.join(' → ')} <span>{hoja.pedidos.length} pedidos confirmados</span></footer>
+    </section>)}
+    {!hojas.length && <div className="empty-state"><strong>No hay pedidos confirmados en esta semana</strong><span>Los borradores no se incluyen en la impresión ni en la preparación.</span></div>}
+    <button className="btn btn-primary btn-block no-print" disabled={!hojas.length} onClick={() => window.print()}>Imprimir / guardar PDF</button>
   </div></div>;
 }

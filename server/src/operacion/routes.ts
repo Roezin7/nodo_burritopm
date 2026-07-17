@@ -37,10 +37,22 @@ operacionRouter.put('/pedidos', requireRole('admin', 'encargado_sucursal'), asyn
   res.json(await svc.guardarPedido(req.auth!.negocioId, req.auth!.usuarioId, b, req.auth!.rol === 'admin'));
 }));
 
+/** Confirma en bloque los pedidos capturados de una fecha o semana. */
+operacionRouter.post('/pedidos/confirmar-todos', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ linea, desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
+  res.json(await svc.confirmarPedidosEnRango(req.auth!.negocioId, b.linea, b.desde, b.hasta));
+}));
+
 /** Convierte pedidos confirmados en distribución y genera todas las rutas del día. */
 operacionRouter.post('/distribuciones', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({ linea, fecha_entrega: fecha }).parse(req.body);
   res.status(201).json(await svc.crearDistribucionOperativa(req.auth!.negocioId, req.auth!.usuarioId, b.linea, b.fecha_entrega));
+}));
+
+/** Genera en un toque todas las preparaciones con pedidos confirmados de la semana. */
+operacionRouter.post('/distribuciones/crear-todas', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ linea: linea.optional(), desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
+  res.status(201).json(await svc.crearPreparacionesEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta, b.linea));
 }));
 
 operacionRouter.patch('/plantillas/:id', soloAdmin, asyncHandler(async (req, res) => {
