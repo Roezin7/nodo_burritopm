@@ -121,10 +121,13 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   type Grupo = { empresa: (typeof pedidos)[number]['empresa']; ubicacion: (typeof pedidos)[number]['ubicacion']; linea: LineaOperacion; items: Map<string, { productId: bigint; descripcion: string; cantidad: number; precio: number }> };
   const grupos = new Map<string, Grupo>();
   for (const pedido of pedidos) {
-    const k = `${pedido.ubicacion_id}:${pedido.linea_operacion}`;
-    if (!grupos.has(k)) grupos.set(k, { empresa: pedido.empresa, ubicacion: pedido.ubicacion, linea: pedido.linea_operacion, items: new Map() });
-    const g = grupos.get(k)!;
     for (const l of pedido.lineas) {
+      // La ruta puede ser de carne y llevar consumibles solicitados en la misma hoja.
+      // La factura se separa por la línea real del producto, como en los libros actuales.
+      const linea = l.producto.linea_operacion ?? pedido.linea_operacion;
+      const k = `${pedido.ubicacion_id}:${linea}`;
+      if (!grupos.has(k)) grupos.set(k, { empresa: pedido.empresa, ubicacion: pedido.ubicacion, linea, items: new Map() });
+      const g = grupos.get(k)!;
       const cantidad = await cantidadFacturable(l);
       if (cantidad <= 0) continue;
       const precio = precios.get(l.product_id.toString()) ?? 0;

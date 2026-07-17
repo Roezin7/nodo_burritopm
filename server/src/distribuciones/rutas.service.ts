@@ -6,6 +6,21 @@ import { estadoRutaDesdeParadas, estadoTrasEntrega, normalizarOrden, type Estado
 import { avisarConfirmarRecepcion } from '../push/service.js';
 
 type Tx = Prisma.TransactionClient;
+type LineaRuta = 'carne' | 'desechables';
+interface RutaItemDto { linea_id: number; product_id: number; sku: string; nombre: string; unidad: string; esperado: number; recibida: number | null; destino_facturacion?: string }
+const ORDEN_CARNE = [
+  'MEAT-STEAK', 'MEAT-CHICKEN', 'MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP', 'MEAT-ASADA', 'MEAT-FAJITAS',
+  'MEAT-MILANESA', 'MEAT-TAMAL', 'MEAT-CHILE', 'MEAT-DORADO', 'MEAT-ADOBO', 'MEAT-CARNITAS', 'MEAT-CATERING',
+  'BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029', 'MEAT-TAPATIOS-TACO',
+];
+function ordenItem(sku: string, linea: LineaRuta) {
+  if (linea === 'carne') {
+    const i = ORDEN_CARNE.indexOf(sku);
+    return i < 0 ? 999 : i;
+  }
+  const n = /^BPM-(\d+)$/.exec(sku);
+  return n ? Number(n[1]) : 999;
+}
 
 /** Cantidad que va en el camión para una línea (lo cargado, o lo mejor aprobado disponible). */
 function cantidadACargar(l: {
@@ -95,7 +110,8 @@ export async function crearOActualizarRuta(
 
 /** Detalle por ruta concreta. Varias rutas pueden compartir una distribución. */
 async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnType<typeof rutaDeDist>>>) {
-  const [paradas, lineas, repartidor] = await Promise.all([
+  const [dist, paradas, lineas, repartidor] = await Promise.all([
+    cargarDist(negocioId, ruta.distribucion_id),
     prisma.ruta_paradas.findMany({
       where: { ruta_id: ruta.id },
       include: { ubicaciones: { select: { id: true, nombre: true, direccion: true } } },
@@ -110,13 +126,14 @@ async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnTy
       : Promise.resolve(null),
   ]);
 
-  const itemsPorUbic = new Map<string, unknown[]>();
+  const itemsPorUbic = new Map<string, RutaItemDto[]>();
   for (const l of lineas) {
     const k = (l.ubicaciones.entrega_en_ubicacion_id ?? l.ubicacion_destino_id).toString();
     if (!itemsPorUbic.has(k)) itemsPorUbic.set(k, []);
     itemsPorUbic.get(k)!.push({
       linea_id: Number(l.id),
       product_id: Number(l.product_id),
+      sku: l.products.sku,
       nombre: l.products.nombre,
       unidad: l.products.unidad_distribucion.nombre,
       esperado: cantidadACargar(l),
@@ -124,11 +141,14 @@ async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnTy
       destino_facturacion: l.ubicaciones.nombre,
     });
   }
+  const linea = dist.linea_operacion ?? 'desechables';
+  for (const items of itemsPorUbic.values()) items.sort((a, b) => ordenItem(a.sku, linea));
 
   return {
     ruta_id: Number(ruta.id),
     distribucion_id: Number(ruta.distribucion_id),
     nombre: ruta.nombre,
+    linea,
     estado: ruta.estado,
     repartidor: repartidor ? { id: Number(repartidor.id), nombre: repartidor.nombre } : null,
     despachada_at: ruta.despachada_at?.toISOString() ?? null,
@@ -190,7 +210,7 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
     },
   });
 
-  const porUbic = new Map<string, { ubic: { id: number; nombre: string; direccion: string | null }; items: unknown[]; lineas: typeof lineas }>();
+  const porUbic = new Map<string, { ubic: { id: number; nombre: string; direccion: string | null }; items: RutaItemDto[]; lineas: typeof lineas }>();
   for (const l of lineas) {
     const k = l.ubicacion_destino_id.toString();
     if (!porUbic.has(k)) {
@@ -204,6 +224,7 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
     g.items.push({
       linea_id: Number(l.id),
       product_id: Number(l.product_id),
+      sku: l.products.sku,
       nombre: l.products.nombre,
       unidad: l.products.unidad_distribucion.nombre,
       esperado: cantidadACargar(l),
@@ -211,6 +232,7 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
     });
     g.lineas.push(l);
   }
+  for (const grupo of porUbic.values()) grupo.items.sort((a, b) => ordenItem(a.sku, dist?.linea_operacion ?? 'desechables'));
 
   const paradas = [...porUbic.values()]
     .sort((a, b) => a.ubic.nombre.localeCompare(b.ubic.nombre, 'es'))
@@ -234,6 +256,7 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
     ruta_id: -Number(distId), // sintético (negativo) para distinguir de rutas reales
     distribucion_id: Number(distId),
     nombre: `Pedido #${distId}`,
+    linea: dist?.linea_operacion ?? 'desechables',
     estado: 'en_curso',
     repartidor: null,
     despachada_at: dist?.cargado_at?.toISOString() ?? null,

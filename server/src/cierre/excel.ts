@@ -118,12 +118,13 @@ const FILA_CARNE: Record<string, number> = {
   'MEAT-STEAK': 11, 'MEAT-CHICKEN': 12, 'MEAT-PASTOR-BPM': 13, 'MEAT-PASTOR-TAP': 13,
   'MEAT-ASADA': 14, 'MEAT-FAJITAS': 15, 'MEAT-MILANESA': 16, 'MEAT-TAMAL': 17,
   'MEAT-CHILE': 18, 'MEAT-DORADO': 19, 'MEAT-ADOBO': 20, 'MEAT-CARNITAS': 21,
-  'MEAT-CATERING': 22, 'MEAT-TAPATIOS-TACO': 29,
+  'MEAT-CATERING': 22, 'BPM-0019': 23, 'BPM-0047': 24, 'BPM-0048': 25,
+  'BPM-0049': 26, 'BPM-0020': 27, 'BPM-0029': 28, 'MEAT-TAPATIOS-TACO': 29,
 };
 
-function valorPedido(d: Datos, linea: 'carne' | 'desechables', codigo: string, productId: bigint, dia?: number) {
+function valorPedido(d: Datos, linea: 'carne' | 'desechables' | null, codigo: string, productId: bigint, dia?: number) {
   return d.pedidos
-    .filter((p) => p.linea_operacion === linea && p.ubicacion.codigo === codigo && (dia == null || p.fecha_entrega.getUTCDay() === dia))
+    .filter((p) => (linea == null || p.linea_operacion === linea) && p.ubicacion.codigo === codigo && (dia == null || p.fecha_entrega.getUTCDay() === dia))
     .flatMap((p) => p.lineas)
     .filter((l) => l.product_id === productId)
     .reduce((a, l) => a + num0(l.cantidad), 0);
@@ -132,7 +133,7 @@ function valorPedido(d: Datos, linea: 'carne' | 'desechables', codigo: string, p
 function llenarWeeklyOrder(wb: ExcelJS.Workbook, d: Datos) {
   const n = d.semana.semana;
   const ws = hojaSemana(wb, /^Meat Order/, n, `Meat Order (${n})`);
-  const carne = d.productos.filter((p) => p.linea_operacion === 'carne' && p.tipo_operativo !== 'materia_prima');
+  const carne = d.productos.filter((p) => FILA_CARNE[p.sku] != null);
   for (let base = 1; base <= ws.columnCount; base += 10) {
     const encabezado = normal(ws.getCell(7, base).text);
     if (!encabezado || encabezado === 'TOTAL' || ['PABLO', 'MH'].some((x) => encabezado.startsWith(x)) || encabezado.startsWith('TAPATIOS MONDAY') || encabezado.startsWith('TAPATIOS THURSDAY')) continue;
@@ -187,7 +188,7 @@ function llenarShipping(ws: ExcelJS.Worksheet, d: Datos, filas: Map<string, numb
     if (row < 3 || row > 46) continue;
     let total = 0;
     for (const [codigo, col] of Object.entries(columnas)) {
-      const qty = valorPedido(d, 'desechables', codigo, p.id);
+      const qty = valorPedido(d, null, codigo, p.id);
       if (qty > 0) ws.getCell(row, col).value = qty;
       total += qty;
     }
@@ -209,7 +210,7 @@ function llenarDesechables(wb: ExcelJS.Workbook, d: Datos) {
     ws.getCell(row, 7).value = precio;
     let vendido = 0;
     for (const [codigo, sourceCol] of Object.entries(COLUMNAS_DESECHABLES)) {
-      const qty = valorPedido(d, 'desechables', codigo, p.id);
+      const qty = valorPedido(d, null, codigo, p.id);
       ws.getCell(row, sourceCol).value = qty || null;
       vendido += qty;
       const destino = COLUMNAS_DESTINO_DESECHABLES[sourceCol];

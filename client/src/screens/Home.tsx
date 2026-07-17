@@ -78,16 +78,16 @@ interface Modulo {
 }
 
 const MODULOS: Modulo[] = [
-  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y fecha', ruta: '/pedidos', roles: ['admin', 'encargado_sucursal'] },
-  { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Materia prima, lotes y cuentas por pagar', ruta: '/compras', soloAdmin: true },
-  { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/produccion', soloAdmin: true },
-  { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/inventario', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y fecha', ruta: '/semana/pedidos', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Materia prima, lotes y cuentas por pagar', ruta: '/semana/compras', soloAdmin: true },
+  { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/semana/produccion', soloAdmin: true },
+  { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
   { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
-  { clave: 'distribucion', titulo: 'Preparación', icono: 'package', desc: 'Consolidar pedidos y preparar entregas', ruta: '/distribucion', soloAdmin: true },
-  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
-  { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/ruta', roles: ['encargado_bodega'] },
-  { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
-  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cierre semanal, cobros y Excel', ruta: '/facturacion', soloAdmin: true },
+  { clave: 'distribucion', titulo: 'Preparación', icono: 'package', desc: 'Consolidar pedidos y preparar entregas', ruta: '/semana/preparacion', soloAdmin: true },
+  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'] },
+  { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cierre semanal, cobros y Excel', ruta: '/semana/cierre', soloAdmin: true },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];
@@ -135,9 +135,8 @@ export default function Home() {
       <ActivarAvisos />
       <TareaHoy />
       <div className="quick-actions" aria-label="Acciones rápidas">
-        <Link to="/semana/pedidos"><span><Icono name="clipboard" size={20} /></span><strong>Abrir semana</strong><small>Pedidos a cierre</small></Link>
-        <Link to="/rutas"><span><Icono name="map" size={20} /></span><strong>Rutas</strong><small>Orden de entrega</small></Link>
-        <Link to="/distribucion"><span><Icono name="package" size={20} /></span><strong>Preparación</strong><small>Pedidos confirmados</small></Link>
+        <Link to="/semana"><span><Icono name="clipboard" size={20} /></span><strong>Abrir semana</strong><small>Compras a cierre</small></Link>
+        <Link to="/incidencias"><span><Icono name="alert" size={20} /></span><strong>Incidencias</strong><small>Diferencias por resolver</small></Link>
       </div>
       <PanelAdmin />
     </div>

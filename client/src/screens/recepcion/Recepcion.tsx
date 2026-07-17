@@ -16,7 +16,7 @@ interface LineaRec {
 interface DistRec { id: number; estado: string; creado_at: string; lineas: LineaRec[] }
 interface DistHist { id: number; estado: string; recibido_at: string; con_incidencia: boolean; total_lineas: number; lineas: LineaRec[] }
 
-export default function Recepcion() {
+export default function Recepcion({ integrado = false }: { integrado?: boolean }) {
   const { usuario } = useAuth();
   const esAdmin = usuario?.rol === 'admin';
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
@@ -79,11 +79,12 @@ export default function Recepcion() {
   const toggleProblema = (id: number) => setProblema((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
-    <div className="page conteo-page">
-      <header className="page-head">
+    <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
+      {!integrado && <header className="page-head">
         <div><h1>Recepción</h1><p className="page-sub">Confirma lo que llega del camión.</p></div>
-      </header>
-      <FlujoStepper activo="recepcion" />
+      </header>}
+      {!integrado && <FlujoStepper activo="recepcion" />}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 7</span><h2>Recepción</h2></div></header>}
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes una sucursal asignada.</p>

@@ -171,8 +171,9 @@ dashboardRouter.get(
         const g = porEmpresa.get(p.empresa_cliente_id.toString());
         for (const l of p.lineas) {
           const total = num0(l.cantidad) * precioPedido(l);
-          if (p.linea_operacion === 'carne') ventaCarne += total; else ventaDesechables += total;
-          if (g) { g[p.linea_operacion] += total; g.total += total; }
+          const linea = l.producto.linea_operacion ?? p.linea_operacion;
+          if (linea === 'carne') ventaCarne += total; else ventaDesechables += total;
+          if (g) { g[linea] += total; g.total += total; }
           if (l.producto.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * num0(l.producto.markup_caja);
         }
       }

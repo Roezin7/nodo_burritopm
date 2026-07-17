@@ -5,10 +5,12 @@ import { Icono } from '../../icons';
 import { ParadaChip, FlujoStepper, paradaLabel } from '../../flujo';
 import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import Spinner from '../../components/Spinner';
+import { nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 
 interface ParadaItem {
   linea_id: number;
   product_id: number;
+  sku: string;
   nombre: string;
   unidad: string;
   esperado: number;
@@ -28,6 +30,7 @@ interface RutaDetalle {
   ruta_id: number;
   distribucion_id: number;
   nombre: string | null;
+  linea: LineaOperacion;
   estado: string;
   repartidor: { id: number; nombre: string } | null;
   despachada_at: string | null;
@@ -37,13 +40,13 @@ interface RutaDetalle {
 const cerrada = (e: string) => ['entregada', 'confirmada', 'con_incidencia', 'omitida'].includes(e);
 const hora = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('es-MX', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit' }) : '');
 
-export default function Ruta() {
+export default function Ruta({ integrado = false }: { integrado?: boolean }) {
   const { usuario } = useAuth();
-  if (usuario?.rol === 'admin') return <MonitorRutas />;
-  return <RutaRepartidor />;
+  if (usuario?.rol === 'admin') return <MonitorRutas integrado={integrado} />;
+  return <RutaRepartidor integrado={integrado} />;
 }
 
-function RutaRepartidor() {
+function RutaRepartidor({ integrado }: { integrado: boolean }) {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [historial, setHistorial] = useState<RutaDetalle[]>([]);
   const [tab, setTab] = useState<'activas' | 'historial'>('activas');
@@ -93,13 +96,14 @@ function RutaRepartidor() {
   const hechasTotal = rutas.reduce((a, r) => a + r.paradas.filter((p) => cerrada(p.estado)).length, 0);
 
   return (
-    <div className="page conteo-page ruta-page">
+    <div className={integrado ? 'embedded-operation conteo-page ruta-page' : 'page conteo-page ruta-page'}>
       {exito && <ExitoOverlay nombre={exito} />}
-      <header className="page-head">
+      {!integrado && <header className="page-head">
         <div><span className="eyebrow">Ruta activa</span><h1>Reparto</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
-      </header>
-      <FlujoStepper activo="ruta" />
-      <BodegaRutaTabs activo="reparto" />
+      </header>}
+      {!integrado && <FlujoStepper activo="ruta" />}
+      {!integrado && <BodegaRutaTabs activo="reparto" />}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 6</span><h2>Reparto</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
@@ -251,7 +255,7 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
         <div className="parada-items">
           {parada.items.map((it) => (
             <div key={it.linea_id} className="parada-item">
-              <span><strong>{it.nombre}</strong> <small className="muted">{it.unidad}</small></span>
+              <span><strong>{nombreEnOrden(it.sku, it.nombre, ruta.linea)}</strong> <small className="muted">{it.unidad}</small></span>
               {modoProblema ? (
                 <input
                   className="conteo-input2 dist-input"
@@ -294,7 +298,7 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
 }
 
 // ───────────────────── Monitor del admin (rutas activas en vivo) ─────────────
-function MonitorRutas() {
+function MonitorRutas({ integrado }: { integrado: boolean }) {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [historial, setHistorial] = useState<RutaDetalle[]>([]);
   const [tab, setTab] = useState<'activas' | 'historial'>('activas');
@@ -326,8 +330,8 @@ function MonitorRutas() {
   }, [tab, historial.length]);
 
   return (
-    <div className="page">
-      <header className="page-head">
+    <div className={integrado ? 'embedded-operation' : 'page'}>
+      {!integrado && <header className="page-head">
         <div>
           <h1>Reparto</h1>
           <p className="page-sub">
@@ -335,9 +339,10 @@ function MonitorRutas() {
             {actualizado && <> · actualizado {hora(actualizado.toISOString())}</>}
           </p>
         </div>
-      </header>
-      <FlujoStepper activo="ruta" />
-      <BodegaRutaTabs activo="reparto" />
+      </header>}
+      {!integrado && <FlujoStepper activo="ruta" />}
+      {!integrado && <BodegaRutaTabs activo="reparto" />}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 6</span><h2>Reparto</h2></div></header>}
 
       <div className="tabs">
         <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>Activas ({rutas.length})</button>

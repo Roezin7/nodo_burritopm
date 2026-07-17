@@ -4,6 +4,7 @@ import { api, ApiError } from '../../api';
 import { useToast, mensajeError } from '../../toast';
 import { EstadoDistChip, FaseChip, ParadaChip, FlujoStepper } from '../../flujo';
 import Spinner from '../../components/Spinner';
+import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 
 interface DistResumen {
   id: number;
@@ -18,7 +19,7 @@ const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim(
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 
-export default function Distribucion() {
+export default function Distribucion({ integrado = false }: { integrado?: boolean }) {
   const toast = useToast();
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [abierta, setAbierta] = useState<number | null>(null);
@@ -62,16 +63,17 @@ export default function Distribucion() {
   }
 
   return (
-    <div className="page">
-      <header className="page-head">
+    <div className={integrado ? 'embedded-operation' : 'page'}>
+      {!integrado && <header className="page-head">
         <div>
           <span className="eyebrow">Pedidos confirmados</span>
           <h1>Preparación de entregas</h1>
           <p className="page-sub">Revisa el consolidado de carne o desechables antes de enviarlo a despacho.</p>
         </div>
-      </header>
+      </header>}
 
-      <FlujoStepper activo="plan" />
+      {!integrado && <FlujoStepper activo="plan" />}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 4</span><h2>Preparación</h2></div></header>}
 
       {error && <p className="error-msg">{error}</p>}
       <section className="workspace-card preparation-builder">
@@ -88,7 +90,7 @@ export default function Distribucion() {
           <label className="field"><span>Fecha de entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
           <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear preparación'}</button>
         </div>
-        <Link className="preparation-orders-link" to="/pedidos">Revisar o capturar pedidos →</Link>
+        <Link className="preparation-orders-link" to="/semana/pedidos">Revisar o capturar pedidos →</Link>
       </section>
 
       <h3 className="seccion-title">Preparaciones</h3>
@@ -122,6 +124,7 @@ export default function Distribucion() {
 interface SucItem {
   linea_id: number;
   product_id: number;
+  sku: string;
   nombre: string;
   unidad: string;
   categoria: string | null;
@@ -133,12 +136,14 @@ interface SucItem {
 interface VistaSucursal {
   estado: string;
   nombre: string | null;
+  linea: LineaOperacion;
   vista: 'sucursal';
   grupos: { ubicacion: { id: number; nombre: string }; items: SucItem[]; subtotal: number }[];
   total: number;
 }
 interface ProdItem {
   product_id: number;
+  sku: string;
   nombre: string;
   unidad: string;
   costo_unitario: number | null;
@@ -153,6 +158,7 @@ interface ProdItem {
 interface VistaProducto {
   estado: string;
   nombre: string | null;
+  linea: LineaOperacion;
   vista: 'producto';
   items: ProdItem[];
   total_valor: number;
@@ -329,15 +335,15 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
             </div>
           )}
           {prod.items
-            .filter((it) => !q || it.nombre.toLowerCase().includes(q.trim().toLowerCase()))
+            .filter((it) => !q || nombreEnOrden(it.sku, it.nombre, prod.linea).toLowerCase().includes(q.trim().toLowerCase()))
             .filter((it) => !soloFaltante || it.faltante > 0)
             .slice()
-            .sort((a, b) => (b.faltante > 0 ? 1 : 0) - (a.faltante > 0 ? 1 : 0))
+            .sort((a, b) => indiceEnOrden(a.sku, prod.linea) - indiceEnOrden(b.sku, prod.linea))
             .map((it) => (
             <div key={it.product_id} className={`card ${it.faltante > 0 ? 'card--falt' : ''}`}>
               <div className="ubic-row">
                 <div>
-                  <strong>{it.nombre}</strong> <span className="chip chip--info">{it.unidad}</span>
+                  <strong>{nombreEnOrden(it.sku, it.nombre, prod.linea)}</strong> <span className="chip chip--info">{it.unidad}</span>
                   <div className="muted">
                     Pedido: {it.total_aprobada} · Bodega: {it.bodega_disponible} · Surtible: {it.surtible}
                     {it.faltante > 0 && <> · <span className="txt-danger">Faltan {it.faltante}</span></>}
@@ -361,10 +367,10 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
           {suc.grupos.map((g) => (
             <div key={g.ubicacion.id} className="card">
               <div className="card-head"><strong>{g.ubicacion.nombre}</strong><span className="muted">{usd(g.subtotal)}</span></div>
-              {g.items.map((it) => (
+              {[...g.items].sort((a, b) => indiceEnOrden(a.sku, suc.linea) - indiceEnOrden(b.sku, suc.linea)).map((it) => (
                 <div key={it.linea_id} className="dist-row">
                   <div className="conteo-prod">
-                    <strong>{it.nombre}</strong>
+                    <strong>{nombreEnOrden(it.sku, it.nombre, suc.linea)}</strong>
                     <small className="muted">{it.unidad} · pedido {it.cantidad_sugerida}</small>
                   </div>
                   {editable ? (

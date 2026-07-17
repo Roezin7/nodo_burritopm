@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { EstadoDistChip, FaseChip, FlujoStepper } from '../../flujo';
 import BodegaRutaTabs from '../../components/BodegaRutaTabs';
+import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 
 interface DistResumen { id: number; estado: string; creado_at: string; total_lineas: number }
 interface OpItem {
   linea_id: number;
   product_id: number;
+  sku: string;
   nombre: string;
   unidad: string;
   categoria: string | null;
@@ -19,6 +21,7 @@ interface OpItem {
 }
 interface TotalCarga {
   product_id: number;
+  sku: string;
   nombre: string;
   unidad: string;
   categoria: string | null;
@@ -30,6 +33,7 @@ interface TotalCarga {
 interface Operacion {
   id: number;
   estado: string;
+  linea: LineaOperacion;
   preparado_por: number | null;
   verificado_por: number | null;
   total_carga: TotalCarga[];
@@ -40,7 +44,7 @@ interface Operacion {
 const ESTADOS_BODEGA = ['aprobada', 'verificada', 'en_transito', 'parcialmente_entregada'];
 const ESTADOS_HIST = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'];
 
-export default function Bodega() {
+export default function Bodega({ integrado = false }: { integrado?: boolean }) {
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [op, setOp] = useState<Operacion | null>(null);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
@@ -65,19 +69,20 @@ export default function Bodega() {
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); }
   }
 
-  if (op) return <OperacionView op={op} verificacionCarga={verificacionCarga} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
+  if (op) return <OperacionView op={op} verificacionCarga={verificacionCarga} integrado={integrado} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
 
   const activos = lista.filter((d) => ESTADOS_BODEGA.includes(d.estado));
   const historial = lista.filter((d) => ESTADOS_HIST.includes(d.estado));
   const mostradas = tab === 'activos' ? activos : historial;
 
   return (
-    <div className="page">
-      <header className="page-head">
+    <div className={integrado ? 'embedded-operation' : 'page'}>
+      {!integrado && <header className="page-head">
         <div><span className="eyebrow">Salida de almacén</span><h1>Despacho</h1><p className="page-sub">Surte la lista aprobada, verifica existencias y confirma la carga.</p></div>
-      </header>
-      <FlujoStepper activo="bodega" />
-      <BodegaRutaTabs activo="bodega" />
+      </header>}
+      {!integrado && <FlujoStepper activo="bodega" />}
+      {!integrado && <BodegaRutaTabs activo="bodega" />}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 5</span><h2>Despacho</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
@@ -104,7 +109,7 @@ export default function Bodega() {
   );
 }
 
-function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Operacion; verificacionCarga: boolean; onSalir: () => void; onRecargar: () => void }) {
+function OperacionView({ op, verificacionCarga, integrado, onSalir, onRecargar }: { op: Operacion; verificacionCarga: boolean; integrado: boolean; onSalir: () => void; onRecargar: () => void }) {
   const [edits, setEdits] = useState<Record<number, string>>({});
   const [vista, setVista] = useState<'total' | 'sucursal'>('total');
   const [error, setError] = useState('');
@@ -144,7 +149,7 @@ function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Ope
   }
 
   return (
-    <div className="page conteo-page">
+    <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
       <header className="page-head">
         <div>
           <button className="link-btn" onClick={onSalir}>← Bodega y reparto</button>
@@ -166,10 +171,10 @@ function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Ope
           )}
           <div className="card">
             <div className="card-head"><strong>Todo lo que sube al camión</strong><span className="muted">{op.total_carga.length} productos</span></div>
-            {op.total_carga.map((t) => (
+            {[...op.total_carga].sort((a, b) => indiceEnOrden(a.sku, op.linea) - indiceEnOrden(b.sku, op.linea)).map((t) => (
               <div key={t.product_id} className={`carga-total-item ${t.faltante > 0 ? 'carga-total-item--falt' : ''}`}>
                 <span>
-                  <strong>{t.nombre}</strong> {t.categoria && <small className="muted"> · {t.categoria}</small>}
+                  <strong>{nombreEnOrden(t.sku, t.nombre, op.linea)}</strong> {t.categoria && <small className="muted"> · {t.categoria}</small>}
                   <small className="muted carga-bodega"> · en bodega {t.bodega_disponible}</small>
                   {t.faltante > 0 && <small className="txt-danger"> · faltan {t.faltante}</small>}
                 </span>
@@ -183,10 +188,10 @@ function OperacionView({ op, verificacionCarga, onSalir, onRecargar }: { op: Ope
         op.grupos.map((g) => (
           <div key={g.ubicacion.id} className="card">
             <div className="card-head"><strong>{g.ubicacion.nombre}</strong></div>
-            {g.items.map((it) => (
+            {[...g.items].sort((a, b) => indiceEnOrden(a.sku, op.linea) - indiceEnOrden(b.sku, op.linea)).map((it) => (
               <div key={it.linea_id} className="dist-row">
                 <div className="conteo-prod">
-                  <strong>{it.nombre}</strong>
+                  <strong>{nombreEnOrden(it.sku, it.nombre, op.linea)}</strong>
                   <small className="muted">{it.unidad} · pedido {it.cantidad_aprobada}</small>
                 </div>
                 {editable ? (

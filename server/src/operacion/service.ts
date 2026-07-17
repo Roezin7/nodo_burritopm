@@ -10,6 +10,7 @@ const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
+const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029']);
 
 const salidasPorMateria: Record<string, string[]> = {
   'RAW-INSIDE-SKIRT': ['MEAT-STEAK'],
@@ -139,9 +140,13 @@ export async function guardarPedido(
 
   const productIds = [...new Set(input.lineas.map((l) => BigInt(l.product_id)))];
   const productos = await prisma.products.findMany({
-    where: { id: { in: productIds }, negocio_id: negocioId, linea_operacion: input.linea, activo: true },
+    // La hoja de carne incluye seis consumibles de Tapatíos. La línea del pedido define
+    // la ruta; la línea propia del producto conserva su bodega e invoice correctos.
+    where: { id: { in: productIds }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true },
   });
-  if (productos.length !== productIds.length) throw new HttpError(400, 'Hay productos que no pertenecen a esa línea operativa');
+  if (productos.length !== productIds.length) throw new HttpError(400, 'Hay productos que no pertenecen a la operación');
+  const fueraDeFormato = productos.some((p) => p.linea_operacion !== input.linea && !(input.linea === 'carne' && consumiblesEnOrdenCarne.has(p.sku)));
+  if (fueraDeFormato) throw new HttpError(400, 'Hay productos fuera del formato de esta orden');
   const porId = new Map(productos.map((p) => [p.id.toString(), p]));
   const dia = fecha(input.fecha_entrega).getUTCDay();
   if (!esAdmin) {

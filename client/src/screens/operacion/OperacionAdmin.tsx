@@ -26,10 +26,10 @@ const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripcion: string }> = {
-  compras: { eyebrow: 'Paso 2', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
-  produccion: { eyebrow: 'Paso 3', titulo: 'Producción', descripcion: 'Captura la materia prima usada y las cajas producidas.' },
+  compras: { eyebrow: 'Paso 1', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
+  produccion: { eyebrow: 'Paso 2', titulo: 'Producción', descripcion: 'Captura la materia prima usada y las cajas producidas.' },
   rutas: { eyebrow: 'Entregas', titulo: 'Rutas', descripcion: 'Orden de entrega por día.' },
-  cierre: { eyebrow: 'Paso 5', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
+  cierre: { eyebrow: 'Paso 9', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
 };
 
 export default function OperacionAdmin({ seccion, integrado = false }: { seccion: OperacionSeccion; integrado?: boolean }) {

@@ -15,6 +15,7 @@
     "seed": "tsx prisma/seed.ts",
     "seed:operacion": "tsx prisma/seed-operacion.ts",
     "import:excel:3q": "tsx prisma/import-excel-3q.ts",
+    "backfill:meat-supplies": "tsx prisma/backfill-meat-order-supplies.ts",
     "test": "vitest run"
   },
   "prisma": {

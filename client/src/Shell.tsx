@@ -19,16 +19,8 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/semana/pedidos', label: 'Semana', icono: 'clipboard', grupo: 'operacion', soloAdmin: true },
-  { ruta: '/pedidos', label: 'Pedidos', icono: 'clipboard', grupo: 'operacion', roles: ['encargado_sucursal'] },
-  { ruta: '/inventario', label: 'Inventario', icono: 'boxes', grupo: 'operacion', roles: ['encargado_bodega'] },
-  { ruta: '/rutas', label: 'Rutas', icono: 'map', grupo: 'entregas', soloAdmin: true },
-  { ruta: '/distribucion', label: 'Preparación', icono: 'package', grupo: 'entregas', soloAdmin: true },
-  { ruta: '/bodega', label: 'Despacho', icono: 'truck', grupo: 'entregas', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/ruta', label: 'Reparto', icono: 'map', grupo: 'entregas', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/recepcion', label: 'Recepción', icono: 'checks', grupo: 'entregas', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/semana', label: 'Semana', icono: 'clipboard', grupo: 'operacion' },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
-  { ruta: '/configuracion', label: 'Configuración', icono: 'settings', grupo: 'sistema', soloAdmin: true },
 ];
 
 const GRUPOS = [
@@ -60,7 +52,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const extras = items.length > MAX_PRIMARIOS ? items.slice(MAX_PRIMARIOS) : [];
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
-    : i.ruta.startsWith('/semana/') ? pathname.startsWith('/semana/') : pathname.startsWith(i.ruta);
+    : i.ruta === '/semana' ? pathname.startsWith('/semana') : pathname.startsWith(i.ruta);
   const enMas = extras.some(itemActivo);
 
   const syncChip = !online ? (
@@ -128,6 +120,7 @@ export default function Shell({ children }: { children: ReactNode }) {
           </div>
           <div className="ctx-right">
             {syncChip}
+            {usuario?.rol === 'admin' && <NavLink className="icon-btn" to="/configuracion" aria-label="Configuración" title="Configuración"><Icono name="settings" size={18} /></NavLink>}
             <button className="icon-btn" onClick={alternar} aria-label="Cambiar tema" title="Cambiar tema">
               <Icono name={tema === 'dark' ? 'sun' : 'moon'} size={18} />
             </button>
