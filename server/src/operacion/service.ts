@@ -67,6 +67,10 @@ export function precioVentaProducto(p: {
   return r4(costo + (p.tipo_operativo === 'proteina' ? num0(p.markup_caja) : 0));
 }
 
+export function skuPastorParaEmpresa(empresaCodigo: string) {
+  return empresaCodigo === 'LBT' ? 'MEAT-PASTOR-TAP' : 'MEAT-PASTOR-BPM';
+}
+
 export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubicacionesPermitidas?: bigint[]) {
   const [empresas, ubicaciones, productos, proveedores, plantillas, semanas] = await Promise.all([
     prisma.empresas_clientes.findMany({
@@ -179,6 +183,15 @@ export async function guardarPedido(
   if (productos.length !== productIds.length) throw new HttpError(400, 'Hay productos que no pertenecen a la operación');
   const fueraDeFormato = productos.some((p) => p.linea_operacion !== input.linea && !(input.linea === 'carne' && consumiblesEnOrdenCarne.has(p.sku)));
   if (fueraDeFormato) throw new HttpError(400, 'Hay productos fuera del formato de esta orden');
+  if (input.linea === 'carne') {
+    const pastorEsperado = skuPastorParaEmpresa(ubicacion.empresa_cliente.codigo);
+    const pastorIncorrecto = pastorEsperado === 'MEAT-PASTOR-TAP' ? 'MEAT-PASTOR-BPM' : 'MEAT-PASTOR-TAP';
+    if (productos.some((p) => p.sku === pastorIncorrecto)) {
+      throw new HttpError(400, ubicacion.empresa_cliente.codigo === 'LBT'
+        ? 'Los Burritos Tapatíos debe ordenar Pastor Tapatíos'
+        : 'Este restaurante debe ordenar el Pastor regular de BPM');
+    }
+  }
   const porId = new Map(productos.map((p) => [p.id.toString(), p]));
   const dia = fecha(input.fecha_entrega).getUTCDay();
   if (!esAdmin) {

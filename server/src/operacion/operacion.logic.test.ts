@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularConsumoFifo, precioVentaProducto } from './service.js';
+import { calcularConsumoFifo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -49,5 +49,16 @@ describe('materia prima con cajas de peso variable', () => {
     const calculo = calcularConsumoFifo([{ cajas: 4, peso_lb: 286, costo: 720 }], 1.5);
     expect(calculo.peso_total).toBe(107.25);
     expect(calculo.costo_total).toBe(270);
+  });
+});
+
+describe('pastor por empresa', () => {
+  it('usa el producto exclusivo de Tapatíos para LBT', () => {
+    expect(skuPastorParaEmpresa('LBT')).toBe('MEAT-PASTOR-TAP');
+  });
+
+  it('conserva el pastor regular para BPM y Aurora', () => {
+    expect(skuPastorParaEmpresa('BPM')).toBe('MEAT-PASTOR-BPM');
+    expect(skuPastorParaEmpresa('AUR')).toBe('MEAT-PASTOR-BPM');
   });
 });

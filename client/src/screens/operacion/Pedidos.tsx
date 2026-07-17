@@ -3,7 +3,7 @@ import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
-import { filasOrden, nombreEnOrden, productosParaPedido } from '../../operationOrder';
+import { filasOrden, nombreEnVenta, productosParaPedido } from '../../operationOrder';
 
 type Linea = 'carne' | 'desechables';
 interface Catalogo {
@@ -97,10 +97,20 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
         const p = rows[0];
         setEstado(p?.estado ?? null);
         setNotas(p?.notas ?? '');
-        setCantidades(Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, String(l.cantidad)])));
+        const cargadas = Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, String(l.cantidad)]));
+        const pastorBpm = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-BPM');
+        const pastorTap = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-TAP');
+        const esTapatios = ubicacionSeleccionada?.empresa?.codigo === 'LBT';
+        if (pastorBpm && pastorTap) {
+          const origen = esTapatios ? pastorBpm.id : pastorTap.id;
+          const destino = esTapatios ? pastorTap.id : pastorBpm.id;
+          if (cargadas[origen] && !cargadas[destino]) cargadas[destino] = cargadas[origen];
+          delete cargadas[origen];
+        }
+        setCantidades(cargadas);
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el pedido.'));
-  }, [ubicacionId, linea, fecha, vista]);
+  }, [ubicacionId, linea, fecha, vista, catalogo, ubicacionSeleccionada?.empresa?.codigo]);
 
   useEffect(() => {
     if (!admin || vista !== 'historial') return;
@@ -172,7 +182,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   const unidades = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
   const conCantidad = productos.filter((p) => Number(cantidades[p.id] || 0) > 0).length;
   const q = buscar.trim().toLowerCase();
-  const visibles = productos.filter((p) => !q || `${nombreEnOrden(p.sku, p.nombre, linea)} ${p.tipo}`.toLowerCase().includes(q));
+  const visibles = productos.filter((p) => !q || `${nombreEnVenta(p.sku, p.nombre, linea)} ${p.tipo}`.toLowerCase().includes(q));
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
       {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Ventas</span><h1>Venta semanal</h1></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
@@ -195,7 +205,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
           <section className="workspace-card product-picker">
             <div className="workspace-card-head"><h2>Productos</h2><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" /></div>
             <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
-              <span><strong>{nombreEnOrden(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {usd(p.precio)}</small></span>
+              <span><strong>{nombreEnVenta(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {usd(p.precio)}</small></span>
               <div className="input-suffix input-suffix--compact"><input inputMode="decimal" type="number" min="0" step={esPieza(p) ? '1' : '0.5'} value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>{unidadCorta(p)}</span></div>
             </label>)}</div>
           </section>
@@ -244,7 +254,7 @@ function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion
 
 function PedidoHistorico({ pedido }: { pedido: Pedido }) {
   const total = pedido.lineas.reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
-  return <article className="history-order-card"><header><div><strong>{pedido.ubicacion.nombre}</strong><small>{pedido.empresa.nombre}</small></div><span className={`order-status order-status--${pedido.estado}`}>{pedido.estado.replaceAll('_', ' ')}</span></header><div>{pedido.lineas.map((l) => <div className="history-order-line" key={l.id}><span><strong>{nombreEnOrden(l.sku, l.nombre, pedido.linea)}</strong><small>{l.sku}</small></span><span>{l.cantidad.toLocaleString('es-MX')} × {usd(l.precio)}</span><strong>{usd(l.cantidad * (l.precio ?? 0))}</strong></div>)}</div><footer><span>{pedido.notas ?? ''}</span><strong>{usd(total)}</strong></footer></article>;
+  return <article className="history-order-card"><header><div><strong>{pedido.ubicacion.nombre}</strong><small>{pedido.empresa.nombre}</small></div><span className={`order-status order-status--${pedido.estado}`}>{pedido.estado.replaceAll('_', ' ')}</span></header><div>{pedido.lineas.map((l) => <div className="history-order-line" key={l.id}><span><strong>{nombreEnVenta(l.sku, l.nombre, pedido.linea)}</strong><small>{l.sku}</small></span><span>{l.cantidad.toLocaleString('es-MX')} × {usd(l.precio)}</span><strong>{usd(l.cantidad * (l.precio ?? 0))}</strong></div>)}</div><footer><span>{pedido.notas ?? ''}</span><strong>{usd(total)}</strong></footer></article>;
 }
 
 interface HojaRuta {

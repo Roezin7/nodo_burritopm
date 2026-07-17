@@ -55,12 +55,19 @@ export function nombreEnOrden(sku: string, nombre: string, linea: LineaOperacion
   return nombre.toUpperCase();
 }
 
+/** En captura se distingue el producto; los formatos impresos conservan ALPASTOR. */
+export function nombreEnVenta(sku: string, nombre: string, linea: LineaOperacion): string {
+  if (linea === 'carne' && sku === 'MEAT-PASTOR-TAP') return 'PASTOR TAPATÍOS';
+  return nombreEnOrden(sku, nombre, linea);
+}
+
 export function productosParaPedido<T extends ProductoOrdenable>(productos: T[], linea: LineaOperacion, empresaCodigo?: string): T[] {
   const porSku = new Map(productos.map((p) => [p.sku, p]));
   const filas = filasOrden(linea, productos);
   const resultado: T[] = [];
   for (const fila of filas) {
-    const skus = fila.skus[0] === 'MEAT-PASTOR-BPM'
+    const esPastor = fila.skus.includes('MEAT-PASTOR-BPM') || fila.skus.includes('MEAT-PASTOR-TAP');
+    const skus = esPastor
       ? [empresaCodigo === 'LBT' ? 'MEAT-PASTOR-TAP' : 'MEAT-PASTOR-BPM']
       : fila.skus;
     const producto = skus.map((sku) => porSku.get(sku)).find((p): p is T => p != null);
