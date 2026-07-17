@@ -1,10 +1,13 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const prisma = new PrismaClient();
-const EXCEL_DIR = process.env.BPM_EXCEL_DIR ?? '/Users/arturohernandez/Downloads/burritopmgroup';
+const EXCEL_DIR = process.env.BPM_EXCEL_DIR ?? fileURLToPath(new URL('./data/3q', import.meta.url));
 const APPLY = process.env.APPLY_EXCEL_IMPORT === '1';
+const ONLY_ONCE = process.env.IMPORT_EXCEL_ONCE === '1';
+const IMPORT_KEY = 'excel-3q-2026-semana-28-v2';
 const date = (v: Date | string) => new Date(`${v instanceof Date ? v.toISOString().slice(0, 10) : v.slice(0, 10)}T00:00:00.000Z`);
 const iso = (v: Date) => v.toISOString().slice(0, 10);
 function n(v: ExcelJS.CellValue): number {
@@ -52,6 +55,15 @@ function precioImportado(p: { precio_venta_fijo: Prisma.Decimal | null; ultimo_c
 
 async function main() {
   const org = await prisma.negocios.findFirstOrThrow({ where: { nombre: 'Burrito Parrilla Mexicana' } });
+  if (APPLY && ONLY_ONCE) {
+    const aplicada = await prisma.importaciones_sistema.findUnique({
+      where: { negocio_id_clave: { negocio_id: org.id, clave: IMPORT_KEY } },
+    });
+    if (aplicada) {
+      console.log(`✅ Importación ${IMPORT_KEY} ya aplicada; no se restablecieron datos.`);
+      return;
+    }
+  }
   const admin = await prisma.usuarios.findFirstOrThrow({ where: { negocio_id: org.id, rol: 'admin', activo: true }, orderBy: { id: 'asc' } });
   const ubicaciones = await prisma.ubicaciones.findMany({ where: { negocio_id: org.id, empresa_cliente_id: { not: null } } });
   const porCodigo = new Map(ubicaciones.map((u) => [u.codigo, u]));
@@ -136,43 +148,88 @@ async function main() {
     }
   });
   await importarInventarioInicial(org.id, admin.id, porSku, porNombre);
-  await importarSaldosPendientes(org.id);
-  console.log('✅ Semanas 27 y 28 históricas, semana 29 abierta e inventario inicial de semana 28 importados.');
+  await importarSaldosPendientes(org.id, admin.id);
+  await prisma.importaciones_sistema.upsert({
+    where: { negocio_id_clave: { negocio_id: org.id, clave: IMPORT_KEY } },
+    update: { aplicado_at: new Date() },
+    create: { negocio_id: org.id, clave: IMPORT_KEY },
+  });
+  console.log('✅ Semanas 27 y 28, semana 29, inventarios, cuentas por cobrar y cuentas por pagar importados.');
 }
 
-async function importarSaldosPendientes(negocioId: bigint) {
+const codigoFacturacion: Record<string, string> = {
+  LOMBARD: 'LOMBA', 'NAPERVILLE I': 'NAPER', 'CAROL STREAM': 'CAROL', LISLE: 'LISLE', 'GLENDALE H.': 'GLEND',
+  'WEST CHICAGO': 'WESTC', BATAVIA: 'BATAV', ALGONQUIN: 'ALGON', 'NAPERVILLE II': 'NAPER2', 'RO-ME': 'ROLLI',
+  SCHAUMBURG: 'SCHAU', 'CRYSTAL LAKE': 'CRYST', 'LAKE ZURICH': 'LAKEZ', FRANKFORT: 'FRANK', PLAINFIELD: 'PLAIN',
+  'TAQ. AURORA': 'AUROR', 'TAQ. AURORA #2': 'BURLI', 'LBT GLEN ELLYN': 'TGE', 'LBT STREAMWOOD': 'TST',
+  'LBT LOMBARD': 'TLO', 'LBT NAPERVILLE': 'TNA',
+};
+
+async function importarSaldosPendientes(negocioId: bigint, adminId: bigint) {
   const billing = new ExcelJS.Workbook();
   await billing.xlsx.readFile(path.join(EXCEL_DIR, '4. Billing 2026 3Q.xlsx'));
   const bpm = await prisma.empresas_clientes.findFirstOrThrow({ where: { negocio_id: negocioId, codigo: 'BPM' } });
   const ubicaciones = new Map((await prisma.ubicaciones.findMany({ where: { negocio_id: negocioId } })).map((u) => [u.codigo, u]));
-  const columnas = [['LOMBA', 5], ['NAPER', 8], ['CAROL', 11], ['LISLE', 14], ['GLEND', 17], ['WESTC', 20], ['BATAV', 23], ['ALGON', 26], ['NAPER2', 29], ['ROLLI', 32], ['SCHAU', 35]] as const;
+
+  // Borra únicamente las facturas provisionales de una versión anterior del importador.
+  // Las facturas creadas o modificadas por el admin quedan fuera de este patrón.
+  const provisionales = await prisma.facturas.findMany({ where: { negocio_id: negocioId, numero: { endsWith: '-OPEN' } }, select: { id: true } });
+  if (provisionales.length) await prisma.facturas.deleteMany({ where: { id: { in: provisionales.map((f) => f.id) } } });
+
   for (const sem of semanas.filter((s) => s.cerrada)) {
     const ws = billing.getWorksheet(`Billing (${sem.numero})`)!;
     const semana = await prisma.semanas_operativas.findFirstOrThrow({ where: { negocio_id: negocioId, anio: 2026, semana: sem.numero } });
-    for (const [codigo, col] of columnas) {
-      const ubic = ubicaciones.get(codigo)!;
-      const importes = { carne: n(ws.getCell(20, col).value) + n(ws.getCell(21, col).value), desechables: n(ws.getCell(22, col).value) } as const;
+    for (let col = 5; col <= 71; col += 3) {
+      const encabezado = text(ws.getCell(2, col).value).toUpperCase();
+      const codigo = codigoFacturacion[encabezado];
+      if (!codigo) continue; // Proyectos todavía en construcción, sin venta.
+      const ubic = ubicaciones.get(codigo);
+      if (!ubic?.empresa_cliente_id) throw new Error(`Falta empresa/ubicación de facturación ${codigo}`);
+      const importes = {
+        carne: n(ws.getCell(20, col).value) + n(ws.getCell(21, col).value),
+        desechables: n(ws.getCell(22, col).value),
+      } as const;
       for (const linea of ['carne', 'desechables'] as const) {
         const total = Math.round(importes[linea] * 100) / 100;
         if (total <= 0) continue;
-        await upsertSaldo({ negocioId, semanaId: semana.id, empresaId: bpm.id, ubicacionId: ubic.id, linea, numero: `2026-${sem.numero}-BPM-${codigo}-${linea === 'carne' ? 'M' : 'D'}-OPEN`, emitida: date(sem.sabado), vence: new Date(date(sem.sabado).getTime() + 14 * 86400000), total, descripcion: `Saldo pendiente importado de Billing semana ${sem.numero}` });
+        const empresa = await prisma.empresas_clientes.findUniqueOrThrow({ where: { id: ubic.empresa_cliente_id } });
+        const diasCredito = linea === 'carne' ? empresa.dias_credito_carne : empresa.dias_credito_desechables;
+        await upsertSaldo({ negocioId, semanaId: semana.id, empresaId: empresa.id, ubicacionId: ubic.id, linea, numero: `2026-${sem.numero}-${empresa.codigo}-${codigo}-${linea === 'carne' ? 'M' : 'D'}-OPEN`, emitida: date(sem.sabado), vence: new Date(date(sem.sabado).getTime() + diasCredito * 86400000), total, descripcion: `Saldo pendiente importado de Billing semana ${sem.numero}` });
       }
     }
   }
 
-  // Payments de Aurora: saldo acumulado real hasta la semana 28, sin recrear el historial de pagos.
-  const auroraBook = new ExcelJS.Workbook();
-  await auroraBook.xlsx.readFile(path.join(EXCEL_DIR, '6. Taqueria Aurora 2026 3Q.xlsx'));
-  const payments = auroraBook.getWorksheet('Payments')!;
-  const empresaAurora = await prisma.empresas_clientes.findFirstOrThrow({ where: { negocio_id: negocioId, codigo: 'AUR' } });
-  const semana28 = await prisma.semanas_operativas.findFirstOrThrow({ where: { negocio_id: negocioId, anio: 2026, semana: 28 } });
-  for (const [codigo, facturaCol, pagoCol] of [['AUROR', 9, 10], ['BURLI', 18, 19]] as const) {
-    let saldo = 0;
-    for (let row = 3; row <= 30; row += 1) saldo += n(payments.getCell(row, facturaCol).value) + n(payments.getCell(row, pagoCol).value);
-    saldo = Math.round(Math.max(0, saldo) * 100) / 100;
-    if (!saldo) continue;
-    const ubic = ubicaciones.get(codigo)!;
-    await upsertSaldo({ negocioId, semanaId: semana28.id, empresaId: empresaAurora.id, ubicacionId: ubic.id, linea: 'carne', numero: `2026-28-AUR-${codigo}-M-OPEN`, emitida: date('2026-07-11'), vence: date('2026-07-18'), total: saldo, descripcion: 'Saldo pendiente acumulado importado de Payments al cierre de semana 28' });
+  // El archivo 3Q comienza en semana 27, pero el cierre de semana 28 arrastra Billing 26.
+  const semana26 = await prisma.semanas_operativas.upsert({
+    where: { negocio_id_anio_semana: { negocio_id: negocioId, anio: 2026, semana: 26 } },
+    update: {},
+    create: { negocio_id: negocioId, anio: 2026, semana: 26, inicia_at: date('2026-06-22'), termina_at: date('2026-06-27'), estado: 'cerrada', cerrado_por: adminId, cerrado_at: date('2026-06-27') },
+  });
+  const lombard = ubicaciones.get('LOMBA')!;
+  const saldo26 = n(billing.getWorksheet('Billing (28)')!.getCell('BW6').value);
+  await upsertSaldo({ negocioId, semanaId: semana26.id, empresaId: bpm.id, ubicacionId: lombard.id, linea: 'carne', numero: '2026-26-BPM-SALDO-OPEN', emitida: date('2026-06-27'), vence: date('2026-07-11'), total: saldo26, descripcion: 'Saldo anterior Billing 26 arrastrado por el archivo 3Q' });
+
+  await importarCuentasPorPagar(negocioId, adminId, billing.getWorksheet('Billing (28)')!);
+}
+
+async function importarCuentasPorPagar(negocioId: bigint, adminId: bigint, ws: ExcelJS.Worksheet) {
+  const carniceria = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: negocioId, codigo: 'CARN' } });
+  const proveedorPorExcel: Record<string, string> = {
+    'CHRIST PANOS FOOD': 'Christ Panos', 'GORDON FOOD': 'Gordon', SYSCO: 'Sysco',
+    'SUPER CLEAN': 'Super Clean', 'AMIGOS FOOD': 'Amigos', 'BRD DISTRIBUTORS': 'BRD',
+  };
+  for (let row = 12; row <= 16; row += 1) {
+    const nombre = text(ws.getCell(row, 77).value); // BY
+    const total = Math.round(Math.abs(n(ws.getCell(row, 75).value)) * 100) / 100; // BW
+    if (!nombre || total <= 0) continue;
+    const nombreProveedor = proveedorPorExcel[nombre.toUpperCase()] ?? nombre;
+    const proveedor = await prisma.proveedores.findFirst({ where: { negocio_id: negocioId, nombre: { equals: nombreProveedor, mode: 'insensitive' } } });
+    if (!proveedor) throw new Error(`Falta proveedor para cuenta por pagar: ${nombre}`);
+    const referencia = `IMPORT-3Q-W28-${proveedor.id}`;
+    const existente = await prisma.compras.findFirst({ where: { negocio_id: negocioId, referencia } });
+    const data = { proveedor_id: proveedor.id, ubicacion_id: carniceria.id, fecha: date('2026-07-11'), vence_at: date('2026-07-11'), referencia, total, estado: 'pendiente' as const, registrado_por: adminId };
+    if (existente) await prisma.compras.update({ where: { id: existente.id }, data });
+    else await prisma.compras.create({ data: { negocio_id: negocioId, ...data } });
   }
 }
 
@@ -194,11 +251,13 @@ async function importarInventarioInicial(negocioId: bigint, adminId: bigint, por
   for (let row = 2; row <= 53; row += 1) {
     const p = porNombre.get(text(dw.getCell(row, 1).value).toUpperCase());
     if (!p) continue;
-    const cajas = n(dw.getCell(row, 115).value);
-    // La columna 117 es el valor total del inventario (cajas × costo); existencias
-    // necesita costo unitario para no volver a multiplicarlo en dashboard/billing.
-    const costo = n(dw.getCell(row, 5).value);
-    await prisma.existencias.upsert({ where: { ubicacion_id_product_id: { ubicacion_id: adison.id, product_id: p.id } }, update: { cantidad_disponible: cajas, cantidad_reservada: 0, cantidad_transito: 0, costo_promedio: costo }, create: { negocio_id: negocioId, ubicacion_id: adison.id, product_id: p.id, cantidad_disponible: cajas, costo_promedio: costo } });
+    const cajas = n(dw.getCell(row, 115).value); // DK: inventario final físico
+    const valorFisico = n(dw.getCell(row, 117).value); // DM
+    const cajasEnReserva = n(dw.getCell(row, 123).value); // DS: reserva anticipada en hold
+    const valorReserva = n(dw.getCell(row, 129).value); // DY
+    const unidadesTotales = cajas + cajasEnReserva;
+    const costo = unidadesTotales > 0 ? (valorFisico + valorReserva) / unidadesTotales : n(dw.getCell(row, 5).value);
+    await prisma.existencias.upsert({ where: { ubicacion_id_product_id: { ubicacion_id: adison.id, product_id: p.id } }, update: { cantidad_disponible: cajas, cantidad_reservada: 0, cantidad_transito: cajasEnReserva, costo_promedio: costo }, create: { negocio_id: negocioId, ubicacion_id: adison.id, product_id: p.id, cantidad_disponible: cajas, cantidad_transito: cajasEnReserva, costo_promedio: costo } });
   }
   const raw = [
     ['RAW-INSIDE-SKIRT', 25, 1873, 15134.5], ['RAW-CHICKEN', 0, 0, 0], ['RAW-PORK-BUTT', 0, 0, 0],

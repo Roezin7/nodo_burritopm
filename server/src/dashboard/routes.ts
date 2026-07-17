@@ -116,7 +116,6 @@ dashboardRouter.get(
     const hoyISO = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const hoy = new Date(`${hoyISO}T00:00:00.000Z`);
     const periodo = semanaDeFecha(hoy);
-    const desdeBalance = new Date(periodo.lunes.getTime() - 14 * 86400000);
 
     const semana = await prisma.semanas_operativas.findUnique({
       where: { negocio_id_anio_semana: { negocio_id: negocioId, anio: periodo.anio, semana: periodo.semana } },
@@ -132,7 +131,7 @@ dashboardRouter.get(
         include: { empresa: true, lineas: { include: { producto: true } } },
       }),
       prisma.existencias.findMany({
-        where: { negocio_id: negocioId, cantidad_disponible: { gt: 0 }, ubicaciones: { tipo: 'bodega', activo: true } },
+        where: { negocio_id: negocioId, OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }], ubicaciones: { tipo: 'bodega', activo: true } },
         include: { products: true, ubicaciones: { select: { id: true, nombre: true } } },
       }),
       prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
@@ -183,7 +182,7 @@ dashboardRouter.get(
     let desechables = 0;
     for (const e of existencias) {
       if (e.products.tipo_operativo === 'materia_prima') continue; // los lotes conservan el costo exacto y el estado fresco/congelado
-      const valor = num0(e.cantidad_disponible) * (num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0);
+      const valor = (num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * (num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0);
       if (e.products.linea_operacion === 'carne') carneTerminada += valor;
       if (e.products.linea_operacion === 'desechables') desechables += valor;
     }
@@ -193,7 +192,6 @@ dashboardRouter.get(
 
     const saldoFactura = (f: (typeof facturasPendientes)[number]) => Math.max(0, num0(f.total) - f.pagos.reduce((a, p) => a + num0(p.monto), 0));
     const porCobrar = facturasPendientes.reduce((a, f) => a + saldoFactura(f), 0);
-    const porCobrarTresSemanas = facturasPendientes.filter((f) => f.emitida_at >= desdeBalance && f.emitida_at <= periodo.sabado).reduce((a, f) => a + saldoFactura(f), 0);
     const vencidoCobrar = facturasPendientes.filter((f) => f.vence_at < hoy).reduce((a, f) => a + saldoFactura(f), 0);
     const porPagar = comprasPendientes.reduce((a, c) => a + num0(c.total), 0);
     const vencidoPagar = comprasPendientes.filter((c) => c.vence_at < hoy).reduce((a, c) => a + num0(c.total), 0);
@@ -222,7 +220,7 @@ dashboardRouter.get(
         por_empresa: [...porEmpresa.values()].map((g) => ({ ...g, carne: r2(g.carne), desechables: r2(g.desechables), total: r2(g.total) })),
       },
       inventario: { total: r2(inventarioTotal), materia_prima_fresca: r2(materiaFresca), materia_prima_congelada: r2(materiaCongelada), carne_terminada: r2(carneTerminada), desechables: r2(desechables) },
-      cartera: { por_cobrar: r2(porCobrar), vencido_cobrar: r2(vencidoCobrar), facturas_pendientes: facturasPendientes.length, por_pagar: r2(porPagar), vencido_pagar: r2(vencidoPagar), compras_pendientes: comprasPendientes.length, balance_neto: r2(inventarioTotal + porCobrarTresSemanas - porPagar) },
+      cartera: { por_cobrar: r2(porCobrar), vencido_cobrar: r2(vencidoCobrar), facturas_pendientes: facturasPendientes.length, por_pagar: r2(porPagar), vencido_pagar: r2(vencidoPagar), compras_pendientes: comprasPendientes.length, balance_neto: r2(inventarioTotal + porCobrar - porPagar) },
       produccion: { costo: r2(costoProduccion), cajas: r2(cajasProduccion), yield: pesoEntrada > 0 ? r2((pesoSalida / pesoEntrada) * 100) : 0, compras_semana: r2(comprasTotal) },
       operacion: { pedidos_confirmados: pedidos.filter((p) => !['borrador', 'cancelado'].includes(p.estado)).length, pedidos_borrador: borradores, distribuciones_abiertas: distribuciones.length, paradas_pendientes: paradasPendientes, productos_bajo_minimo: bajoMinimo },
       alertas,

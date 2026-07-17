@@ -95,7 +95,10 @@ iPhone/iPad el push solo funciona con la **PWA instalada** (Compartir → Agrega
 
 Al arrancar, el contenedor aplica `prisma migrate deploy`, crea el admin si hace falta y ejecuta
 el **bootstrap operativo idempotente**. Este último completa empresas, productos, proveedores y
-rutas faltantes sin sobrescribir cambios hechos por el admin (admin inicial `Admin`, PIN `1234` — cámbialo).
+rutas faltantes sin sobrescribir cambios hechos por el admin. También carga una sola vez el snapshot
+histórico 3Q incluido en la imagen (pedidos, inventarios, facturación y cuentas por pagar); los
+despliegues posteriores reconocen la marca de importación y no restablecen cambios del admin
+(admin inicial `Admin`, PIN `1234` — cámbialo).
 Healthcheck: `/api/health`. Datos de prueba (sucursales/usuarios): scripts en `server/scripts/`.
 
 ## Estado por bloque (Fase 1 — MVP)

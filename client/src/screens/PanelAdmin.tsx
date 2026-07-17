@@ -40,8 +40,8 @@ export default function PanelAdmin() {
     <div className="kpi-grid overview-kpis">
       <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
       <div className="kpi-card"><span className="kpi-label">Markup de proteína</span><span className="big-number">{usd(p.ventas.markup_proteina)}</span><small>$15 por caja producida vendida</small></div>
-      <div className="kpi-card"><span className="kpi-label">Inventario disponible</span><span className="big-number">{usd(p.inventario.total)}</span><small>Carne, materia prima y desechables</small></div>
-      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + 3 semanas por cobrar − por pagar</small></div>
+      <div className="kpi-card"><span className="kpi-label">Inventario y reservas</span><span className="big-number">{usd(p.inventario.total)}</span><small>Carne, materia prima, desechables y compras en hold</small></div>
+      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + saldo pendiente por cobrar − por pagar</small></div>
     </div>
 
     <div className="overview-grid">

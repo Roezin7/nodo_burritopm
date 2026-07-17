@@ -1,14 +1,14 @@
 # Activación de operación 3Q 2026
 
-Coolify ejecuta automáticamente `prisma migrate deploy`, el seed base y el bootstrap operativo antes de iniciar la API. Los bootstraps solo crean o completan datos faltantes: no restablecen rutas, precios, pesos ni calendarios modificados por el admin.
+Coolify ejecuta automáticamente `prisma migrate deploy`, el seed base, el bootstrap operativo y la carga histórica 3Q antes de iniciar la API. Los bootstraps solo crean o completan datos faltantes: no restablecen rutas, precios, pesos ni calendarios modificados por el admin.
 
 1. Respaldar la base de datos.
 2. Hacer deploy; el contenedor aplica la migración y carga datos maestros automáticamente.
-3. Revisar el Excel sin escribir: `npm run import:excel:3q`.
-4. Si el resumen es correcto, importar: `APPLY_EXCEL_IMPORT=1 npm run import:excel:3q`.
+3. Confirmar en los logs `Semanas 27 y 28, semana 29, inventarios, cuentas por cobrar y cuentas por pagar importados`.
+4. En despliegues posteriores se mostrará `Importación ... ya aplicada`; eso confirma que no se restableció el histórico.
 
-El directorio predeterminado de los seis libros es `/Users/arturohernandez/Downloads/burritopmgroup`. En otro entorno se define con `BPM_EXCEL_DIR`.
+Los seis libros auditados están versionados en `server/prisma/data/3q`. Para revisar otra copia sin escribir se puede definir `BPM_EXCEL_DIR` y ejecutar `npm run import:excel:3q`.
 
-El importador histórico es idempotente, pero se ejecuta manualmente porque lee los seis Excel externos al contenedor. Importa semanas 27 y 28 como históricas cerradas, semana 29 como abierta, inventario final de semana 28 y únicamente los saldos pendientes (no el historial completo de pagos). La carga inicial fue aplicada el 17 de julio de 2026.
+El importador se ejecuta automáticamente una sola vez por base de datos y deja una marca en `importaciones_sistema`. Importa semanas 27 y 28 como históricas cerradas, semana 29 como abierta, inventario final y reservas de semana 28, saldos pendientes de Billing 26–28 y las cuentas abiertas de proveedores. Si un arranque falla antes de crear la marca, Coolify puede reintentarlo de forma segura.
 
 Los valores iniciales inferidos que deben confirmarse antes del primer batch real son Chicken `40 lb/caja`, ambos Al Pastor `20 lb/caja` y Milanesa `20 lb/caja`. El admin puede cambiarlos en Configuración → Productos → Operación semanal y facturación.

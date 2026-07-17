@@ -64,7 +64,7 @@ function numeroFactura(anio: number, semana: number, empresa: string, ubicacion:
 async function valuacionInventario(negocioId: bigint) {
   const [existencias, lotes] = await Promise.all([
     prisma.existencias.findMany({
-      where: { negocio_id: negocioId, cantidad_disponible: { gt: 0 } },
+      where: { negocio_id: negocioId, OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }] },
       include: { products: { select: { linea_operacion: true, tipo_operativo: true } }, ubicaciones: { select: { nombre: true } } },
     }),
     prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
@@ -72,7 +72,7 @@ async function valuacionInventario(negocioId: bigint) {
   let desechables = 0;
   let terminada = 0;
   for (const e of existencias) {
-    const valor = num0(e.cantidad_disponible) * num0(e.costo_promedio);
+    const valor = (num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * num0(e.costo_promedio);
     if (e.products.linea_operacion === 'desechables') desechables += valor;
     else if (e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima') terminada += valor;
   }
