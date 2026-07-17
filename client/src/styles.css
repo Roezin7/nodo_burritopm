@@ -3260,8 +3260,9 @@ textarea { resize: vertical; }
 .order-history { display: flex; flex-direction: column; gap: 1rem; }
 .history-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto minmax(220px, .8fr) auto; align-items: end; gap: 0.8rem; }
 .history-toolbar h2 { margin: 0.1rem 0 0; font-size: 1.05rem; }
+.history-toolbar > div:first-child p { margin: 0.15rem 0 0; color: var(--ink-3); font-size: 0.72rem; }
 .history-week-controls { display: flex; align-items: center; gap: 0.35rem; }
-.history-week-controls input { width: 150px; min-height: 40px; }
+.history-week-controls select { width: 270px; min-height: 40px; }
 .history-day { display: flex; flex-direction: column; gap: 0.7rem; }
 .history-location-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
 .history-order-card { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--sh-sm); }
@@ -3439,7 +3440,7 @@ textarea { resize: vertical; }
   .metric-strip > div { padding: 0.7rem; }
   .history-toolbar { grid-template-columns: 1fr; }
   .history-toolbar > *, .history-toolbar > div:first-child, .history-toolbar .field { grid-column: 1; width: 100%; }
-  .history-week-controls input { flex: 1; width: auto; }
+  .history-week-controls select { flex: 1; width: auto; min-width: 0; }
   .history-order-line { grid-template-columns: minmax(0, 1fr) auto; }
   .history-order-line > strong { grid-column: 2; }
 }

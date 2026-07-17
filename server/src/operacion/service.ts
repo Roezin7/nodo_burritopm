@@ -35,7 +35,7 @@ export function precioVentaProducto(p: {
 }
 
 export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubicacionesPermitidas?: bigint[]) {
-  const [empresas, ubicaciones, productos, proveedores, plantillas] = await Promise.all([
+  const [empresas, ubicaciones, productos, proveedores, plantillas, semanas] = await Promise.all([
     prisma.empresas_clientes.findMany({
       where: { negocio_id: negocioId, activo: true, id: esAdmin ? undefined : { in: ubicacionesPermitidas ?? [] } },
       orderBy: { nombre: 'asc' },
@@ -55,6 +55,11 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       where: { negocio_id: negocioId, activo: true },
       include: { paradas: { include: { ubicacion: { select: { id: true, nombre: true } } }, orderBy: { orden: 'asc' } } },
       orderBy: [{ linea_operacion: 'asc' }, { dia_semana: 'asc' }, { nombre: 'asc' }],
+    }),
+    prisma.semanas_operativas.findMany({
+      where: { negocio_id: negocioId },
+      orderBy: [{ anio: 'desc' }, { semana: 'desc' }],
+      take: 52,
     }),
   ]);
   return {
@@ -77,6 +82,9 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       dia_semana: p.dia_semana, conductor: p.conductor,
       paradas: p.paradas.map((x) => ({ ubicacion_id: Number(x.ubicacion_id), nombre: x.ubicacion.nombre, orden: x.orden, opcional: x.opcional })),
     })) : [],
+    semanas: semanas.map((s) => ({
+      id: Number(s.id), anio: s.anio, semana: s.semana, inicia_at: iso(s.inicia_at), termina_at: iso(s.termina_at), estado: s.estado,
+    })),
   };
 }
 

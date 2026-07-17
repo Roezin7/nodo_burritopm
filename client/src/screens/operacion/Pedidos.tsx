@@ -8,6 +8,7 @@ type Linea = 'carne' | 'desechables';
 interface Catalogo {
   ubicaciones: { id: number; nombre: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
   productos: { id: number; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; peso_caja_lb: number | null }[];
+  semanas: { id: number; anio: number; semana: number; inicia_at: string; termina_at: string; estado: string }[];
 }
 interface Pedido {
   id: number; linea: Linea; fecha_entrega: string; estado: string; notas?: string | null;
@@ -36,9 +37,6 @@ function rangoSemana(valor: string) {
   d.setDate(d.getDate() + 5);
   return { inicio, fin: d.toLocaleDateString('en-CA') };
 }
-function moverSemana(valor: string, semanas: number) {
-  const d = new Date(`${valor}T12:00:00`); d.setDate(d.getDate() + semanas * 7); return d.toLocaleDateString('en-CA');
-}
 
 export default function Pedidos({ integrado = false }: { integrado?: boolean }) {
   const { usuario } = useAuth();
@@ -65,6 +63,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   useEffect(() => {
     api<Catalogo>('/operacion/catalogo').then((c) => {
       setCatalogo(c);
+      if (c.semanas[0]) setFechaHistorial(c.semanas[0].inicia_at);
       const asignada = admin ? c.ubicaciones.find((u) => u.tipo === 'sucursal' && u.empresa) : c.ubicaciones.find((u) => usuario?.ubicaciones?.some((x) => x.id === u.id));
       if (asignada) setUbicacionId(String(asignada.id));
     }).catch(() => setError('No se pudo cargar el catálogo de pedidos.'));
@@ -175,25 +174,29 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
           {admin && <button className="btn btn-ghost btn-block" disabled={busy} onClick={() => void crearDistribucion()}>Crear preparación y rutas</button>}
           {admin && <div className="order-print-actions"><span>Orden semanal consolidada</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne', fecha)}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables', fecha)}>Imprimir desechables</button></div>}
         </aside>
-      </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} onPrint={() => void abrirImpresion(linea, fechaHistorial)} />}
+      </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} semanas={catalogo.semanas} onPrint={() => void abrirImpresion(linea, fechaHistorial)} />}
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}
     </div>
   );
 }
 
-function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion, setUbicacion, ubicaciones, onPrint }: {
+function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion, setUbicacion, ubicaciones, semanas, onPrint }: {
   pedidos: Pedido[]; cargando: boolean; linea: Linea; fecha: string; setFecha: (v: string) => void; ubicacion: string; setUbicacion: (v: string) => void;
-  ubicaciones: Catalogo['ubicaciones']; onPrint: () => void;
+  ubicaciones: Catalogo['ubicaciones']; semanas: Catalogo['semanas']; onPrint: () => void;
 }) {
   const rango = rangoSemana(fecha);
+  const indiceSemana = semanas.findIndex((s) => s.inicia_at === fecha);
+  const semanaActual = semanas[indiceSemana] ?? semanas[0];
+  const anterior = semanas[indiceSemana + 1];
+  const siguiente = indiceSemana > 0 ? semanas[indiceSemana - 1] : undefined;
   const filtrados = pedidos.filter((p) => ubicacion === 'todas' || String(p.ubicacion.id) === ubicacion);
   const fechas = [...new Set(filtrados.map((p) => p.fecha_entrega))].sort();
   const unidades = filtrados.flatMap((p) => p.lineas).reduce((a, l) => a + l.cantidad, 0);
   const total = filtrados.flatMap((p) => p.lineas).reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
   return <div className="order-history">
     <section className="workspace-card history-toolbar">
-      <div><span className="eyebrow">Semana</span><h2>{rango.inicio} al {rango.fin}</h2></div>
-      <div className="history-week-controls"><button className="icon-btn" aria-label="Semana anterior" onClick={() => setFecha(moverSemana(fecha, -1))}>←</button><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /><button className="icon-btn" aria-label="Semana siguiente" onClick={() => setFecha(moverSemana(fecha, 1))}>→</button></div>
+      <div><span className="eyebrow">Periodo</span><h2>Semana {semanaActual?.semana ?? '—'}</h2><p>{rango.inicio} al {rango.fin}</p></div>
+      <div className="history-week-controls"><button className="icon-btn" disabled={!anterior} aria-label="Semana anterior" onClick={() => anterior && setFecha(anterior.inicia_at)}>←</button><select aria-label="Semana" value={semanaActual?.inicia_at ?? fecha} onChange={(e) => setFecha(e.target.value)}>{semanas.map((s) => <option key={s.id} value={s.inicia_at}>Semana {s.semana} · {s.inicia_at} al {s.termina_at}</option>)}</select><button className="icon-btn" disabled={!siguiente} aria-label="Semana siguiente" onClick={() => siguiente && setFecha(siguiente.inicia_at)}>→</button></div>
       <label className="field"><span>Sucursal</span><select value={ubicacion} onChange={(e) => setUbicacion(e.target.value)}><option value="todas">Todas las sucursales</option>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}</select></label>
       <button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir orden total</button>
     </section>
