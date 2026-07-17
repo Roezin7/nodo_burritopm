@@ -3,7 +3,7 @@ import { AuthProvider, useAuth, type Rol } from './auth';
 import { ToastProvider } from './toast';
 import Login from './screens/Login';
 import Home from './screens/Home';
-import Inventario from './screens/inventario/Inventario';
+import ConteosInventario from './screens/inventario/Inventario';
 import Distribucion from './screens/distribucion/Distribucion';
 import Bodega from './screens/bodega/Bodega';
 import Ruta from './screens/ruta/Ruta';
@@ -16,6 +16,7 @@ import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
 import Pedidos from './screens/operacion/Pedidos';
 import OperacionAdmin from './screens/operacion/OperacionAdmin';
+import InventarioOperacion from './screens/operacion/InventarioOperacion';
 import { useState, useEffect, type JSX } from 'react';
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
@@ -50,9 +51,14 @@ function AppBody() {
       <OfflineBanner />
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/inventario" element={<SoloRol roles={['admin', 'encargado_bodega', 'encargado_sucursal']}><Inventario /></SoloRol>} />
+        <Route path="/inventario" element={<SoloRol roles={['admin', 'encargado_bodega']}><InventarioOperacion /></SoloRol>} />
+        <Route path="/conteos" element={<SoloRol roles={['admin', 'encargado_bodega']}><ConteosInventario /></SoloRol>} />
         <Route path="/pedidos" element={<SoloRol roles={['admin', 'encargado_sucursal']}><Pedidos /></SoloRol>} />
-        <Route path="/operacion" element={<SoloRol roles={['admin']}><OperacionAdmin /></SoloRol>} />
+        <Route path="/compras" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="compras" /></SoloRol>} />
+        <Route path="/produccion" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="produccion" /></SoloRol>} />
+        <Route path="/rutas" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="rutas" /></SoloRol>} />
+        <Route path="/facturacion" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="cierre" /></SoloRol>} />
+        <Route path="/operacion" element={<Navigate to="/compras" replace />} />
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
         <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
         <Route path="/ruta" element={<SoloRol roles={['admin', 'encargado_bodega']}><Ruta /></SoloRol>} />

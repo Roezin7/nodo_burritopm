@@ -12,13 +12,13 @@ import Spinner from '../../components/Spinner';
 type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos' | 'stock' | 'operacion';
 
 const TABS: { clave: Tab; label: string }[] = [
-  { clave: 'ubicaciones', label: 'Ubicaciones' },
-  { clave: 'usuarios', label: 'Usuarios' },
+  { clave: 'ubicaciones', label: 'Restaurantes y bodegas' },
+  { clave: 'usuarios', label: 'Accesos' },
   { clave: 'categorias', label: 'Categorías' },
   { clave: 'unidades', label: 'Unidades' },
   { clave: 'productos', label: 'Productos' },
-  { clave: 'stock', label: 'Productos por ubicación' },
-  { clave: 'operacion', label: 'Operación' },
+  { clave: 'stock', label: 'Mínimos por almacén' },
+  { clave: 'operacion', label: 'Despacho' },
 ];
 
 const DIAS = [
@@ -83,9 +83,9 @@ function Operacion() {
   return (
     <>
       <div className="card">
-        <strong>Días de pedido</strong>
+        <strong>Días de conteo físico</strong>
         <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
-          En los días marcados se habilita el pedido para sucursales y el conteo físico para bodega.
+          Programa cuándo se solicita una conciliación física de bodega. Las fechas de pedido y entrega se controlan desde Rutas.
         </p>
         <div className="dias-selector">
           {DIAS.map((d) => (
@@ -157,8 +157,9 @@ export default function Configuracion() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Configuración</h1>
-          <p className="page-sub">Bodega, sucursales y catálogo.</p>
+            <span className="eyebrow">Administración del sistema</span>
+            <h1>Configuración</h1>
+            <p className="page-sub">Empresas, restaurantes, accesos, productos y reglas de despacho.</p>
         </div>
       </header>
 

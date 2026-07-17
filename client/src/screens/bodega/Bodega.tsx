@@ -74,7 +74,7 @@ export default function Bodega() {
   return (
     <div className="page">
       <header className="page-head">
-        <div><h1>Bodega y reparto</h1><p className="page-sub">Surte la lista total, carga el camión y entrega.</p></div>
+        <div><span className="eyebrow">Salida de almacén</span><h1>Despacho</h1><p className="page-sub">Surte la lista aprobada, verifica existencias y confirma la carga.</p></div>
       </header>
       <FlujoStepper activo="bodega" />
       <BodegaRutaTabs activo="bodega" />

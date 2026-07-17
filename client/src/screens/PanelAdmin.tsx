@@ -56,12 +56,12 @@ export default function PanelAdmin() {
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente, no historial completo</div></div><Link className="link-btn" to="/operacion">Abrir cierre →</Link></div>
+        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente, no historial completo</div></div><Link className="link-btn" to="/facturacion">Abrir facturación →</Link></div>
         <div className="cash-grid"><div><small>Por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Cobro vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>requiere seguimiento</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>Pago vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere seguimiento</span></div></div>
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Resultado acumulado de la semana</div></div><Link className="link-btn" to="/operacion">Registrar →</Link></div>
+        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Resultado acumulado de la semana</div></div><Link className="link-btn" to="/produccion">Registrar →</Link></div>
         <div className="production-summary"><div><small>Costo procesado</small><strong>{usd(p.produccion.costo)}</strong></div><div><small>Cajas producidas</small><strong>{p.produccion.cajas.toLocaleString('es-MX')}</strong></div><div><small>Yield</small><strong>{p.produccion.yield.toFixed(1)}%</strong></div><div><small>Compras</small><strong>{usd(p.produccion.compras_semana)}</strong></div></div>
       </section>
     </div>

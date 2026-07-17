@@ -7,7 +7,8 @@ const prisma = new PrismaClient();
 const EXCEL_DIR = process.env.BPM_EXCEL_DIR ?? fileURLToPath(new URL('./data/3q', import.meta.url));
 const APPLY = process.env.APPLY_EXCEL_IMPORT === '1';
 const ONLY_ONCE = process.env.IMPORT_EXCEL_ONCE === '1';
-const IMPORT_KEY = 'excel-3q-2026-semana-28-v2';
+const PREVIOUS_IMPORT_KEY = 'excel-3q-2026-semana-28-v2';
+const IMPORT_KEY = 'excel-3q-2026-semana-28-v3';
 const date = (v: Date | string) => new Date(`${v instanceof Date ? v.toISOString().slice(0, 10) : v.slice(0, 10)}T00:00:00.000Z`);
 const iso = (v: Date) => v.toISOString().slice(0, 10);
 function n(v: ExcelJS.CellValue): number {
@@ -61,6 +62,15 @@ async function main() {
     });
     if (aplicada) {
       console.log(`✅ Importación ${IMPORT_KEY} ya aplicada; no se restablecieron datos.`);
+      return;
+    }
+    const anterior = await prisma.importaciones_sistema.findUnique({
+      where: { negocio_id_clave: { negocio_id: org.id, clave: PREVIOUS_IMPORT_KEY } },
+    });
+    if (anterior) {
+      await actualizarCierresHistoricos(org.id);
+      await prisma.importaciones_sistema.create({ data: { negocio_id: org.id, clave: IMPORT_KEY } });
+      console.log('✅ Totales históricos de Billing 27 y 28 agregados sin restablecer pedidos ni inventario.');
       return;
     }
   }
@@ -149,12 +159,26 @@ async function main() {
   });
   await importarInventarioInicial(org.id, admin.id, porSku, porNombre);
   await importarSaldosPendientes(org.id, admin.id);
+  await actualizarCierresHistoricos(org.id);
   await prisma.importaciones_sistema.upsert({
     where: { negocio_id_clave: { negocio_id: org.id, clave: IMPORT_KEY } },
     update: { aplicado_at: new Date() },
     create: { negocio_id: org.id, clave: IMPORT_KEY },
   });
   console.log('✅ Semanas 27 y 28, semana 29, inventarios, cuentas por cobrar y cuentas por pagar importados.');
+}
+
+async function actualizarCierresHistoricos(negocioId: bigint) {
+  const cierres = [
+    { semana: 27, carne: 98497.43817380186, congelado: 12633.68, desechables: 254984.265, cobrar: 299119.495, pagar: 86680.69, balance: 578554.1881738019 },
+    { semana: 28, carne: 48004.39071532847, congelado: 0, desechables: 264694.885, cobrar: 284923.305, pagar: 36648.38, balance: 560974.2007153285 },
+  ];
+  for (const c of cierres) {
+    await prisma.semanas_operativas.updateMany({
+      where: { negocio_id: negocioId, anio: 2026, semana: c.semana },
+      data: { valor_carne: c.carne, valor_congelado: c.congelado, valor_desechables: c.desechables, cuentas_por_cobrar: c.cobrar, cuentas_por_pagar: c.pagar, balance_neto: c.balance },
+    });
+  }
 }
 
 const codigoFacturacion: Record<string, string> = {

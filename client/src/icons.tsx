@@ -16,6 +16,31 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M12 13v8" />
     </>
   ),
+  boxes: (
+    <>
+      <path d="m4 8 4-2 4 2-4 2-4-2Z" /><path d="M4 8v5l4 2 4-2V8" /><path d="m12 13 4-2 4 2-4 2-4-2Z" /><path d="M12 13v5l4 2 4-2v-5" />
+    </>
+  ),
+  cart: (
+    <>
+      <path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" />
+    </>
+  ),
+  factory: (
+    <>
+      <path d="M3 21V10l6 3V9l6 4V5h4l2 16H3Z" /><path d="M7 17h2M13 17h2M17 17h2" />
+    </>
+  ),
+  map: (
+    <>
+      <path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z" /><path d="M9 3v15M15 6v15" />
+    </>
+  ),
+  receipt: (
+    <>
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" /><path d="M9 8h6M9 12h6M9 16h4" />
+    </>
+  ),
   checks: (
     <>
       <path d="M4 12.5 9 17.5 20 6.5" />

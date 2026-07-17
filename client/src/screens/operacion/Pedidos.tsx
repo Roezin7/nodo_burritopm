@@ -10,7 +10,7 @@ interface Catalogo {
   productos: { id: number; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; peso_caja_lb: number | null }[];
 }
 interface Pedido {
-  id: number; linea: Linea; fecha_entrega: string; estado: string; ubicacion: { id: number; nombre: string }; lineas: { product_id: number; cantidad: number }[];
+  id: number; linea: Linea; fecha_entrega: string; estado: string; notas?: string | null; ubicacion: { id: number; nombre: string }; lineas: { product_id: number; cantidad: number }[];
 }
 
 function hoy() { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }); }
@@ -32,6 +32,8 @@ export default function Pedidos() {
   const [ubicacionId, setUbicacionId] = useState('');
   const [fecha, setFecha] = useState(siguienteMiercoles());
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
+  const [notas, setNotas] = useState('');
+  const [buscar, setBuscar] = useState('');
   const [estado, setEstado] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -58,6 +60,7 @@ export default function Pedidos() {
       .then((rows) => {
         const p = rows[0];
         setEstado(p?.estado ?? null);
+        setNotas(p?.notas ?? '');
         setCantidades(Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, String(l.cantidad)])));
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el pedido.'));
@@ -69,7 +72,7 @@ export default function Pedidos() {
     try {
       const r = await api<{ estado: string }>('/operacion/pedidos', {
         method: 'PUT',
-        body: { ubicacion_id: Number(ubicacionId), linea, fecha_entrega: fecha, confirmar, lineas: productos.map((p) => ({ product_id: p.id, cantidad: Number(cantidades[p.id] || 0) })) },
+        body: { ubicacion_id: Number(ubicacionId), linea, fecha_entrega: fecha, confirmar, notas: notas.trim() || null, lineas: productos.map((p) => ({ product_id: p.id, cantidad: Number(cantidades[p.id] || 0) })) },
       });
       setEstado(r.estado);
       toast.ok(confirmar ? 'Pedido confirmado.' : 'Avance guardado.');
@@ -89,33 +92,41 @@ export default function Pedidos() {
   if (!catalogo) return <div className="page"><Spinner /><p className="error-msg">{error}</p></div>;
   const ubic = ubicaciones.find((u) => String(u.id) === ubicacionId);
   const total = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0) * (p.precio ?? 0), 0);
+  const cajas = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
+  const conCantidad = productos.filter((p) => Number(cantidades[p.id] || 0) > 0).length;
+  const q = buscar.trim().toLowerCase();
+  const visibles = productos.filter((p) => !q || `${p.nombre} ${p.tipo}`.toLowerCase().includes(q));
   return (
-    <div className="page conteo-page">
-      <header className="page-head"><div><h1>Pedidos</h1><p className="page-sub">Carne y desechables por fecha de entrega. El precio de proteína se congela al cerrar la semana.</p></div></header>
-      <div className="tabs">
+    <div className="page order-page">
+      <header className="page-head operation-page-head"><div><span className="eyebrow">Captura por restaurante</span><h1>Pedidos</h1><p className="page-sub">Carne y desechables se capturan por separado según su fecha real de entrega.</p></div>{estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>
+      <div className="segmented order-line-switch">
         <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('carne')}>Carne</button>
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
       </div>
-      <div className="card form-grid">
-        <label className="field"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
-        <label className="field"><span>Entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-      </div>
-      {ubic?.entrega_en && <p className="notice">Este pedido se factura a {ubic.nombre} y se entrega físicamente en {ubic.entrega_en.nombre}.</p>}
-      {estado && <p className="muted">Estado actual: <strong>{estado.replaceAll('_', ' ')}</strong></p>}
       {error && <p className="error-msg">{error}</p>}
-      <div className="card">
-        {productos.map((p) => (
-          <label key={p.id} className="conteo-row">
-            <span className="conteo-prod"><strong>{p.nombre}</strong><small>{p.unidad} · {usd(p.precio)}{p.peso_caja_lb ? ` · ${p.peso_caja_lb} lb` : ''}</small></span>
-            <input className="conteo-input2" inputMode="decimal" type="number" min="0" step="0.5" value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} />
-          </label>
-        ))}
-      </div>
-      <div className="card-head"><strong>Estimado</strong><strong>{usd(total)}</strong></div>
-      <div className="action-bar">
-        <button className="btn btn-secondary" disabled={busy} onClick={() => void guardar(false)}>Guardar</button>
-        <button className="btn btn-primary" disabled={busy} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar pedido'}</button>
-        {admin && <button className="btn btn-secondary" disabled={busy} onClick={() => void crearDistribucion()}>Crear distribución y rutas</button>}
+      <div className="order-workspace">
+        <section className="order-capture">
+          <div className="workspace-card order-context">
+            <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
+            <label className="field"><span>Fecha de entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
+          </div>
+          {ubic?.entrega_en && <p className="notice">Se factura a <strong>{ubic.nombre}</strong> y se entrega físicamente en <strong>{ubic.entrega_en.nombre}</strong>.</p>}
+          <section className="workspace-card product-picker">
+            <div className="workspace-card-head"><div><h2>Productos de {linea}</h2><p>Ingresa únicamente las cajas requeridas.</p></div><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar producto" /></div>
+            <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
+              <span><strong>{p.nombre}</strong><small>{p.unidad}{p.peso_caja_lb ? ` · ${p.peso_caja_lb} lb/caja` : ''} · {usd(p.precio)}</small></span>
+              <div className="input-suffix input-suffix--compact"><input inputMode="decimal" type="number" min="0" step="0.5" value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>cajas</span></div>
+            </label>)}</div>
+          </section>
+          <label className="workspace-card field order-notes"><span>Notas del pedido <em>opcional</em></span><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
+        </section>
+        <aside className="order-summary">
+          <span className="eyebrow">Resumen del pedido</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha} · {linea}</p>
+          <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Total de cajas</dt><dd>{cajas.toLocaleString('es-MX')}</dd></div><div><dt>Estimado</dt><dd>{usd(total)}</dd></div></dl>
+          <small>El precio final de proteína se congela al cerrar la semana.</small>
+          <div className="order-actions"><button className="btn btn-secondary" disabled={busy || !ubicacionId} onClick={() => void guardar(false)}>Guardar borrador</button><button className="btn btn-primary" disabled={busy || !ubicacionId || cajas <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar pedido'}</button></div>
+          {admin && <button className="btn btn-ghost btn-block" disabled={busy} onClick={() => void crearDistribucion()}>Crear preparación y rutas</button>}
+        </aside>
       </div>
     </div>
   );

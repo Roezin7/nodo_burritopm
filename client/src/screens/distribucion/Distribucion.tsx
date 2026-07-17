@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useToast, mensajeError } from '../../toast';
 import { EstadoDistChip, FaseChip, ParadaChip, FlujoStepper } from '../../flujo';
@@ -18,12 +19,14 @@ const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim(
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 
 export default function Distribucion() {
+  const toast = useToast();
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [abierta, setAbierta] = useState<number | null>(null);
   const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
   const [cargando, setCargando] = useState(true);
-  const [calculando, setCalculando] = useState(false);
+  const [creando, setCreando] = useState(false);
+  const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
+  const [fecha, setFecha] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }));
 
   async function cargar() {
     setCargando(true);
@@ -37,17 +40,20 @@ export default function Distribucion() {
   }
   useEffect(() => { void cargar(); }, []);
 
-  async function calcular() {
-    setCalculando(true); setError(''); setInfo('');
+  async function crearPreparacion() {
+    setCreando(true);
+    setError('');
     try {
-      const r = await api<{ id: number; lineas: number; sin_conteo: string[] }>('/distribuciones', { method: 'POST', body: {} });
-      if (r.sin_conteo.length) setInfo(`Sucursales sin pedido cerrado (excluidas): ${r.sin_conteo.join(', ')}`);
-      await cargar();
-      setAbierta(r.id);
+      const resultado = await api<{ id: number; pedidos: number }>('/operacion/distribuciones', {
+        method: 'POST',
+        body: { linea, fecha_entrega: fecha },
+      });
+      toast.ok(`Preparación #${resultado.id} creada con ${resultado.pedidos} pedidos confirmados.`);
+      setAbierta(resultado.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudo calcular');
+      setError(e instanceof ApiError ? e.message : 'No se pudo crear la preparación.');
     } finally {
-      setCalculando(false);
+      setCreando(false);
     }
   }
 
@@ -59,21 +65,33 @@ export default function Distribucion() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Distribución</h1>
-          <p className="page-sub">Crea el pedido maestro a partir de los pedidos cerrados por cada sucursal.</p>
+          <span className="eyebrow">Pedidos confirmados</span>
+          <h1>Preparación de entregas</h1>
+          <p className="page-sub">Revisa el consolidado de carne o desechables antes de enviarlo a despacho.</p>
         </div>
       </header>
 
       <FlujoStepper activo="plan" />
 
       {error && <p className="error-msg">{error}</p>}
-      {info && <p className="muted">{info}</p>}
+      <section className="workspace-card preparation-builder">
+        <div>
+          <span className="eyebrow">Nueva preparación</span>
+          <h2>Consolidar pedidos</h2>
+          <p>Reúne únicamente los pedidos confirmados de la línea y fecha elegidas; las rutas del día se generan al mismo tiempo.</p>
+        </div>
+        <div className="preparation-builder__controls">
+          <div className="segmented order-line-switch">
+            <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('carne')}>Carne</button>
+            <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
+          </div>
+          <label className="field"><span>Fecha de entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
+          <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear preparación'}</button>
+        </div>
+        <Link className="preparation-orders-link" to="/pedidos">Revisar o capturar pedidos →</Link>
+      </section>
 
-      <button className="btn btn-primary btn-grande" onClick={() => void calcular()} disabled={calculando}>
-        {calculando ? 'Creando…' : '+ Crear pedido'}
-      </button>
-
-      <h3 className="seccion-title">Pedidos</h3>
+      <h3 className="seccion-title">Preparaciones</h3>
       {cargando ? (
         <Spinner />
       ) : lista.length === 0 ? (

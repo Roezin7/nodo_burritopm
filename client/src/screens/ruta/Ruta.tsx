@@ -96,7 +96,7 @@ function RutaRepartidor() {
     <div className="page conteo-page ruta-page">
       {exito && <ExitoOverlay nombre={exito} />}
       <header className="page-head">
-        <div><h1>Bodega y reparto</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
+        <div><span className="eyebrow">Ruta activa</span><h1>Reparto</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
       </header>
       <FlujoStepper activo="ruta" />
       <BodegaRutaTabs activo="reparto" />
@@ -329,7 +329,7 @@ function MonitorRutas() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Bodega y reparto</h1>
+          <h1>Reparto</h1>
           <p className="page-sub">
             En vivo: dónde va cada camión y qué sucursal sigue.
             {actualizado && <> · actualizado {hora(actualizado.toISOString())}</>}

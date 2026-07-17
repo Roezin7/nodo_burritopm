@@ -12,21 +12,33 @@ interface Item {
   ruta: string;
   label: string;
   icono: Parameters<typeof Icono>[0]['name'];
+  grupo: 'general' | 'operacion' | 'entregas' | 'sistema';
   soloAdmin?: boolean;
   roles?: Rol[]; // si se define, solo estos roles ven el ítem
 }
 
 const ITEMS: Item[] = [
-  { ruta: '/', label: 'Inicio', icono: 'home' },
-  { ruta: '/pedidos', label: 'Pedidos', icono: 'clipboard', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/operacion', label: 'Operación', icono: 'trending', soloAdmin: true },
-  { ruta: '/inventario', label: 'Inventario', icono: 'clipboard', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
-  { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
-  { ruta: '/bodega', label: 'Bodega y reparto', icono: 'truck', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/recepcion', label: 'Recepción', icono: 'checks', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/incidencias', label: 'Incidencias', icono: 'wallet', soloAdmin: true },
-  { ruta: '/configuracion', label: 'Configuración', icono: 'settings', soloAdmin: true },
+  { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
+  { ruta: '/pedidos', label: 'Pedidos', icono: 'clipboard', grupo: 'operacion', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/compras', label: 'Compras', icono: 'cart', grupo: 'operacion', soloAdmin: true },
+  { ruta: '/produccion', label: 'Producción', icono: 'factory', grupo: 'operacion', soloAdmin: true },
+  { ruta: '/inventario', label: 'Inventarios', icono: 'boxes', grupo: 'operacion', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/rutas', label: 'Rutas', icono: 'map', grupo: 'entregas', soloAdmin: true },
+  { ruta: '/distribucion', label: 'Preparación', icono: 'package', grupo: 'entregas', soloAdmin: true },
+  { ruta: '/bodega', label: 'Despacho', icono: 'truck', grupo: 'entregas', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/ruta', label: 'Reparto', icono: 'map', grupo: 'entregas', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/recepcion', label: 'Recepción', icono: 'checks', grupo: 'entregas', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/facturacion', label: 'Facturación', icono: 'receipt', grupo: 'sistema', soloAdmin: true },
+  { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
+  { ruta: '/configuracion', label: 'Configuración', icono: 'settings', grupo: 'sistema', soloAdmin: true },
 ];
+
+const GRUPOS = [
+  { clave: 'general', label: 'General' },
+  { clave: 'operacion', label: 'Operación' },
+  { clave: 'entregas', label: 'Entregas' },
+  { clave: 'sistema', label: 'Control' },
+] as const;
 
 // En móvil mostramos pocas pestañas y el resto en una hoja "Más" (accesible al pulgar).
 const MAX_PRIMARIOS = 4;
@@ -72,17 +84,24 @@ export default function Shell({ children }: { children: ReactNode }) {
           <BurritoLockup size={30} variante="rail" />
         </div>
         <nav className="nav-links">
-          {items.map((i) => (
-            <NavLink
-              key={i.ruta}
-              to={i.ruta}
-              end={i.ruta === '/'}
-              className={({ isActive }) => (isActive ? 'nav-link nav-link--on' : 'nav-link')}
-            >
-              <Icono name={i.icono} size={20} />
-              <span>{i.label}</span>
-            </NavLink>
-          ))}
+          {GRUPOS.map((grupo) => {
+            const delGrupo = items.filter((i) => i.grupo === grupo.clave);
+            if (!delGrupo.length) return null;
+            return <div className="nav-group" key={grupo.clave}>
+              <span className="nav-group-label">{grupo.label}</span>
+              {delGrupo.map((i) => (
+                <NavLink
+                  key={i.ruta}
+                  to={i.ruta}
+                  end={i.ruta === '/'}
+                  className={({ isActive }) => (isActive ? 'nav-link nav-link--on' : 'nav-link')}
+                >
+                  <Icono name={i.icono} size={19} />
+                  <span>{i.label}</span>
+                </NavLink>
+              ))}
+            </div>;
+          })}
         </nav>
         <div className="nav-foot">
           <button className="nav-link" onClick={alternar}>

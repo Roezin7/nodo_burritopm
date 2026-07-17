@@ -223,16 +223,20 @@ existenciasRouter.get(
     });
     const items = filas.map((e) => {
       const disp = num0(e.cantidad_disponible);
+      const transito = num0(e.cantidad_transito);
       const costo = num(e.costo_promedio);
       return {
         product_id: Number(e.product_id),
         nombre: e.products.nombre,
+        sku: e.products.sku,
+        linea: e.products.linea_operacion,
+        tipo: e.products.tipo_operativo,
         unidad: e.products.unidad_distribucion.nombre,
         disponible: disp,
         reservada: num0(e.cantidad_reservada),
-        transito: num0(e.cantidad_transito),
+        transito,
         costo_promedio: costo,
-        valor: costo != null ? Math.round(disp * costo * 100) / 100 : 0,
+        valor: costo != null ? Math.round((disp + transito) * costo * 100) / 100 : 0,
       };
     });
     res.json({ items, valor_total: Math.round(items.reduce((a, i) => a + i.valor, 0) * 100) / 100 });

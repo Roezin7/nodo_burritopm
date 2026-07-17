@@ -27,7 +27,7 @@ function TareaHoy() {
           }
           const ses = await api<{ programado: boolean; conteo: { estado: string } | null }>(`/conteos/sesion?ubicacion=${suc.id}`);
           if (ses.programado && ses.conteo?.estado !== 'cerrado') {
-            return { titulo: 'Hoy toca pedido', sub: ses.conteo ? 'Continúa el pedido de hoy' : 'Elige cuánto quieres recibir', ruta: '/inventario' };
+            return { titulo: 'Hoy toca pedido', sub: 'Captura carne o desechables para tu próxima entrega', ruta: '/pedidos' };
           }
           return { titulo: 'Captura tu pedido', sub: 'Carne y desechables por fecha de entrega', ruta: '/pedidos' };
         }
@@ -79,11 +79,15 @@ interface Modulo {
 
 const MODULOS: Modulo[] = [
   { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y fecha', ruta: '/pedidos', roles: ['admin', 'encargado_sucursal'] },
-  { clave: 'operacion', titulo: 'Operación semanal', icono: 'trending', desc: 'Compras, producción, rutas, costo y facturación', ruta: '/operacion', soloAdmin: true },
-  { clave: 'inventario', titulo: 'Pedido / inventario', icono: 'clipboard', desc: 'Sucursal pide directo; bodega cuenta físico', ruta: '/inventario' },
-  { clave: 'distribucion', titulo: 'Distribución', icono: 'trending', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
-  { clave: 'bodega', titulo: 'Bodega y reparto', icono: 'truck', desc: 'Surtir, cargar el camión y entregar', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Materia prima, lotes y cuentas por pagar', ruta: '/compras', soloAdmin: true },
+  { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/produccion', soloAdmin: true },
+  { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/inventario', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
+  { clave: 'distribucion', titulo: 'Preparación', icono: 'package', desc: 'Consolidar pedidos y preparar entregas', ruta: '/distribucion', soloAdmin: true },
+  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/ruta', roles: ['encargado_bodega'] },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cierre semanal, cobros y Excel', ruta: '/facturacion', soloAdmin: true },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];
@@ -98,7 +102,6 @@ function saludo() {
 export default function Home() {
   const { usuario } = useAuth();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'inicio' | 'dashboard'>('inicio');
 
   // Si "Bodega y reparto" tiene una ruta en curso, lo llevamos directo a entregarla (una vez por
   // sesión, para que pueda volver al inicio si quiere). Cero fricción: abre la app y a repartir.
@@ -126,6 +129,18 @@ export default function Home() {
     return true;
   });
 
+  if (esAdmin) return (
+    <div className="page admin-home">
+      <header className="page-head operation-page-head"><div><span className="eyebrow">Centro operativo</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Toda la operación de Burrito Parrilla, Carnicería, Aurora y Tapatíos en un solo panorama.</p></div></header>
+      <ActivarAvisos />
+      <TareaHoy />
+      <div className="quick-actions" aria-label="Acciones rápidas">
+        {MODULOS.filter((m) => m.soloAdmin && m.ruta && ['compras', 'produccion', 'rutas', 'facturacion'].includes(m.clave)).map((m) => <Link key={m.clave} to={m.ruta!}><span><Icono name={m.icono} size={20} /></span><strong>{m.titulo}</strong><small>{m.desc}</small></Link>)}
+      </div>
+      <PanelAdmin />
+    </div>
+  );
+
   return (
     <div className="page">
       <header className="page-head">
@@ -138,15 +153,7 @@ export default function Home() {
       <ActivarAvisos />
       <TareaHoy />
 
-      {esAdmin && (
-        <div className="tabs">
-          <button className={tab === 'inicio' ? 'tab tab--on' : 'tab'} onClick={() => setTab('inicio')}>Inicio</button>
-          <button className={tab === 'dashboard' ? 'tab tab--on' : 'tab'} onClick={() => setTab('dashboard')}>Dashboard</button>
-        </div>
-      )}
-
-      {(!esAdmin || tab === 'inicio') && (
-        <div className="module-grid">
+      <div className="module-grid">
           {visibles.map((m) =>
             m.ruta ? (
               <Link key={m.clave} className="module-card module-card--active" to={m.ruta}>
@@ -163,10 +170,7 @@ export default function Home() {
               </button>
             ),
           )}
-        </div>
-      )}
-
-      {esAdmin && tab === 'dashboard' && <PanelAdmin />}
+      </div>
     </div>
   );
 }
