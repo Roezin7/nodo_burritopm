@@ -22,6 +22,37 @@ const salidasPorMateria: Record<string, string[]> = {
   'RAW-TAPATIOS-TACO': ['MEAT-TAPATIOS-TACO'],
 };
 
+export interface LoteFifoCalculable {
+  cajas: number;
+  peso_lb: number;
+  costo: number;
+}
+
+/**
+ * Consume cajas por antigüedad conservando el peso y costo reales de cada lote.
+ * Una fracción de caja toma la misma fracción del peso/costo restante del lote;
+ * nunca se usa un peso fijo de catálogo para la materia prima comprada.
+ */
+export function calcularConsumoFifo(lotes: LoteFifoCalculable[], cajasSolicitadas: number) {
+  let faltan = r3(cajasSolicitadas);
+  const consumos: { indice: number; cajas: number; peso: number; costo: number }[] = [];
+  for (const [indice, lote] of lotes.entries()) {
+    if (faltan <= 0.0001) break;
+    const disponibles = Math.max(0, lote.cajas);
+    const cajas = Math.min(faltan, disponibles);
+    if (cajas <= 0) continue;
+    const proporcion = cajas / disponibles;
+    consumos.push({ indice, cajas: r3(cajas), peso: r3(lote.peso_lb * proporcion), costo: r2(lote.costo * proporcion) });
+    faltan = r3(faltan - cajas);
+  }
+  return {
+    consumos,
+    cajas_faltantes: Math.max(0, faltan),
+    peso_total: r3(consumos.reduce((a, c) => a + c.peso, 0)),
+    costo_total: r2(consumos.reduce((a, c) => a + c.costo, 0)),
+  };
+}
+
 export function precioVentaProducto(p: {
   tipo_operativo: string | null;
   precio_venta_fijo: Prisma.Decimal | null;
@@ -456,6 +487,112 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
   return { id: Number(compra.id), total, vence_at: iso(compra.vence_at) };
 }
 
+/**
+ * Elimina una compra y revierte su entrada de inventario. La materia prima solo
+ * puede borrarse mientras su lote siga íntegro: una compra ya usada en producción
+ * o ajustada por inventario conserva su trazabilidad y debe corregirse desde la
+ * operación posterior correspondiente.
+ */
+export async function eliminarCompra(negocioId: bigint, compraId: bigint) {
+  return prisma.$transaction(async (tx) => {
+    const compra = await tx.compras.findFirst({
+      where: { id: compraId, negocio_id: negocioId },
+      include: {
+        lineas: {
+          include: {
+            producto: true,
+            lote: { include: { _count: { select: { consumos: true, ajustes: true } } } },
+          },
+        },
+      },
+    });
+    if (!compra) throw new HttpError(404, 'Compra no encontrada');
+
+    const semanaCerrada = await tx.semanas_operativas.findFirst({
+      where: { negocio_id: negocioId, estado: 'cerrada', inicia_at: { lte: compra.fecha }, termina_at: { gte: compra.fecha } },
+      select: { semana: true, anio: true },
+    });
+    if (semanaCerrada) throw new HttpError(409, `La compra pertenece a la semana ${semanaCerrada.semana} de ${semanaCerrada.anio}, que está cerrada. Reabre la semana antes de eliminarla.`);
+
+    const grupos = new Map<string, { productId: bigint; cajas: number; costo: number; materiaPrima: boolean; nombre: string }>();
+    for (const linea of compra.lineas) {
+      const materiaPrima = linea.producto.tipo_operativo === 'materia_prima';
+      if (materiaPrima) {
+        const lote = linea.lote;
+        if (!lote) throw new HttpError(409, `${linea.producto.nombre}: la compra no tiene un lote reversible.`);
+        const loteIntegro = Math.abs(num0(lote.cajas_disponibles) - num0(lote.cajas_iniciales)) <= 0.001
+          && Math.abs(num0(lote.peso_disponible_lb) - num0(lote.peso_inicial_lb)) <= 0.001
+          && Math.abs(num0(lote.costo_disponible) - num0(lote.costo_inicial)) <= 0.01;
+        if (!loteIntegro || lote._count.consumos > 0 || lote._count.ajustes > 0) {
+          throw new HttpError(409, `${linea.producto.nombre}: esta compra ya fue utilizada en producción o inventario y no se puede eliminar.`);
+        }
+      }
+      const clave = linea.product_id.toString();
+      const grupo = grupos.get(clave) ?? { productId: linea.product_id, cajas: 0, costo: 0, materiaPrima, nombre: linea.producto.nombre };
+      grupo.cajas = r3(grupo.cajas + num0(linea.cajas));
+      grupo.costo = r2(grupo.costo + num0(linea.costo_total));
+      grupos.set(clave, grupo);
+    }
+
+    const existenciasAntes = new Map<string, { cantidad: number; costo: number | null }>();
+    for (const [clave, grupo] of grupos) {
+      const existencia = await tx.existencias.findUnique({
+        where: { ubicacion_id_product_id: { ubicacion_id: compra.ubicacion_id, product_id: grupo.productId } },
+      });
+      const cantidad = num0(existencia?.cantidad_disponible);
+      if (cantidad + 0.0001 < grupo.cajas) {
+        throw new HttpError(409, `${grupo.nombre}: el inventario disponible ya es menor que la compra. Revierte primero su uso antes de eliminarla.`);
+      }
+      existenciasAntes.set(clave, { cantidad, costo: num(existencia?.costo_promedio) });
+    }
+
+    const lotesIds = compra.lineas.flatMap((linea) => linea.lote ? [linea.lote.id] : []);
+    if (lotesIds.length) await tx.lotes_materia_prima.deleteMany({ where: { id: { in: lotesIds } } });
+    await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'compra', documento_id: compra.id } });
+    await tx.compras.delete({ where: { id: compra.id } });
+
+    for (const [clave, grupo] of grupos) {
+      const anterior = existenciasAntes.get(clave)!;
+      const cantidadNueva = r3(anterior.cantidad - grupo.cajas);
+      const lotesRestantes = grupo.materiaPrima
+        ? await tx.lotes_materia_prima.findMany({
+            where: { negocio_id: negocioId, ubicacion_id: compra.ubicacion_id, product_id: grupo.productId, cajas_disponibles: { gt: 0 } },
+            select: { cajas_disponibles: true, peso_disponible_lb: true, costo_disponible: true },
+          })
+        : [];
+      const cajasLotes = lotesRestantes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0);
+      const pesoLotes = lotesRestantes.reduce((a, lote) => a + num0(lote.peso_disponible_lb), 0);
+      const costoLotes = lotesRestantes.reduce((a, lote) => a + num0(lote.costo_disponible), 0);
+      const valorRestante = anterior.costo == null ? null : anterior.cantidad * anterior.costo - grupo.costo;
+      const costoPromedio = cantidadNueva > 0 && valorRestante != null && valorRestante >= 0
+        ? r4(valorRestante / cantidadNueva)
+        : (grupo.materiaPrima && cajasLotes > 0 ? r4(costoLotes / cajasLotes) : null);
+      await tx.existencias.updateMany({
+        where: { ubicacion_id: compra.ubicacion_id, product_id: grupo.productId },
+        data: { cantidad_disponible: Math.max(0, cantidadNueva), costo_promedio: costoPromedio },
+      });
+
+      const ultimaLinea = await tx.compra_lineas.findFirst({
+        where: { product_id: grupo.productId, compra: { negocio_id: negocioId } },
+        orderBy: { id: 'desc' },
+        select: { cajas: true, peso_total_lb: true, costo_total: true },
+      });
+      const cajasUltima = num0(ultimaLinea?.cajas);
+      const ultimoCosto = cajasUltima > 0 ? r4(num0(ultimaLinea?.costo_total) / cajasUltima) : null;
+      await tx.products.update({
+        where: { id: grupo.productId },
+        data: {
+          ultimo_costo: ultimoCosto,
+          peso_caja_lb: grupo.materiaPrima
+            ? (cajasLotes > 0 ? r3(pesoLotes / cajasLotes) : (cajasUltima > 0 ? r3(num0(ultimaLinea?.peso_total_lb) / cajasUltima) : null))
+            : undefined,
+        },
+      });
+    }
+    return { ok: true, total_revertido: num0(compra.total), lineas_revertidas: compra.lineas.length };
+  }, { isolationLevel: 'Serializable' });
+}
+
 export async function guardarInventarioFinal(
   negocioId: bigint,
   usuarioId: bigint,
@@ -666,18 +803,14 @@ export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, 
       throw new HttpError(409, `No hay suficiente ${materia.nombre} fresca para esa fecha. Disponible: ${frescas} cajas; solicitadas: ${input.cajas_materia_prima}.`);
     }
 
-    let faltan = input.cajas_materia_prima;
-    const consumos: { lote: (typeof lotes)[number]; cajas: number; peso: number; costo: number }[] = [];
-    for (const lote of lotes) {
-      if (faltan <= 0.0001) break;
-      const disponibles = num0(lote.cajas_disponibles);
-      const cajas = Math.min(faltan, disponibles);
-      const proporcion = disponibles > 0 ? cajas / disponibles : 0;
-      consumos.push({ lote, cajas: r3(cajas), peso: r3(num0(lote.peso_disponible_lb) * proporcion), costo: r2(num0(lote.costo_disponible) * proporcion) });
-      faltan = r3(faltan - cajas);
-    }
-    const pesoEntrada = r3(consumos.reduce((a, c) => a + c.peso, 0));
-    const costoEntrada = r2(consumos.reduce((a, c) => a + c.costo, 0));
+    const calculoFifo = calcularConsumoFifo(
+      lotes.map((lote) => ({ cajas: num0(lote.cajas_disponibles), peso_lb: num0(lote.peso_disponible_lb), costo: num0(lote.costo_disponible) })),
+      input.cajas_materia_prima,
+    );
+    if (calculoFifo.cajas_faltantes > 0.0001) throw new HttpError(409, 'Los lotes cambiaron mientras se registraba la producción; vuelve a intentarlo.');
+    const consumos = calculoFifo.consumos.map((consumo) => ({ ...consumo, lote: lotes[consumo.indice]! }));
+    const pesoEntrada = calculoFifo.peso_total;
+    const costoEntrada = calculoFifo.costo_total;
     const salidas = input.salidas.map((s) => {
       const p = productos.find((x) => x.id === BigInt(s.product_id))!;
       const pesoCaja = num0(p.peso_caja_lb);

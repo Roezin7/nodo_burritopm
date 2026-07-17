@@ -55,7 +55,7 @@ export default function OperacionAdmin({ seccion, integrado = false }: { seccion
       {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{meta[seccion].eyebrow}</span><h1>{meta[seccion].titulo}</h1><p className="page-sub">{meta[seccion].descripcion}</p></div></header>}
       {integrado && <header className="embedded-head"><span className="eyebrow">{meta[seccion].eyebrow}</span><h2>{meta[seccion].titulo}</h2></header>}
       {error && <p className="error-msg">{error}</p>}
-      {seccion === 'compras' && <Compras catalogo={catalogo} resumen={resumen} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Compra registrada e inventario actualizado.'); }} setError={setError} />}
+      {seccion === 'compras' && <Compras catalogo={catalogo} resumen={resumen} busy={busy} setBusy={setBusy} onDone={async (mensaje = 'Compra registrada e inventario actualizado.') => { await cargar(); toast.ok(mensaje); }} setError={setError} />}
       {seccion === 'produccion' && <Produccion catalogo={catalogo} resumen={resumen} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Batch calculado y guardado.'); }} setError={setError} />}
       {seccion === 'rutas' && <Rutas catalogo={catalogo} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Ruta actualizada.'); }} setError={setError} />}
       {seccion === 'cierre' && <Cierres cierres={cierres} busy={busy} setBusy={setBusy} onDone={cargar} setError={setError} />}
@@ -63,7 +63,7 @@ export default function OperacionAdmin({ seccion, integrado = false }: { seccion
   );
 }
 
-function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
+function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; busy: boolean; setBusy: (v: boolean) => void; onDone: (mensaje?: string) => Promise<void>; setError: (v: string) => void }) {
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const bodega = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && !u.nombre.toLowerCase().includes('carnicer'));
   const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
@@ -84,6 +84,7 @@ function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catal
   const seleccionado = productosCompra.find((p) => String(p.id) === producto);
   const requierePeso = seleccionado?.tipo === 'materia_prima';
   const almacen = linea === 'carne' ? carniceria : bodega;
+  const pesoCaja = Number(cajas) > 0 ? Number(peso) / Number(cajas) : 0;
   const costoCaja = Number(cajas) > 0 ? Number(costo) / Number(cajas) : 0;
   const costoLibra = Number(peso) > 0 ? Number(costo) / Number(peso) : 0;
   async function guardar() {
@@ -94,8 +95,16 @@ function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catal
       setCajas(''); setPeso(''); setCosto(''); setReferencia(''); await onDone();
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar la compra.'); } finally { setBusy(false); }
   }
-  async function cambiarLote(id: number, valor: boolean) { setBusy(true); try { await api(`/operacion/lotes/${id}`, { method: 'PATCH', body: { congelado: valor } }); await onDone(); } finally { setBusy(false); } }
-  async function pagarCompra(id: number) { setBusy(true); setError(''); try { await api(`/cierre/compras/${id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo marcar la compra pagada.'); } finally { setBusy(false); } }
+  async function cambiarLote(id: number, valor: boolean) { setBusy(true); try { await api(`/operacion/lotes/${id}`, { method: 'PATCH', body: { congelado: valor } }); await onDone('Lote actualizado.'); } finally { setBusy(false); } }
+  async function pagarCompra(id: number) { setBusy(true); setError(''); try { await api(`/cierre/compras/${id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone('Compra marcada como pagada.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo marcar la compra pagada.'); } finally { setBusy(false); } }
+  async function eliminarCompra(id: number) {
+    if (!window.confirm('Se eliminará la compra y se restarán sus cajas, peso y costo del inventario. Solo puede hacerse si todavía no fue utilizada. ¿Continuar?')) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/operacion/compras/${id}`, { method: 'DELETE' });
+      await onDone('Compra eliminada e inventario revertido.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la compra.'); } finally { setBusy(false); }
+  }
   return <div className="operation-stack">
     <section className="workspace-card form-workspace simple-entry-card">
         <div className="workspace-card-head"><h2>Nueva compra</h2><div className="segmented segmented--small"><button className={linea === 'carne' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea('carne')}>Carne</button><button className={linea === 'desechables' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea('desechables')}>Desechables</button></div></div>
@@ -109,15 +118,15 @@ function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catal
           <label className="field field--wide"><span>Factura / referencia</span><input value={referencia} onChange={(e) => setReferencia(e.target.value)} /></label>
           {requierePeso && <label className="check-card"><input type="checkbox" checked={congelado} onChange={(e) => setCongelado(e.target.checked)} /><span><strong>Congelado</strong></span></label>}
         </div>
-        <div className="simple-entry-total"><span>Costo por {seleccionado?.unidad?.toLowerCase() ?? 'unidad'} <strong>{usd(costoCaja)}</strong>{requierePeso && <> · por lb <strong>{usd(costoLibra)}</strong></>}</span><button className="btn btn-primary" disabled={busy || !proveedor || !producto || !cajas || !costo || (requierePeso && !peso)} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar compra'}</button></div>
+        <div className="simple-entry-total"><span>{requierePeso && <>Peso promedio <strong>{pesoCaja.toFixed(2)} lb/caja</strong> · </>}Costo por {seleccionado?.unidad?.toLowerCase() ?? 'unidad'} <strong>{usd(costoCaja)}</strong>{requierePeso && <> · por lb <strong>{usd(costoLibra)}</strong></>}</span><button className="btn btn-primary" disabled={busy || !proveedor || !producto || !cajas || !costo || (requierePeso && !peso)} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar compra'}</button></div>
     </section>
 
     {resumen.lotes.length > 0 && <section className="workspace-section"><div className="section-heading"><h2>Materia prima disponible</h2><span>{resumen.lotes.length} lotes</span></div>
-      <div className="lot-grid">{resumen.lotes.map((l) => <article className="lot-card" key={l.id}><div className="card-head"><strong>{l.producto}</strong><span className={`chip ${l.congelado ? 'chip--info' : 'chip--ok'}`}>{l.congelado ? 'Congelado' : 'Fresco'}</span></div><div className="lot-value">{l.cajas} <small>cajas</small></div><p>{l.peso_lb.toLocaleString('es-MX')} lb · {usd(l.costo)}</p><footer><span>{l.fecha}</span><button className="link-btn" disabled={busy} onClick={() => void cambiarLote(l.id, !l.congelado)}>{l.congelado ? 'Descongelar' : 'Congelar'}</button></footer></article>)}</div>
+      <div className="lot-grid">{resumen.lotes.map((l) => <article className="lot-card" key={l.id}><div className="card-head"><strong>{l.producto}</strong><span className={`chip ${l.congelado ? 'chip--info' : 'chip--ok'}`}>{l.congelado ? 'Congelado' : 'Fresco'}</span></div><div className="lot-value">{l.cajas} <small>cajas</small></div><p>{l.peso_lb.toLocaleString('es-MX')} lb · {l.cajas > 0 ? (l.peso_lb / l.cajas).toFixed(2) : '0.00'} lb/caja<br />{usd(l.costo)} · {l.cajas > 0 ? usd(l.costo / l.cajas) : usd(0)}/caja</p><footer><span>{l.fecha}</span><button className="link-btn" disabled={busy} onClick={() => void cambiarLote(l.id, !l.congelado)}>{l.congelado ? 'Descongelar' : 'Congelar'}</button></footer></article>)}</div>
     </section>}
 
     <section className="workspace-card"><div className="workspace-card-head"><h2>Compras registradas</h2></div>
-      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas}{l.peso_lb > 0 ? ` · ${l.peso_lb} lb` : ''}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span>{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void pagarCompra(c.id)}>Pagada</button>}</div></article>)}</div>
+      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span>{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void pagarCompra(c.id)}>Pagada</button>}<button className="btn btn-secondary btn-sm btn-peligro" disabled={busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></article>)}</div>
     </section>
   </div>;
 }
@@ -130,12 +139,24 @@ function Produccion({ catalogo, resumen, busy, setBusy, onDone, setError }: { ca
   const materiaActual = materias.find((p) => String(p.id) === materia);
   const terminados = catalogo.productos.filter((p) => p.linea === 'carne' && p.tipo === 'proteina' && (recetas[materiaActual?.sku ?? ''] ?? []).includes(p.sku));
   const lotesMateria = resumen.lotes.filter((l) => String(l.product_id) === materia);
-  const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= fecha);
+  const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= fecha).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
   const cajasFrescas = lotesFrescos.reduce((a, l) => a + l.cajas, 0);
   const cajasCongeladas = lotesMateria.filter((l) => l.congelado).reduce((a, l) => a + l.cajas, 0);
   const pesoFresco = lotesFrescos.reduce((a, l) => a + l.peso_lb, 0);
-  const pesoCajaDisponible = cajasFrescas > 0 ? pesoFresco / cajasFrescas : (materiaActual?.peso_caja_lb ?? 0);
-  const pesoEntradaEstimado = Number(entrada || 0) * pesoCajaDisponible;
+  const consumoEstimado = (() => {
+    let faltan = Number(entrada || 0); let pesoTotal = 0; let costoTotal = 0;
+    for (const lote of lotesFrescos) {
+      if (faltan <= 0.0001) break;
+      const usadas = Math.min(faltan, lote.cajas);
+      const proporcion = lote.cajas > 0 ? usadas / lote.cajas : 0;
+      pesoTotal += lote.peso_lb * proporcion;
+      costoTotal += lote.costo * proporcion;
+      faltan -= usadas;
+    }
+    return { pesoTotal, costoTotal };
+  })();
+  const pesoEntradaEstimado = consumoEstimado.pesoTotal;
+  const pesoCajaConsumida = Number(entrada) > 0 ? pesoEntradaEstimado / Number(entrada) : (materiaActual?.peso_caja_lb ?? 0);
   const pesoSalida = terminados.reduce((a, p) => a + Number(salidas[p.id] || 0) * (p.peso_caja_lb ?? 0), 0);
   const insuficiente = Number(entrada || 0) > cajasFrescas + 0.0001;
   async function guardar() {
@@ -158,7 +179,7 @@ function Produccion({ catalogo, resumen, busy, setBusy, onDone, setError }: { ca
         </div>
         <div className={`production-stock-link ${insuficiente ? 'is-alert' : ''}`}><span><strong>Disponible para producir</strong>{cajasFrescas.toLocaleString('es-MX')} cajas frescas · {pesoFresco.toLocaleString('es-MX')} lb</span><span>{cajasCongeladas > 0 ? `${cajasCongeladas.toLocaleString('es-MX')} congeladas (descongela antes de usar)` : 'Sin cajas congeladas'}</span></div>
         {insuficiente && <p className="error-msg">La producción excede las compras frescas disponibles.</p>}
-        <div className="production-weight-flow"><span><strong>Entrada</strong>{pesoCajaDisponible ? pesoCajaDisponible.toFixed(2) : '?'} lb promedio por caja comprada</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
+        <div className="production-weight-flow"><span><strong>Entrada FIFO</strong>{pesoCajaConsumida ? pesoCajaConsumida.toFixed(2) : '?'} lb promedio de las cajas que se usarán · {usd(consumoEstimado.costoTotal)}</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
         <div className="form-divider"><span>Cajas terminadas producidas</span></div>
         <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>Caja terminada de {p.peso_caja_lb ?? '?'} lb · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
         {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima o revisa el catálogo.</span></div>}

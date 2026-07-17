@@ -76,6 +76,11 @@ operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
   res.status(201).json(await svc.registrarCompra(req.auth!.negocioId, req.auth!.usuarioId, b));
 }));
 
+/** Revierte una compra mientras su inventario/lote todavía no haya sido utilizado. */
+operacionRouter.delete('/compras/:id', soloAdmin, asyncHandler(async (req, res) => {
+  res.json(await svc.eliminarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id))));
+}));
+
 /** Captura directa del inventario físico final, en el mismo orden del libro semanal. */
 operacionRouter.put('/inventario-final', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({

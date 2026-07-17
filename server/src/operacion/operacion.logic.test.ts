@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { precioVentaProducto } from './service.js';
+import { calcularConsumoFifo, precioVentaProducto } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -26,5 +26,28 @@ describe('cierre operativo', () => {
     expect(s.semana).toBe(28);
     expect(s.lunes.toISOString().slice(0, 10)).toBe('2026-07-06');
     expect(s.sabado.toISOString().slice(0, 10)).toBe('2026-07-11');
+  });
+});
+
+describe('materia prima con cajas de peso variable', () => {
+  it('consume el peso y costo reales de cada lote en orden FIFO', () => {
+    const calculo = calcularConsumoFifo([
+      { cajas: 2, peso_lb: 140, costo: 350 },
+      { cajas: 3, peso_lb: 180, costo: 450 },
+    ], 3);
+
+    expect(calculo.cajas_faltantes).toBe(0);
+    expect(calculo.peso_total).toBe(200);
+    expect(calculo.costo_total).toBe(500);
+    expect(calculo.consumos).toEqual([
+      { indice: 0, cajas: 2, peso: 140, costo: 350 },
+      { indice: 1, cajas: 1, peso: 60, costo: 150 },
+    ]);
+  });
+
+  it('prorratea una caja parcial dentro del lote correspondiente', () => {
+    const calculo = calcularConsumoFifo([{ cajas: 4, peso_lb: 286, costo: 720 }], 1.5);
+    expect(calculo.peso_total).toBe(107.25);
+    expect(calculo.costo_total).toBe(270);
   });
 });
