@@ -96,7 +96,7 @@ export async function listarPedidos(
       ubicacion: { select: { id: true, nombre: true, entrega_en: { select: { id: true, nombre: true } } } },
       lineas: { include: { producto: { select: { id: true, nombre: true, sku: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } },
     },
-    orderBy: [{ fecha_entrega: 'desc' }, { ubicacion: { nombre: 'asc' } }],
+    orderBy: [{ fecha_entrega: 'desc' }, { ubicacion: { orden_operativo: 'asc' } }],
   });
   return rows.map((p) => ({
     id: Number(p.id), linea: p.linea_operacion, fecha_entrega: iso(p.fecha_entrega), estado: p.estado,

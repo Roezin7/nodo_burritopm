@@ -7,8 +7,10 @@ const prisma = new PrismaClient();
 const EXCEL_DIR = process.env.BPM_EXCEL_DIR ?? fileURLToPath(new URL('./data/3q', import.meta.url));
 const APPLY = process.env.APPLY_EXCEL_IMPORT === '1';
 const ONLY_ONCE = process.env.IMPORT_EXCEL_ONCE === '1';
-const PREVIOUS_IMPORT_KEY = 'excel-3q-2026-semana-28-v2';
-const IMPORT_KEY = 'excel-3q-2026-semana-28-v3';
+const PREVIOUS_IMPORT_KEYS = ['excel-3q-2026-semana-28-v2', 'excel-3q-2026-semana-28-v3'];
+// v4 fuerza el backfill de los 122 pedidos y sus renglones aun cuando una versión
+// anterior ya hubiera importado únicamente inventarios, facturas o cierres.
+const IMPORT_KEY = 'excel-3q-2026-pedidos-completos-v4';
 const date = (v: Date | string) => new Date(`${v instanceof Date ? v.toISOString().slice(0, 10) : v.slice(0, 10)}T00:00:00.000Z`);
 const iso = (v: Date) => v.toISOString().slice(0, 10);
 function n(v: ExcelJS.CellValue): number {
@@ -56,6 +58,7 @@ function precioImportado(p: { precio_venta_fijo: Prisma.Decimal | null; ultimo_c
 
 async function main() {
   const org = await prisma.negocios.findFirstOrThrow({ where: { nombre: 'Burrito Parrilla Mexicana' } });
+  let baseAnteriorAplicada = false;
   if (APPLY && ONLY_ONCE) {
     const aplicada = await prisma.importaciones_sistema.findUnique({
       where: { negocio_id_clave: { negocio_id: org.id, clave: IMPORT_KEY } },
@@ -64,15 +67,9 @@ async function main() {
       console.log(`✅ Importación ${IMPORT_KEY} ya aplicada; no se restablecieron datos.`);
       return;
     }
-    const anterior = await prisma.importaciones_sistema.findUnique({
-      where: { negocio_id_clave: { negocio_id: org.id, clave: PREVIOUS_IMPORT_KEY } },
-    });
-    if (anterior) {
-      await actualizarCierresHistoricos(org.id);
-      await prisma.importaciones_sistema.create({ data: { negocio_id: org.id, clave: IMPORT_KEY } });
-      console.log('✅ Totales históricos de Billing 27 y 28 agregados sin restablecer pedidos ni inventario.');
-      return;
-    }
+    baseAnteriorAplicada = await prisma.importaciones_sistema.count({
+      where: { negocio_id: org.id, clave: { in: PREVIOUS_IMPORT_KEYS } },
+    }) > 0;
   }
   const admin = await prisma.usuarios.findFirstOrThrow({ where: { negocio_id: org.id, rol: 'admin', activo: true }, orderBy: { id: 'asc' } });
   const ubicaciones = await prisma.ubicaciones.findMany({ where: { negocio_id: org.id, empresa_cliente_id: { not: null } } });
@@ -150,22 +147,28 @@ async function main() {
     for (const p of pedidos) {
       const pedido = await tx.pedidos_operativos.upsert({
         where: { ubicacion_id_linea_operacion_fecha_entrega: { ubicacion_id: p.ubicacionId, linea_operacion: p.linea, fecha_entrega: p.entrega } },
-        update: { empresa_cliente_id: p.empresaId, estado: p.cerrada ? 'cerrado' : 'confirmado', notas: `Importado Excel semana ${p.semana}` },
-        create: { negocio_id: org.id, empresa_cliente_id: p.empresaId, ubicacion_id: p.ubicacionId, linea_operacion: p.linea, fecha_entrega: p.entrega, estado: p.cerrada ? 'cerrado' : 'confirmado', capturado_por: admin.id, confirmado_at: p.entrega, notas: `Importado Excel semana ${p.semana}` },
+        update: { empresa_cliente_id: p.empresaId, estado: p.cerrada ? 'cerrado' : 'confirmado' },
+        create: { negocio_id: org.id, empresa_cliente_id: p.empresaId, ubicacion_id: p.ubicacionId, linea_operacion: p.linea, fecha_entrega: p.entrega, estado: p.cerrada ? 'cerrado' : 'confirmado', capturado_por: admin.id, confirmado_at: p.entrega, notas: null },
       });
+      if (pedido.notas?.startsWith('Importado Excel semana ')) await tx.pedidos_operativos.update({ where: { id: pedido.id }, data: { notas: null } });
       await tx.pedido_operativo_lineas.deleteMany({ where: { pedido_id: pedido.id } });
       await tx.pedido_operativo_lineas.createMany({ data: p.lineas.map((l) => ({ pedido_id: pedido.id, product_id: l.productId, cantidad: l.cantidad, precio_unitario: l.precio })) });
     }
   });
-  await importarInventarioInicial(org.id, admin.id, porSku, porNombre);
-  await importarSaldosPendientes(org.id, admin.id);
+  // En bases ya inicializadas solo se completan pedidos: no se toca el inventario
+  // vivo ni se recrean saldos. Una instalación nueva sí recibe el snapshot completo.
+  if (!baseAnteriorAplicada) {
+    await importarInventarioInicial(org.id, admin.id, porSku, porNombre);
+    await importarSaldosPendientes(org.id, admin.id);
+  }
   await actualizarCierresHistoricos(org.id);
   await prisma.importaciones_sistema.upsert({
     where: { negocio_id_clave: { negocio_id: org.id, clave: IMPORT_KEY } },
     update: { aplicado_at: new Date() },
     create: { negocio_id: org.id, clave: IMPORT_KEY },
   });
-  console.log('✅ Semanas 27 y 28, semana 29, inventarios, cuentas por cobrar y cuentas por pagar importados.');
+  console.log(`✅ Backfill completo: ${pedidos.length} pedidos y ${pedidos.reduce((a, p) => a + p.lineas.length, 0)} renglones por sucursal.`);
+  if (baseAnteriorAplicada) console.log('   Inventario y saldos existentes se conservaron sin cambios.');
 }
 
 async function actualizarCierresHistoricos(negocioId: bigint) {
