@@ -40,9 +40,9 @@ const carne = [
   { nombre: 'Outside Skirt', sku: 'RAW-OUTSIDE-SKIRT', tipo: 'materia_prima' as const, peso: 65.055, markup: 0, dias: [] },
   { nombre: 'Inside Round', sku: 'RAW-INSIDE-ROUND', tipo: 'materia_prima' as const, peso: 72.55, markup: 0, dias: [] },
   { nombre: 'Tapatíos Taco Meat Raw', sku: 'RAW-TAPATIOS-TACO', tipo: 'materia_prima' as const, peso: 59.167, markup: 0, dias: [] },
-  // Pesos de salida configurables. Steak/Carne/Fajitas siguen los pesos confirmados por el usuario.
+  // Cajas terminadas: 20 lb; únicamente Carne Asada y Fajitas usan caja de 10 lb.
   { nombre: 'Steak Taco', sku: 'MEAT-STEAK', tipo: 'proteina' as const, peso: 20, costo: 205.8387, markup: 15, dias: [2, 5] },
-  { nombre: 'Chicken', sku: 'MEAT-CHICKEN', tipo: 'proteina' as const, peso: 40, costo: 37.213, markup: 15, dias: [3, 6] },
+  { nombre: 'Chicken', sku: 'MEAT-CHICKEN', tipo: 'proteina' as const, peso: 20, costo: 37.213, markup: 15, dias: [3, 6] },
   { nombre: 'Al Pastor BPM', sku: 'MEAT-PASTOR-BPM', tipo: 'proteina' as const, peso: 20, costo: 59.4189, markup: 15, dias: [1, 4] },
   { nombre: 'Al Pastor Tapatíos', sku: 'MEAT-PASTOR-TAP', tipo: 'proteina' as const, peso: 20, costo: 59.4189, markup: 15, dias: [1, 4] },
   { nombre: 'Tapatíos Taco Meat', sku: 'MEAT-TAPATIOS-TACO', tipo: 'proteina' as const, peso: 20, costo: 129.6953, markup: 15, dias: [1, 4] },
@@ -70,7 +70,7 @@ const rutas: { codigo: string; nombre: string; linea: LineaOperacion; dia: numbe
 ];
 
 async function seedDesechables(negocioId: bigint) {
-  for (const [nombre, costo, venta] of desechables) {
+  for (const [indice, [nombre, costo, venta]] of desechables.entries()) {
     const producto = await prisma.products.findFirst({ where: { negocio_id: negocioId, nombre: { equals: nombre, mode: 'insensitive' } } });
     if (!producto) throw new Error(`El catálogo actual no contiene el desechable: ${nombre}`);
     await prisma.products.update({
@@ -79,6 +79,7 @@ async function seedDesechables(negocioId: bigint) {
         linea_operacion: producto.linea_operacion ?? 'desechables', tipo_operativo: producto.tipo_operativo ?? 'desechable',
         costo_promedio: producto.costo_promedio ?? costo, ultimo_costo: producto.ultimo_costo ?? costo,
         precio_venta_fijo: producto.precio_venta_fijo ?? venta,
+        orden_operativo: indice + 1,
       },
     });
   }
@@ -88,6 +89,7 @@ async function main() {
   const org = await prisma.negocios.findFirstOrThrow({ where: { nombre: 'Burrito Parrilla Mexicana' } });
   if (!org.inventario_dias.length) await prisma.negocios.update({ where: { id: org.id }, data: { inventario_dias: [3] } });
   const caja = await prisma.unidades.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Caja' } }, update: {}, create: { negocio_id: org.id, nombre: 'Caja' } });
+  const pieza = await prisma.unidades.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Pieza' } }, update: {}, create: { negocio_id: org.id, nombre: 'Pieza' } });
   const catCarne = await prisma.categorias.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Carnicería' } }, update: {}, create: { negocio_id: org.id, nombre: 'Carnicería', orden: 0 } });
 
   const empresas = {
@@ -104,11 +106,33 @@ async function main() {
   await prisma.ubicaciones.update({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'BURLI' } }, data: { entrega_en_ubicacion_id: aurora.id } });
   const carniceria = await prisma.ubicaciones.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'CARN' } }, update: {}, create: { negocio_id: org.id, nombre: 'Carnicería', codigo: 'CARN', tipo: 'bodega' } });
 
+  // Mismo orden horizontal que Weekly Order/Billing. Los proyectos inactivos conservan
+  // su posición para que al abrirlos no cambie el libro ni la captura semanal.
+  const ordenUbicaciones = ['LOMBA', 'NAPER', 'CAROL', 'LISLE', 'GLEND', 'WESTC', 'BATAV', 'ALGON', 'NAPER2', 'ROLLI', 'SCHAU', 'CRYST', 'LAKEZ', 'FRANK', 'PLAIN', 'AUROR', 'BURLI', 'TGE', 'TST', 'TLO', 'TNA', 'TBO'];
+  for (const [indice, codigo] of ordenUbicaciones.entries()) {
+    await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo }, data: { orden_operativo: indice + 1 } });
+  }
+
   await seedDesechables(org.id);
+  const ordenCarne: Record<string, number> = {
+    'MEAT-STEAK': 1, 'MEAT-CHICKEN': 2, 'MEAT-PASTOR-BPM': 3, 'MEAT-PASTOR-TAP': 3,
+    'MEAT-ASADA': 4, 'MEAT-FAJITAS': 5, 'MEAT-MILANESA': 6, 'MEAT-TAMAL': 7,
+    'MEAT-CHILE': 8, 'MEAT-DORADO': 9, 'MEAT-ADOBO': 10, 'MEAT-CARNITAS': 11,
+    'MEAT-CATERING': 12, 'MEAT-PULPA': 13, 'MEAT-TAPATIOS-TACO': 19,
+  };
+  let ordenMateriaPrima = 101;
   for (const p of carne) {
     const costo = 'costo' in p ? p.costo : null;
-    const data = { nombre: p.nombre, categoria_id: catCarne.id, unidad_distribucion_id: caja.id, unidad_compra_id: caja.id, unidad_almacen_id: caja.id, linea_operacion: 'carne' as const, tipo_operativo: p.tipo, requiere_refrigeracion: p.tipo !== 'servicio', peso_caja_lb: p.peso, ultimo_costo: costo, costo_promedio: costo, markup_caja: p.markup, precio_venta_fijo: 'precio' in p ? p.precio : null, produccion_dias: p.dias };
-    const producto = await prisma.products.upsert({ where: { negocio_id_sku: { negocio_id: org.id, sku: p.sku } }, update: {}, create: { negocio_id: org.id, sku: p.sku, ...data } });
+    const esCaja = p.tipo === 'proteina' || p.tipo === 'materia_prima';
+    const pesoNormalizado = p.tipo === 'proteina' ? (['MEAT-ASADA', 'MEAT-FAJITAS'].includes(p.sku) ? 10 : 20) : p.peso;
+    const unidadId = esCaja ? caja.id : pieza.id;
+    const orden = ordenCarne[p.sku] ?? ordenMateriaPrima++;
+    const data = { nombre: p.nombre, categoria_id: catCarne.id, unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, linea_operacion: 'carne' as const, tipo_operativo: p.tipo, requiere_refrigeracion: p.tipo !== 'servicio', peso_caja_lb: pesoNormalizado, ultimo_costo: costo, costo_promedio: costo, markup_caja: p.markup, precio_venta_fijo: 'precio' in p ? p.precio : null, produccion_dias: p.dias, orden_operativo: orden };
+    const producto = await prisma.products.upsert({
+      where: { negocio_id_sku: { negocio_id: org.id, sku: p.sku } },
+      update: { unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, peso_caja_lb: pesoNormalizado, orden_operativo: orden },
+      create: { negocio_id: org.id, sku: p.sku, ...data },
+    });
     if (costo != null && producto.ultimo_costo == null) await prisma.products.update({ where: { id: producto.id }, data: { ultimo_costo: costo, costo_promedio: producto.costo_promedio ?? costo } });
   }
   for (const nombre of ['Christ Panos', 'Gordon', 'Sysco', 'Amigos', 'Super Clean', 'BRD']) {

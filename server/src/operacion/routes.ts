@@ -59,9 +59,19 @@ operacionRouter.get('/produccion', soloAdmin, asyncHandler(async (req, res) => {
 operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     proveedor_id: id, ubicacion_id: id, fecha, referencia: z.string().trim().max(120).nullable().optional(),
-    lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().positive(), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
+    lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
   res.status(201).json(await svc.registrarCompra(req.auth!.negocioId, req.auth!.usuarioId, b));
+}));
+
+/** Captura directa del inventario físico final, en el mismo orden del libro semanal. */
+operacionRouter.put('/inventario-final', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({
+    ubicacion_id: id,
+    fecha,
+    lineas: z.array(z.object({ product_id: id, cantidad: z.coerce.number().nonnegative() })).min(1),
+  }).parse(req.body);
+  res.json(await svc.guardarInventarioFinal(req.auth!.negocioId, req.auth!.usuarioId, b));
 }));
 
 operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => {

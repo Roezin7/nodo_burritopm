@@ -29,6 +29,6 @@ EXPOSE 3100
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
   CMD curl -fsS http://localhost:3100/api/health || exit 1
 
-# Migraciones + bootstraps idempotentes. El seed operativo solo crea lo faltante y
-# conserva precios, pesos, rutas y calendario que el admin haya modificado.
+# Migraciones + bootstraps idempotentes. El seed conserva precios y rutas existentes,
+# y vuelve a aplicar el orden de los libros y las unidades normalizadas de producción.
 CMD ["sh", "-c", "npx --workspace server prisma migrate deploy && npm run seed -w server && npm run seed:operacion -w server && APPLY_EXCEL_IMPORT=1 IMPORT_EXCEL_ONCE=1 npm run import:excel:3q -w server && npm start"]

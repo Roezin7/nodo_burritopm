@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
+import { useToast } from '../../toast';
 
 type Linea = 'todas' | 'carne' | 'desechables';
 
@@ -34,8 +35,11 @@ interface Stock {
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
-export default function InventarioOperacion() {
+const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+
+export default function InventarioOperacion({ integrado = false }: { integrado?: boolean }) {
   const { usuario } = useAuth();
+  const toast = useToast();
   const admin = usuario?.rol === 'admin';
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [almacenId, setAlmacenId] = useState('');
@@ -43,6 +47,10 @@ export default function InventarioOperacion() {
   const [linea, setLinea] = useState<Linea>('todas');
   const [buscar, setBuscar] = useState('');
   const [error, setError] = useState('');
+  const [editando, setEditando] = useState(false);
+  const [cantidades, setCantidades] = useState<Record<number, string>>({});
+  const [fecha, setFecha] = useState(hoy());
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api<{ ubicaciones: Almacen[] }>('/operacion/catalogo').then((c) => {
@@ -66,10 +74,10 @@ export default function InventarioOperacion() {
     const q = buscar.trim().toLowerCase();
     return (stock?.items ?? []).filter((i) => {
       if (linea !== 'todas' && i.linea !== linea) return false;
-      if (q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
-      return i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0;
+      if (!editando && q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
+      return editando || i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0;
     });
-  }, [stock, linea, buscar]);
+  }, [stock, linea, buscar, editando]);
 
   const totales = filas.reduce((a, i) => ({
     disponible: a.disponible + i.disponible,
@@ -78,11 +86,32 @@ export default function InventarioOperacion() {
     valor: a.valor + i.valor,
   }), { disponible: 0, reservado: 0, transito: 0, valor: 0 });
 
-  return <div className="page operation-page">
-    <header className="page-head operation-page-head">
-      <div><span className="eyebrow">Control de existencias</span><h1>Inventarios</h1><p className="page-sub">Bodega Addison y Carnicería, separadas por línea y estado físico.</p></div>
-      {admin && <div className="page-actions"><Link className="btn btn-secondary" to="/compras">Registrar compra</Link><Link className="btn btn-primary" to="/produccion">Registrar producción</Link></div>}
-    </header>
+  function iniciarCierre() {
+    setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(i.disponible)])));
+    setEditando(true);
+  }
+
+  async function guardarCierre() {
+    if (!almacenId || !stock) return;
+    setBusy(true); setError('');
+    try {
+      const r = await api<{ ajustes: number }>('/operacion/inventario-final', {
+        method: 'PUT',
+        body: { ubicacion_id: Number(almacenId), fecha, lineas: stock.items.map((i) => ({ product_id: i.product_id, cantidad: Number(cantidades[i.product_id] || 0) })) },
+      });
+      setStock(await api<Stock>(`/existencias?ubicacion=${almacenId}`));
+      setEditando(false);
+      toast.ok(`Inventario guardado · ${r.ajustes} ajustes.`);
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar el inventario.'); }
+    finally { setBusy(false); }
+  }
+
+  return <div className={integrado ? 'operation-embedded inventory-embedded' : 'page operation-page'}>
+    {!integrado && <header className="page-head operation-page-head">
+      <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
+      {admin && <div className="page-actions"><Link className="btn btn-secondary" to="/semana/compras">Compra</Link><Link className="btn btn-primary" to="/semana/produccion">Producción</Link></div>}
+    </header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 4</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">
@@ -97,21 +126,21 @@ export default function InventarioOperacion() {
     {!stock && !error ? <Spinner label="Calculando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
         <div><span>Valor</span><strong>{usd(totales.valor)}</strong></div>
-        <div><span>Disponible</span><strong>{totales.disponible.toLocaleString('es-MX')}</strong></div>
+        <div><span>Existencia</span><strong>{totales.disponible.toLocaleString('es-MX')}</strong></div>
         <div><span>En reserva</span><strong>{totales.reservado.toLocaleString('es-MX')}</strong></div>
         <div><span>En tránsito / hold</span><strong>{totales.transito.toLocaleString('es-MX')}</strong></div>
       </div>
 
       <section className="workspace-card">
         <div className="workspace-card-head">
-          <div><h2>Existencias por producto</h2><p>{filas.length} productos con movimiento</p></div>
-          <input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar producto o SKU" />
+          <div><h2>{editando ? 'Captura física' : 'Productos'}</h2><p>{filas.length} renglones</p></div>
+          {!editando && <input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" />}
         </div>
         <div className="data-list data-list--inventory">
           <div className="data-row data-row--head"><span>Producto</span><span>Disponible</span><span>Reserva</span><span>Tránsito</span><span>Costo</span><span>Valor</span></div>
           {filas.map((i) => <div className="data-row" key={i.product_id}>
             <span className="data-primary"><strong>{i.nombre}</strong><small>{i.sku} · {i.tipo?.replaceAll('_', ' ') ?? i.linea}</small></span>
-            <span data-label="Disponible"><strong>{i.disponible.toLocaleString('es-MX')}</strong> <small>{i.unidad}</small></span>
+            <span data-label="Disponible">{editando ? <div className="input-suffix input-suffix--compact"><input type="number" min="0" step={i.unidad.toLowerCase().includes('pieza') ? '1' : '0.5'} value={cantidades[i.product_id] ?? ''} onChange={(e) => setCantidades({ ...cantidades, [i.product_id]: e.target.value })} /><span>{i.unidad}</span></div> : <><strong>{i.disponible.toLocaleString('es-MX')}</strong> <small>{i.unidad}</small></>}</span>
             <span data-label="Reserva">{i.reservada.toLocaleString('es-MX')}</span>
             <span data-label="Tránsito">{i.transito.toLocaleString('es-MX')}</span>
             <span data-label="Costo">{i.costo_promedio == null ? '—' : usd(i.costo_promedio)}</span>
@@ -120,7 +149,8 @@ export default function InventarioOperacion() {
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
       </section>
-      {admin && <p className="operation-footnote">Los conteos físicos y ajustes extraordinarios siguen disponibles en <Link to="/conteos">Ajustes de inventario</Link>.</p>}
+      {editando && <div className="inventory-capture-actions"><label className="field"><span>Fecha</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
+      {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}
   </div>;
 }

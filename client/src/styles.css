@@ -3393,3 +3393,42 @@ textarea { resize: vertical; }
   .metric-strip--four, .metric-strip--five { grid-template-columns: 1fr 1fr; }
   .metric-strip > div { padding: 0.7rem; }
 }
+
+/* Flujo semanal continuo */
+.weekly-operation { max-width: 1460px; }
+.weekly-operation__head { display: grid; grid-template-columns: auto minmax(620px, 1fr); align-items: end; gap: 2rem; margin-bottom: 1rem; }
+.weekly-operation__head h1 { margin: 0; font-size: clamp(1.55rem, 2.4vw, 2.15rem); }
+.weekly-steps { display: grid; grid-template-columns: repeat(5, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--sh-sm); }
+.weekly-steps a { display: flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 48px; padding: 0.5rem; border-right: 1px solid var(--border); color: var(--ink-3); font-size: 0.78rem; font-weight: 700; text-decoration: none; }
+.weekly-steps a:last-child { border-right: 0; }
+.weekly-steps a span { display: grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--surface-2); font-size: 0.68rem; }
+.weekly-steps a.is-active { background: var(--brand-tint); color: var(--brand); }
+.weekly-steps a.is-active span { background: var(--brand); color: white; }
+.weekly-operation__content { min-width: 0; }
+.operation-embedded, .order-embedded { min-width: 0; }
+.embedded-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+.embedded-head h2 { margin: 0.1rem 0 0; font-size: 1.2rem; }
+.embedded-head--status > div { min-width: 0; }
+.weekly-next { display: flex; align-items: center; justify-content: flex-end; gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.weekly-next > span { color: var(--ink-3); font-size: 0.75rem; }
+.simple-entry-card { padding-bottom: 0; }
+.simple-entry-card .workspace-card-head { align-items: center; }
+.simple-entry-total { display: flex; align-items: center; justify-content: flex-end; gap: 1.2rem; margin: 1rem -1rem 0; padding: 0.8rem 1rem; border-top: 1px solid var(--border); background: var(--surface-2); }
+.simple-entry-total > span { color: var(--ink-3); font-size: 0.8rem; }
+.simple-entry-total strong { color: var(--ink); }
+.inventory-capture-actions { position: sticky; bottom: 0.75rem; display: flex; align-items: end; justify-content: flex-end; gap: 0.6rem; margin-top: 0.8rem; padding: 0.8rem; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--sh-md); backdrop-filter: blur(12px); }
+.inventory-capture-actions .field { margin-right: auto; }
+.inventory-embedded .data-row > span:nth-child(2) { min-width: 120px; }
+
+@media (max-width: 900px) {
+  .weekly-operation__head { grid-template-columns: 1fr; gap: 0.7rem; }
+}
+
+@media (max-width: 620px) {
+  .weekly-operation { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .weekly-steps { overflow-x: auto; grid-template-columns: repeat(5, minmax(88px, 1fr)); }
+  .weekly-steps a { flex-direction: column; gap: 0.2rem; min-height: 58px; font-size: 0.67rem; }
+  .simple-entry-total, .inventory-capture-actions { align-items: stretch; flex-direction: column; }
+  .simple-entry-total .btn, .inventory-capture-actions .btn, .inventory-capture-actions .field { width: 100%; }
+  .weekly-next { justify-content: space-between; }
+}

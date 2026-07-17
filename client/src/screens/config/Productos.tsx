@@ -30,6 +30,7 @@ export interface Producto {
   markup_caja: number;
   peso_caja_lb: number | null;
   produccion_dias: number[];
+  orden_operativo: number;
   activo: boolean;
 }
 
@@ -54,13 +55,14 @@ interface FormState {
   markup_caja: string;
   peso_caja_lb: string;
   produccion_dias: number[];
+  orden_operativo: string;
 }
 
 const VACIO: FormState = {
   id: null, nombre: '', sku: '', categoria_id: '', unidad_distribucion_id: '', unidad_compra_id: '',
   unidad_almacen_id: '', factor_compra_almacen: '1', factor_almacen_distribucion: '1', ultimo_costo: '',
   administrado_bodega: true, requiere_refrigeracion: false, stock_min_bodega: '', stock_seguridad_bodega: '',
-  linea_operacion: '', tipo_operativo: '', precio_venta_fijo: '', markup_caja: '0', peso_caja_lb: '', produccion_dias: [],
+  linea_operacion: '', tipo_operativo: '', precio_venta_fijo: '', markup_caja: '0', peso_caja_lb: '', produccion_dias: [], orden_operativo: '999',
 };
 
 const numOrUndef = (s: string) => (s.trim() === '' ? undefined : Number(s));
@@ -106,6 +108,7 @@ export default function Productos() {
       stock_min_bodega: p.stock_min_bodega?.toString() ?? '', stock_seguridad_bodega: p.stock_seguridad_bodega?.toString() ?? '',
       linea_operacion: p.linea_operacion ?? '', tipo_operativo: p.tipo_operativo ?? '', precio_venta_fijo: p.precio_venta_fijo?.toString() ?? '',
       markup_caja: p.markup_caja.toString(), peso_caja_lb: p.peso_caja_lb?.toString() ?? '', produccion_dias: p.produccion_dias,
+      orden_operativo: p.orden_operativo.toString(),
     });
     setError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -139,6 +142,7 @@ export default function Productos() {
       markup_caja: Number(form.markup_caja || 0),
       peso_caja_lb: form.peso_caja_lb.trim() === '' ? null : Number(form.peso_caja_lb),
       produccion_dias: form.produccion_dias,
+      orden_operativo: Number(form.orden_operativo || 999),
     };
     try {
       if (form.id == null) await api('/catalogo/productos', { method: 'POST', body });
@@ -230,6 +234,7 @@ export default function Productos() {
           <label>Precio de venta fijo (vacío = usar costo)<input value={form.precio_venta_fijo} onChange={(e) => setForm({ ...form, precio_venta_fijo: e.target.value })} inputMode="decimal" placeholder="0.00" /></label>
           <label>Markup por caja (solo proteína)<input value={form.markup_caja} onChange={(e) => setForm({ ...form, markup_caja: e.target.value })} inputMode="decimal" /></label>
           <label>Peso estándar por caja (lb)<input value={form.peso_caja_lb} onChange={(e) => setForm({ ...form, peso_caja_lb: e.target.value })} inputMode="decimal" /></label>
+          <label>Orden en pedidos y libros<input type="number" min="0" value={form.orden_operativo} onChange={(e) => setForm({ ...form, orden_operativo: e.target.value })} inputMode="numeric" /></label>
           <div><span className="muted">Días sugeridos de producción</span><div className="dist-suc-mini">{['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((dia, i) => <label className="chip" key={dia}><input type="checkbox" checked={form.produccion_dias.includes(i)} onChange={(e) => setForm({ ...form, produccion_dias: e.target.checked ? [...form.produccion_dias, i].sort() : form.produccion_dias.filter((d) => d !== i) })} /> {dia}</label>)}</div></div>
         </details>
 

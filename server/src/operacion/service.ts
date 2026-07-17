@@ -43,12 +43,12 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
     prisma.ubicaciones.findMany({
       where: { negocio_id: negocioId, activo: true },
       include: { empresa_cliente: { select: { id: true, nombre: true, codigo: true } }, entrega_en: { select: { id: true, nombre: true } } },
-      orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
+      orderBy: [{ tipo: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
     }),
     prisma.products.findMany({
       where: { negocio_id: negocioId, activo: true, linea_operacion: { not: null } },
       include: { unidad_distribucion: { select: { nombre: true } } },
-      orderBy: [{ linea_operacion: 'asc' }, { tipo_operativo: 'asc' }, { nombre: 'asc' }],
+      orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
     }),
     prisma.proveedores.findMany({ where: { negocio_id: negocioId, activo: true }, orderBy: { nombre: 'asc' } }),
     prisma.plantillas_ruta.findMany({
@@ -65,7 +65,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       entrega_en: u.entrega_en ? { id: Number(u.entrega_en.id), nombre: u.entrega_en.nombre } : null,
     })),
     productos: productos.map((p) => ({
-      id: Number(p.id), nombre: p.nombre, sku: p.sku, linea: p.linea_operacion,
+      id: Number(p.id), nombre: p.nombre, sku: p.sku, linea: p.linea_operacion, orden: p.orden_operativo,
       tipo: p.tipo_operativo, unidad: p.unidad_distribucion.nombre,
       costo: esAdmin ? num(p.ultimo_costo) ?? num(p.costo_promedio) : undefined, precio: precioVentaProducto(p),
       precio_fijo: esAdmin ? num(p.precio_venta_fijo) : undefined, markup: esAdmin ? num0(p.markup_caja) : undefined,
@@ -94,7 +94,7 @@ export async function listarPedidos(
     include: {
       empresa: { select: { id: true, nombre: true, codigo: true } },
       ubicacion: { select: { id: true, nombre: true, entrega_en: { select: { id: true, nombre: true } } } },
-      lineas: { include: { producto: { select: { id: true, nombre: true, sku: true } } }, orderBy: { producto: { nombre: 'asc' } } },
+      lineas: { include: { producto: { select: { id: true, nombre: true, sku: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } },
     },
     orderBy: [{ fecha_entrega: 'desc' }, { ubicacion: { nombre: 'asc' } }],
   });
@@ -261,7 +261,7 @@ export interface CompraInput {
   ubicacion_id: number;
   fecha: string;
   referencia?: string | null;
-  lineas: { product_id: number; cajas: number; peso_total_lb: number; costo_total: number; congelado?: boolean }[];
+  lineas: { product_id: number; cajas: number; peso_total_lb?: number; costo_total: number; congelado?: boolean }[];
 }
 
 export async function registrarCompra(negocioId: bigint, usuarioId: bigint, input: CompraInput) {
@@ -269,10 +269,14 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
   if (!proveedor) throw new HttpError(400, 'Proveedor no válido');
   const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: BigInt(input.ubicacion_id), negocio_id: negocioId, activo: true } });
   if (!ubicacion) throw new HttpError(400, 'Ubicación no válida');
-  if (!input.lineas.length || input.lineas.some((l) => l.cajas <= 0 || l.peso_total_lb <= 0 || l.costo_total < 0)) throw new HttpError(400, 'La compra requiere cajas, peso y costo válidos');
+  if (!input.lineas.length || input.lineas.some((l) => l.cajas <= 0 || l.costo_total < 0)) throw new HttpError(400, 'La compra requiere cantidad y costo válidos');
   const ids = input.lineas.map((l) => BigInt(l.product_id));
-  const productos = await prisma.products.findMany({ where: { id: { in: ids }, negocio_id: negocioId, tipo_operativo: 'materia_prima', activo: true } });
-  if (productos.length !== new Set(ids.map(String)).size) throw new HttpError(400, 'La compra contiene materia prima no válida');
+  const productos = await prisma.products.findMany({ where: { id: { in: ids }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true } });
+  if (productos.length !== new Set(ids.map(String)).size) throw new HttpError(400, 'La compra contiene un producto no válido');
+  for (const l of input.lineas) {
+    const p = productos.find((x) => x.id === BigInt(l.product_id))!;
+    if (p.tipo_operativo === 'materia_prima' && (l.peso_total_lb ?? 0) <= 0) throw new HttpError(400, `${p.nombre} requiere peso total`);
+  }
   const total = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
   const f = fecha(input.fecha);
 
@@ -285,25 +289,63 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
       const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacion.id, product_id: pid } } });
       const prod = productos.find((p) => p.id === pid)!;
       const cajasPrev = Math.max(0, num0(actual?.cantidad_disponible));
-      const pesoPrev = cajasPrev * (num(prod.peso_caja_lb) ?? l.peso_total_lb / l.cajas);
-      const pesoCaja = r3((pesoPrev + l.peso_total_lb) / (cajasPrev + l.cajas));
+      const pesoTotal = l.peso_total_lb ?? 0;
+      const esMateriaPrima = prod.tipo_operativo === 'materia_prima';
+      const pesoPrev = cajasPrev * (num(prod.peso_caja_lb) ?? (pesoTotal > 0 ? pesoTotal / l.cajas : 0));
+      const pesoCaja = esMateriaPrima ? r3((pesoPrev + pesoTotal) / (cajasPrev + l.cajas)) : num(prod.peso_caja_lb);
       const costoCaja = r4(l.costo_total / l.cajas);
-      const cl = await tx.compra_lineas.create({ data: { compra_id: c.id, product_id: pid, cajas: r3(l.cajas), peso_total_lb: r3(l.peso_total_lb), costo_total: r2(l.costo_total), congelado: l.congelado ?? false } });
-      await tx.lotes_materia_prima.create({
-        data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: pid, compra_linea_id: cl.id, fecha: f, congelado: l.congelado ?? false, cajas_iniciales: r3(l.cajas), cajas_disponibles: r3(l.cajas), peso_inicial_lb: r3(l.peso_total_lb), peso_disponible_lb: r3(l.peso_total_lb), costo_inicial: r2(l.costo_total), costo_disponible: r2(l.costo_total) },
-      });
+      const cl = await tx.compra_lineas.create({ data: { compra_id: c.id, product_id: pid, cajas: r3(l.cajas), peso_total_lb: r3(pesoTotal), costo_total: r2(l.costo_total), congelado: esMateriaPrima && (l.congelado ?? false) } });
+      if (esMateriaPrima) {
+        await tx.lotes_materia_prima.create({
+          data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: pid, compra_linea_id: cl.id, fecha: f, congelado: l.congelado ?? false, cajas_iniciales: r3(l.cajas), cajas_disponibles: r3(l.cajas), peso_inicial_lb: r3(pesoTotal), peso_disponible_lb: r3(pesoTotal), costo_inicial: r2(l.costo_total), costo_disponible: r2(l.costo_total) },
+        });
+      }
       await aplicarMovimiento(tx, {
         negocioId, productId: pid, tipo: 'compra_recibida', cantidad: l.cajas, usuarioId,
         destinoId: ubicacion.id, costoUnitario: costoCaja, documentoTipo: 'compra', documentoId: c.id,
-        comentario: `${proveedor.nombre}${l.congelado ? ' · congelado' : ''}`,
+        comentario: `${proveedor.nombre}${esMateriaPrima && l.congelado ? ' · congelado' : ''}`,
         idempotencyKey: `compra:${c.id}:${i}`,
         deltas: [{ ubicacionId: ubicacion.id, productId: pid, disponible: l.cajas, costoUnitario: costoCaja }],
       });
-      await tx.products.update({ where: { id: pid }, data: { ultimo_costo: costoCaja, peso_caja_lb: pesoCaja } });
+      await tx.products.update({ where: { id: pid }, data: { ultimo_costo: costoCaja, peso_caja_lb: esMateriaPrima ? pesoCaja : undefined } });
     }
     return c;
   });
   return { id: Number(compra.id), total, vence_at: iso(compra.vence_at) };
+}
+
+export async function guardarInventarioFinal(
+  negocioId: bigint,
+  usuarioId: bigint,
+  input: { ubicacion_id: number; fecha: string; lineas: { product_id: number; cantidad: number }[] },
+) {
+  const ubicacionId = BigInt(input.ubicacion_id);
+  const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: negocioId, tipo: 'bodega', activo: true } });
+  if (!ubicacion) throw new HttpError(400, 'Almacén no válido');
+  const ids = [...new Set(input.lineas.map((l) => BigInt(l.product_id)))];
+  const productos = await prisma.products.findMany({ where: { id: { in: ids }, negocio_id: negocioId, activo: true } });
+  if (productos.length !== ids.length) throw new HttpError(400, 'El inventario contiene productos no válidos');
+  const sello = `${input.fecha}:${Date.now()}`;
+  let ajustes = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const l of input.lineas) {
+      const productId = BigInt(l.product_id);
+      const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } } });
+      const delta = r3(l.cantidad - num0(actual?.cantidad_disponible));
+      if (Math.abs(delta) < 0.0001) continue;
+      const producto = productos.find((p) => p.id === productId)!;
+      const costo = num(actual?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+      await aplicarMovimiento(tx, {
+        negocioId, productId, tipo: delta > 0 ? 'ajuste_positivo' : 'ajuste_negativo', cantidad: Math.abs(delta), usuarioId,
+        origenId: delta < 0 ? ubicacionId : null, destinoId: delta > 0 ? ubicacionId : null, costoUnitario: costo,
+        documentoTipo: 'inventario_final', comentario: `Inventario físico final · ${input.fecha}`,
+        idempotencyKey: `inventario-final:${ubicacionId}:${sello}:${productId}`,
+        deltas: [{ ubicacionId, productId, disponible: delta, costoUnitario: costo }],
+      });
+      ajustes += 1;
+    }
+  });
+  return { ok: true, ajustes };
 }
 
 export async function cambiarCongelado(negocioId: bigint, loteId: bigint, congelado: boolean) {

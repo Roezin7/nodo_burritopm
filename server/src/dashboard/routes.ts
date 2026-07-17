@@ -206,8 +206,8 @@ dashboardRouter.get(
     const bajoMinimo = parametros.filter((p) => (existenciaDe.get(`${p.ubicacion_id}:${p.product_id}`) ?? 0) < num0(p.stock_min)).length;
 
     const alertas: { tipo: 'cobro' | 'pago' | 'inventario' | 'pedido' | 'reparto'; titulo: string; detalle: string; ruta: string }[] = [];
-    if (vencidoCobrar > 0) alertas.push({ tipo: 'cobro', titulo: 'Facturas vencidas', detalle: `${facturasPendientes.filter((f) => f.vence_at < hoy).length} facturas · $${r2(vencidoCobrar).toLocaleString('en-US')}`, ruta: '/facturacion' });
-    if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/compras' });
+    if (vencidoCobrar > 0) alertas.push({ tipo: 'cobro', titulo: 'Facturas vencidas', detalle: `${facturasPendientes.filter((f) => f.vence_at < hoy).length} facturas · $${r2(vencidoCobrar).toLocaleString('en-US')}`, ruta: '/semana/cierre' });
+    if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/semana/compras' });
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
     const borradores = pedidos.filter((p) => p.estado === 'borrador').length;
     if (borradores > 0) alertas.push({ tipo: 'pedido', titulo: 'Pedidos sin confirmar', detalle: `${borradores} pedidos permanecen en borrador`, ruta: '/pedidos' });

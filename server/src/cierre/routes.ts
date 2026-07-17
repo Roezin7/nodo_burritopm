@@ -40,7 +40,8 @@ cierreRouter.get('/:id/excel/:tipo', asyncHandler(async (req, res) => {
   const semanaId = BigInt(id.parse(req.params.id));
   const tipo = tipoExcel.parse(req.params.tipo);
   const buffer = await generarExcel(req.auth!.negocioId, semanaId, tipo);
+  const nombres = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' } as const;
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${tipo}-week-${req.params.id}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${nombres[tipo]}"`);
   res.send(buffer);
 }));

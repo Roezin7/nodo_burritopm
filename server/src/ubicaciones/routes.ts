@@ -36,7 +36,7 @@ ubicacionesRouter.get(
   asyncHandler(async (req, res) => {
     const ubic = await prisma.ubicaciones.findMany({
       where: { negocio_id: req.auth!.negocioId },
-      orderBy: [{ activo: 'desc' }, { tipo: 'asc' }, { nombre: 'asc' }],
+      orderBy: [{ activo: 'desc' }, { tipo: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
     });
     res.json(ubic.map(dto));
   }),

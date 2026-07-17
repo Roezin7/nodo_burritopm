@@ -17,6 +17,7 @@ import Spinner from './components/Spinner';
 import Pedidos from './screens/operacion/Pedidos';
 import OperacionAdmin from './screens/operacion/OperacionAdmin';
 import InventarioOperacion from './screens/operacion/InventarioOperacion';
+import SemanaOperacion from './screens/operacion/SemanaOperacion';
 import { useState, useEffect, type JSX } from 'react';
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
@@ -54,11 +55,12 @@ function AppBody() {
         <Route path="/inventario" element={<SoloRol roles={['admin', 'encargado_bodega']}><InventarioOperacion /></SoloRol>} />
         <Route path="/conteos" element={<SoloRol roles={['admin', 'encargado_bodega']}><ConteosInventario /></SoloRol>} />
         <Route path="/pedidos" element={<SoloRol roles={['admin', 'encargado_sucursal']}><Pedidos /></SoloRol>} />
-        <Route path="/compras" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="compras" /></SoloRol>} />
-        <Route path="/produccion" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="produccion" /></SoloRol>} />
+        <Route path="/semana/:paso" element={<SoloRol roles={['admin']}><SemanaOperacion /></SoloRol>} />
+        <Route path="/compras" element={<Navigate to="/semana/compras" replace />} />
+        <Route path="/produccion" element={<Navigate to="/semana/produccion" replace />} />
         <Route path="/rutas" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="rutas" /></SoloRol>} />
-        <Route path="/facturacion" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="cierre" /></SoloRol>} />
-        <Route path="/operacion" element={<Navigate to="/compras" replace />} />
+        <Route path="/facturacion" element={<Navigate to="/semana/cierre" replace />} />
+        <Route path="/operacion" element={<Navigate to="/semana/pedidos" replace />} />
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
         <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
         <Route path="/ruta" element={<SoloRol roles={['admin', 'encargado_bodega']}><Ruta /></SoloRol>} />

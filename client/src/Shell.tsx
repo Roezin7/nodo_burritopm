@@ -19,16 +19,14 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/pedidos', label: 'Pedidos', icono: 'clipboard', grupo: 'operacion', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/compras', label: 'Compras', icono: 'cart', grupo: 'operacion', soloAdmin: true },
-  { ruta: '/produccion', label: 'Producción', icono: 'factory', grupo: 'operacion', soloAdmin: true },
-  { ruta: '/inventario', label: 'Inventarios', icono: 'boxes', grupo: 'operacion', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/semana/pedidos', label: 'Semana', icono: 'clipboard', grupo: 'operacion', soloAdmin: true },
+  { ruta: '/pedidos', label: 'Pedidos', icono: 'clipboard', grupo: 'operacion', roles: ['encargado_sucursal'] },
+  { ruta: '/inventario', label: 'Inventario', icono: 'boxes', grupo: 'operacion', roles: ['encargado_bodega'] },
   { ruta: '/rutas', label: 'Rutas', icono: 'map', grupo: 'entregas', soloAdmin: true },
   { ruta: '/distribucion', label: 'Preparación', icono: 'package', grupo: 'entregas', soloAdmin: true },
   { ruta: '/bodega', label: 'Despacho', icono: 'truck', grupo: 'entregas', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/ruta', label: 'Reparto', icono: 'map', grupo: 'entregas', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/recepcion', label: 'Recepción', icono: 'checks', grupo: 'entregas', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/facturacion', label: 'Facturación', icono: 'receipt', grupo: 'sistema', soloAdmin: true },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
   { ruta: '/configuracion', label: 'Configuración', icono: 'settings', grupo: 'sistema', soloAdmin: true },
 ];
@@ -60,7 +58,10 @@ export default function Shell({ children }: { children: ReactNode }) {
   // (si no, roles con pocas secciones se quedaban sin forma de salir en el teléfono).
   const primarios = items.length > MAX_PRIMARIOS ? items.slice(0, MAX_PRIMARIOS) : items;
   const extras = items.length > MAX_PRIMARIOS ? items.slice(MAX_PRIMARIOS) : [];
-  const enMas = extras.some((i) => (i.ruta === '/' ? pathname === '/' : pathname.startsWith(i.ruta)));
+  const itemActivo = (i: Item) => i.ruta === '/'
+    ? pathname === '/'
+    : i.ruta.startsWith('/semana/') ? pathname.startsWith('/semana/') : pathname.startsWith(i.ruta);
+  const enMas = extras.some(itemActivo);
 
   const syncChip = !online ? (
     <span className="ctx-chip ctx-chip--off">
@@ -94,7 +95,7 @@ export default function Shell({ children }: { children: ReactNode }) {
                   key={i.ruta}
                   to={i.ruta}
                   end={i.ruta === '/'}
-                  className={({ isActive }) => (isActive ? 'nav-link nav-link--on' : 'nav-link')}
+                  className={itemActivo(i) ? 'nav-link nav-link--on' : 'nav-link'}
                 >
                   <Icono name={i.icono} size={19} />
                   <span>{i.label}</span>
@@ -143,7 +144,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             key={i.ruta}
             to={i.ruta}
             end={i.ruta === '/'}
-            className={({ isActive }) => (isActive ? 'bottom-link bottom-link--on' : 'bottom-link')}
+            className={itemActivo(i) ? 'bottom-link bottom-link--on' : 'bottom-link'}
           >
             <Icono name={i.icono} size={22} />
             <span>{i.label}</span>
@@ -174,7 +175,7 @@ export default function Shell({ children }: { children: ReactNode }) {
                     to={i.ruta}
                     end={i.ruta === '/'}
                     onClick={() => setMasAbierto(false)}
-                    className={({ isActive }) => (isActive ? 'mas-item mas-item--on' : 'mas-item')}
+                    className={itemActivo(i) ? 'mas-item mas-item--on' : 'mas-item'}
                   >
                     <Icono name={i.icono} size={24} />
                     <span>{i.label}</span>

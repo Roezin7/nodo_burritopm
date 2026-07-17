@@ -133,6 +133,8 @@ model ubicaciones {
   direccion               String?
   tipo                    TipoUbicacion
   activo                  Boolean            @default(true)
+  // Orden de captura/visualización heredado de los libros operativos.
+  orden_operativo         Int                @default(999)
   creado_at               DateTime           @default(now()) @db.Timestamptz(6)
   empresa_cliente_id      BigInt?
   // Burlington se factura por separado, pero físicamente se entrega en Aurora.
@@ -160,6 +162,7 @@ model ubicaciones {
 
   @@unique([negocio_id, codigo])
   @@index([negocio_id])
+  @@index([negocio_id, orden_operativo])
   @@index([empresa_cliente_id])
 }
 
@@ -258,6 +261,8 @@ model products {
   lead_time_dias         Int?
   imagen_url             String?
   activo                 Boolean                @default(true)
+  // Mantiene el renglón exacto del producto en pedidos, inventarios y Excel.
+  orden_operativo        Int                    @default(999)
   linea_operacion        LineaOperacion?
   tipo_operativo         TipoProductoOperacion?
   // Productos no producidos (tamal, chile relleno, adobo, carnitas, pulpa, etc.).
@@ -290,6 +295,7 @@ model products {
   @@unique([negocio_id, sku])
   @@unique([negocio_id, nombre])
   @@index([negocio_id])
+  @@index([negocio_id, orden_operativo])
 }
 
 // ===========================================================================

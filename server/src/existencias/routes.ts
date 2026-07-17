@@ -216,24 +216,32 @@ existenciasRouter.get(
     const ubicacionId = BigInt(z.coerce.number().int().positive().parse(req.query.ubicacion));
     if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
 
-    const filas = await prisma.existencias.findMany({
-      where: { ubicacion_id: ubicacionId },
-      include: { products: { include: { unidad_distribucion: true } } },
-      orderBy: { products: { nombre: 'asc' } },
-    });
-    const items = filas.map((e) => {
-      const disp = num0(e.cantidad_disponible);
-      const transito = num0(e.cantidad_transito);
-      const costo = num(e.costo_promedio);
+    const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: req.auth!.negocioId } });
+    if (!ubicacion) throw new HttpError(404, 'Ubicación no encontrada');
+    const linea = ubicacion.codigo === 'CARN' ? 'carne' : ubicacion.codigo === 'BOD' ? 'desechables' : undefined;
+    const [productos, filas] = await Promise.all([
+      prisma.products.findMany({
+        where: { negocio_id: req.auth!.negocioId, activo: true, linea_operacion: linea },
+        include: { unidad_distribucion: true },
+        orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
+      }),
+      prisma.existencias.findMany({ where: { ubicacion_id: ubicacionId } }),
+    ]);
+    const porProducto = new Map(filas.map((e) => [e.product_id.toString(), e]));
+    const items = productos.map((producto) => {
+      const e = porProducto.get(producto.id.toString());
+      const disp = num0(e?.cantidad_disponible);
+      const transito = num0(e?.cantidad_transito);
+      const costo = num(e?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
       return {
-        product_id: Number(e.product_id),
-        nombre: e.products.nombre,
-        sku: e.products.sku,
-        linea: e.products.linea_operacion,
-        tipo: e.products.tipo_operativo,
-        unidad: e.products.unidad_distribucion.nombre,
+        product_id: Number(producto.id),
+        nombre: producto.nombre,
+        sku: producto.sku,
+        linea: producto.linea_operacion,
+        tipo: producto.tipo_operativo,
+        unidad: producto.unidad_distribucion.nombre,
         disponible: disp,
-        reservada: num0(e.cantidad_reservada),
+        reservada: num0(e?.cantidad_reservada),
         transito,
         costo_promedio: costo,
         valor: costo != null ? Math.round((disp + transito) * costo * 100) / 100 : 0,

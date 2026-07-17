@@ -132,6 +132,7 @@ function productoDTO(p: ProductoConRel) {
     precio_venta_fijo: num(p.precio_venta_fijo),
     markup_caja: num0(p.markup_caja),
     peso_caja_lb: num(p.peso_caja_lb),
+    orden_operativo: p.orden_operativo,
     produccion_dias: p.produccion_dias,
     activo: p.activo,
   };
@@ -144,7 +145,7 @@ catalogoRouter.get(
     const ps = await prisma.products.findMany({
       where: { negocio_id: req.auth!.negocioId },
       include: { categorias: true, unidad_distribucion: true, unidad_compra: true, unidad_almacen: true },
-      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+      orderBy: [{ activo: 'desc' }, { linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
     });
     res.json(ps.map(productoDTO));
   }),
@@ -173,6 +174,7 @@ const productoSchema = z.object({
   markup_caja: z.coerce.number().nonnegative().optional(),
   peso_caja_lb: z.coerce.number().positive().optional().nullable(),
   produccion_dias: z.array(z.coerce.number().int().min(0).max(6)).max(7).optional(),
+  orden_operativo: z.coerce.number().int().nonnegative().optional(),
 });
 
 /** Valida que categoría y unidades referidas pertenezcan al negocio. */
@@ -228,6 +230,7 @@ catalogoRouter.post(
         markup_caja: b.markup_caja ?? 0,
         peso_caja_lb: b.peso_caja_lb ?? null,
         produccion_dias: [...new Set(b.produccion_dias ?? [])],
+        orden_operativo: b.orden_operativo ?? 999,
       },
     });
     res.status(201).json({ id: Number(p.id) });
@@ -288,6 +291,7 @@ catalogoRouter.patch(
         markup_caja: b.markup_caja,
         peso_caja_lb: b.peso_caja_lb === undefined ? undefined : b.peso_caja_lb,
         produccion_dias: b.produccion_dias === undefined ? undefined : [...new Set(b.produccion_dias)],
+        orden_operativo: b.orden_operativo,
         activo: b.activo,
       },
     });
@@ -311,7 +315,7 @@ catalogoRouter.get(
       prisma.products.findMany({
         where: { negocio_id: req.auth!.negocioId, activo: true },
         include: { categorias: true, unidad_distribucion: true },
-        orderBy: [{ nombre: 'asc' }],
+        orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
       }),
       prisma.producto_ubicacion.findMany({ where: { ubicacion_id: ubicacionId } }),
     ]);

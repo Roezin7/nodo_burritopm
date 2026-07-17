@@ -131,11 +131,13 @@ export default function Home() {
 
   if (esAdmin) return (
     <div className="page admin-home">
-      <header className="page-head operation-page-head"><div><span className="eyebrow">Centro operativo</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Toda la operación de Burrito Parrilla, Carnicería, Aurora y Tapatíos en un solo panorama.</p></div></header>
+      <header className="page-head operation-page-head"><div><span className="eyebrow">Resumen</span><h1>{saludo()}, {usuario.nombre}</h1></div></header>
       <ActivarAvisos />
       <TareaHoy />
       <div className="quick-actions" aria-label="Acciones rápidas">
-        {MODULOS.filter((m) => m.soloAdmin && m.ruta && ['compras', 'produccion', 'rutas', 'facturacion'].includes(m.clave)).map((m) => <Link key={m.clave} to={m.ruta!}><span><Icono name={m.icono} size={20} /></span><strong>{m.titulo}</strong><small>{m.desc}</small></Link>)}
+        <Link to="/semana/pedidos"><span><Icono name="clipboard" size={20} /></span><strong>Abrir semana</strong><small>Pedidos a cierre</small></Link>
+        <Link to="/rutas"><span><Icono name="map" size={20} /></span><strong>Rutas</strong><small>Orden de entrega</small></Link>
+        <Link to="/distribucion"><span><Icono name="package" size={20} /></span><strong>Preparación</strong><small>Pedidos confirmados</small></Link>
       </div>
       <PanelAdmin />
     </div>
