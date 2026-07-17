@@ -2110,6 +2110,72 @@ select:disabled {
 .action-bar-row { display: flex; gap: 0.6rem; }
 .armar-aviso { margin: 0; font-size: 0.85rem; color: var(--warning); font-weight: 600; text-align: center; }
 
+/* Operación de carne, pedidos y cierre semanal */
+.tabs-scroll { overflow-x: auto; flex-wrap: nowrap; }
+.tabs-scroll .tab { white-space: nowrap; }
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+.field { display: flex; flex-direction: column; gap: 0.35rem; }
+.field > span { color: var(--muted); font-size: 0.82rem; font-weight: 650; }
+.field input, .field select { width: 100%; }
+.check-row { display: flex; align-items: center; gap: 0.55rem; min-height: 2.7rem; }
+.notice {
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--border));
+  border-radius: var(--r-card);
+  background: var(--brand-tint);
+  padding: 0.8rem 1rem;
+}
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.8rem;
+}
+.grid-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.55rem;
+  margin: 0.8rem 0;
+}
+.grid-kpis > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+  padding: 0.65rem 0.75rem;
+}
+.grid-kpis small { color: var(--muted); }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(8, 12, 18, 0.62);
+}
+.modal-card {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+  padding: 1.2rem;
+}
+.invoice-print .dist-row { grid-template-columns: 1fr auto; }
+
+@media print {
+  body * { visibility: hidden; }
+  .invoice-print, .invoice-print * { visibility: visible; }
+  .invoice-print { position: fixed; inset: 0; width: 100%; max-height: none; box-shadow: none; }
+  .invoice-print .btn, .invoice-print .icon-btn { display: none; }
+}
+
 /* ── Distribución / consolidado (Bloque 6) ─────────────────────────────────── */
 .card--falt { border-color: color-mix(in srgb, #c0392b 45%, var(--border)); }
 .txt-danger { color: #c0392b; font-weight: 600; }

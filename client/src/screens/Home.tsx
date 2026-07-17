@@ -30,7 +30,7 @@ function TareaHoy() {
           if (ses.programado && ses.conteo?.estado !== 'cerrado') {
             return { titulo: 'Hoy toca pedido', sub: ses.conteo ? 'Continúa el pedido de hoy' : 'Elige cuánto quieres recibir', ruta: '/inventario' };
           }
-          return null;
+          return { titulo: 'Captura tu pedido', sub: 'Carne y desechables por fecha de entrega', ruta: '/pedidos' };
         }
         if (usuario.rol === 'encargado_bodega') {
           const ds = await api<{ estado: string }[]>('/distribuciones');
@@ -95,6 +95,8 @@ interface Modulo {
 }
 
 const MODULOS: Modulo[] = [
+  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y fecha', ruta: '/pedidos', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'operacion', titulo: 'Operación semanal', icono: 'trending', desc: 'Compras, producción, rutas, costo y facturación', ruta: '/operacion', soloAdmin: true },
   { clave: 'inventario', titulo: 'Pedido / inventario', icono: 'clipboard', desc: 'Sucursal pide directo; bodega cuenta físico', ruta: '/inventario' },
   { clave: 'distribucion', titulo: 'Distribución', icono: 'trending', desc: 'Abastecimiento y pedido maestro', ruta: '/distribucion', soloAdmin: true },
   { clave: 'bodega', titulo: 'Bodega y reparto', icono: 'truck', desc: 'Surtir, cargar el camión y entregar', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },

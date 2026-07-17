@@ -93,12 +93,8 @@ export async function crearOActualizarRuta(
   return { ok: true, distribucion_id: Number(distId), estado_distribucion: dist.estado, paradas: paradas.length };
 }
 
-/** Detalle de la ruta de una distribución: paradas ordenadas con sus items y totales. */
-export async function rutaDetalle(negocioId: bigint, distId: bigint) {
-  await cargarDist(negocioId, distId);
-  const ruta = await rutaDeDist(negocioId, distId);
-  if (!ruta) return null;
-
+/** Detalle por ruta concreta. Varias rutas pueden compartir una distribución. */
+async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnType<typeof rutaDeDist>>>) {
   const [paradas, lineas, repartidor] = await Promise.all([
     prisma.ruta_paradas.findMany({
       where: { ruta_id: ruta.id },
@@ -106,8 +102,8 @@ export async function rutaDetalle(negocioId: bigint, distId: bigint) {
       orderBy: { orden: 'asc' },
     }),
     prisma.distribucion_lineas.findMany({
-      where: { distribucion_id: distId },
-      include: { products: { include: { unidad_distribucion: true } } },
+      where: { distribucion_id: ruta.distribucion_id },
+      include: { products: { include: { unidad_distribucion: true } }, ubicaciones: { select: { nombre: true, entrega_en_ubicacion_id: true } } },
     }),
     ruta.repartidor_id
       ? prisma.usuarios.findUnique({ where: { id: ruta.repartidor_id }, select: { id: true, nombre: true } })
@@ -116,7 +112,7 @@ export async function rutaDetalle(negocioId: bigint, distId: bigint) {
 
   const itemsPorUbic = new Map<string, unknown[]>();
   for (const l of lineas) {
-    const k = l.ubicacion_destino_id.toString();
+    const k = (l.ubicaciones.entrega_en_ubicacion_id ?? l.ubicacion_destino_id).toString();
     if (!itemsPorUbic.has(k)) itemsPorUbic.set(k, []);
     itemsPorUbic.get(k)!.push({
       linea_id: Number(l.id),
@@ -125,12 +121,13 @@ export async function rutaDetalle(negocioId: bigint, distId: bigint) {
       unidad: l.products.unidad_distribucion.nombre,
       esperado: cantidadACargar(l),
       recibida: num(l.cantidad_recibida),
+      destino_facturacion: l.ubicaciones.nombre,
     });
   }
 
   return {
     ruta_id: Number(ruta.id),
-    distribucion_id: Number(distId),
+    distribucion_id: Number(ruta.distribucion_id),
     nombre: ruta.nombre,
     estado: ruta.estado,
     repartidor: repartidor ? { id: Number(repartidor.id), nombre: repartidor.nombre } : null,
@@ -148,6 +145,20 @@ export async function rutaDetalle(negocioId: bigint, distId: bigint) {
   };
 }
 
+/** Compatibilidad: detalle de la última ruta de una distribución. */
+export async function rutaDetalle(negocioId: bigint, distId: bigint) {
+  await cargarDist(negocioId, distId);
+  const ruta = await rutaDeDist(negocioId, distId);
+  return ruta ? detalleRuta(negocioId, ruta) : null;
+}
+
+/** Todas las rutas de una distribución (Sur/Norte/etc.). */
+export async function rutasDeDistribucion(negocioId: bigint, distId: bigint) {
+  await cargarDist(negocioId, distId);
+  const rutas = await prisma.rutas.findMany({ where: { negocio_id: negocioId, distribucion_id: distId }, orderBy: { id: 'asc' } });
+  return Promise.all(rutas.map((r) => detalleRuta(negocioId, r)));
+}
+
 /**
  * Monitor del admin: TODO lo que está en la calle. Se basa en las distribuciones en tránsito
  * (no solo en rutas formalmente planeadas): si la distribución tiene ruta, usa su detalle; si no,
@@ -161,8 +172,9 @@ export async function rutasActivas(negocioId: bigint) {
   });
   const out = [];
   for (const d of dists) {
-    const ruta = await rutaDeDist(negocioId, d.id);
-    out.push(ruta ? await rutaDetalle(negocioId, d.id) : await rutaSintetica(negocioId, d.id));
+    const rutas = await prisma.rutas.findMany({ where: { negocio_id: negocioId, distribucion_id: d.id }, orderBy: { id: 'asc' } });
+    if (rutas.length) for (const ruta of rutas) out.push(await detalleRuta(negocioId, ruta));
+    else out.push(await rutaSintetica(negocioId, d.id));
   }
   return out;
 }
@@ -243,7 +255,7 @@ export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint
     },
     orderBy: { id: 'desc' },
   });
-  return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
+  return Promise.all(rutas.map((r) => detalleRuta(negocioId, r)));
 }
 
 /** Historial de rutas ya completadas (las últimas), para "Bodega y reparto" y el admin. */
@@ -253,7 +265,7 @@ export async function rutasHistorial(negocioId: bigint, limite = 30) {
     orderBy: { id: 'desc' },
     take: limite,
   });
-  return Promise.all(rutas.map((r) => rutaDetalle(negocioId, r.distribucion_id)));
+  return Promise.all(rutas.map((r) => detalleRuta(negocioId, r)));
 }
 
 /** Recalcula el estado de la ruta a partir de sus paradas (dentro de una transacción). */
@@ -293,9 +305,11 @@ export async function entregarParada(
   }
 
   const entregado = new Map((datos.items ?? []).map((i) => [i.linea_id, Math.max(0, i.cantidad)]));
-  const lineas = await prisma.distribucion_lineas.findMany({
-    where: { distribucion_id: ruta.distribucion_id, ubicacion_destino_id: parada.ubicacion_id },
+  const candidatas = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: ruta.distribucion_id },
+    include: { ubicaciones: { select: { entrega_en_ubicacion_id: true } } },
   });
+  const lineas = candidatas.filter((l) => (l.ubicaciones.entrega_en_ubicacion_id ?? l.ubicacion_destino_id) === parada.ubicacion_id);
 
   let hayFaltante = false;
   const faltantes: { linea: (typeof lineas)[number]; esperado: number; entregada: number }[] = [];
@@ -356,14 +370,15 @@ export async function asegurarRutaEnCurso(
   usuarioId: bigint,
   sucursalesConCarga?: Set<string>,
 ) {
-  const existente = await tx.rutas.findFirst({
+  const existentes = await tx.rutas.findMany({
     where: { negocio_id: negocioId, distribucion_id: distId },
-    orderBy: { id: 'desc' },
+    orderBy: { id: 'asc' },
   });
-  if (existente) {
-    if (existente.estado === 'planificada') {
-      await tx.rutas.update({ where: { id: existente.id }, data: { estado: 'en_curso', despachada_at: new Date() } });
-    }
+  if (existentes.length) {
+    await tx.rutas.updateMany({
+      where: { id: { in: existentes.filter((r) => r.estado === 'planificada').map((r) => r.id) } },
+      data: { estado: 'en_curso', despachada_at: new Date() },
+    });
     return;
   }
   const lineas = await tx.distribucion_lineas.findMany({
@@ -406,16 +421,25 @@ export async function sellarParadaPorRecepcion(
   ubicacionId: bigint,
   conIncidencia: boolean,
 ) {
-  const ruta = await tx.rutas.findFirst({
-    where: { negocio_id: negocioId, distribucion_id: distId },
-    orderBy: { id: 'desc' },
+  const destino = await tx.ubicaciones.findUnique({ where: { id: ubicacionId }, select: { entrega_en_ubicacion_id: true } });
+  const puntoFisico = destino?.entrega_en_ubicacion_id ?? ubicacionId;
+  const parada = await tx.ruta_paradas.findFirst({
+    where: { ubicacion_id: puntoFisico, rutas: { negocio_id: negocioId, distribucion_id: distId } },
+    include: { rutas: true },
   });
-  if (!ruta) return;
-  const parada = await tx.ruta_paradas.findFirst({ where: { ruta_id: ruta.id, ubicacion_id: ubicacionId } });
   if (!parada) return;
+  // Aurora y Burlington comparten parada: no se confirma hasta recibir ambos pedidos.
+  const destinosFisicos = await tx.ubicaciones.findMany({
+    where: { negocio_id: negocioId, OR: [{ id: puntoFisico }, { entrega_en_ubicacion_id: puntoFisico }] },
+    select: { id: true },
+  });
+  const pendientes = await tx.distribucion_lineas.count({
+    where: { distribucion_id: distId, ubicacion_destino_id: { in: destinosFisicos.map((u) => u.id) }, cantidad_recibida: null },
+  });
+  if (pendientes > 0) return;
   await tx.ruta_paradas.update({
     where: { id: parada.id },
     data: { estado: conIncidencia ? 'con_incidencia' : 'confirmada', confirmada_at: new Date() },
   });
-  await recomputarRuta(tx, ruta.id);
+  await recomputarRuta(tx, parada.ruta_id);
 }

@@ -13,6 +13,8 @@
     "prisma:introspect": "prisma db pull",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "seed:operacion": "tsx prisma/seed-operacion.ts",
+    "import:excel:3q": "tsx prisma/import-excel-3q.ts",
     "test": "vitest run"
   },
   "prisma": {
@@ -26,6 +28,7 @@
     "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.0.0",

@@ -12,6 +12,8 @@ import { existenciasRouter } from '../existencias/routes.js';
 import { incidenciasRouter } from '../incidencias/routes.js';
 import { negocioRouter } from '../negocio/routes.js';
 import { pushRouter } from '../push/routes.js';
+import { operacionRouter } from '../operacion/routes.js';
+import { cierreRouter } from '../cierre/routes.js';
 
 export const apiRouter = Router();
 
@@ -37,3 +39,5 @@ apiRouter.use('/existencias', existenciasRouter); // Bloque 8
 apiRouter.use('/incidencias', incidenciasRouter); // Bloque 11
 apiRouter.use('/negocio', negocioRouter); // settings de operación
 apiRouter.use('/push', pushRouter); // avisos web push
+apiRouter.use('/operacion', operacionRouter); // carne + desechables, compras, producción y rutas programadas
+apiRouter.use('/cierre', cierreRouter); // cierre semanal, facturación, pagos y Excel

@@ -225,6 +225,16 @@ distribucionesRouter.get(
   }),
 );
 
+/** GET /distribuciones/:id/rutas — todas las rutas de la distribución (Sur/Norte/etc.). */
+distribucionesRouter.get(
+  '/:id/rutas',
+  requireRole('admin', 'encargado_bodega'),
+  asyncHandler(async (req, res) => {
+    const id = BigInt(idParam.parse(req.params.id));
+    res.json(await rutas.rutasDeDistribucion(req.auth!.negocioId, id));
+  }),
+);
+
 /** PUT /distribuciones/:id/ruta { repartidor_id?, nombre?, paradas:[{ubicacion_id,orden}] } */
 distribucionesRouter.put(
   '/:id/ruta',

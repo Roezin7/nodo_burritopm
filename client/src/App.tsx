@@ -14,6 +14,8 @@ import OfflineBanner from './OfflineBanner';
 import Shell from './Shell';
 import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
+import Pedidos from './screens/operacion/Pedidos';
+import OperacionAdmin from './screens/operacion/OperacionAdmin';
 import { useState, useEffect, type JSX } from 'react';
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
@@ -49,6 +51,8 @@ function AppBody() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/inventario" element={<SoloRol roles={['admin', 'encargado_bodega', 'encargado_sucursal']}><Inventario /></SoloRol>} />
+        <Route path="/pedidos" element={<SoloRol roles={['admin', 'encargado_sucursal']}><Pedidos /></SoloRol>} />
+        <Route path="/operacion" element={<SoloRol roles={['admin']}><OperacionAdmin /></SoloRol>} />
         <Route path="/distribucion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
         <Route path="/bodega" element={<SoloRol roles={['admin', 'encargado_bodega']}><Bodega /></SoloRol>} />
         <Route path="/ruta" element={<SoloRol roles={['admin', 'encargado_bodega']}><Ruta /></SoloRol>} />

@@ -18,6 +18,8 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Inicio', icono: 'home' },
+  { ruta: '/pedidos', label: 'Pedidos', icono: 'clipboard', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/operacion', label: 'Operación', icono: 'trending', soloAdmin: true },
   { ruta: '/inventario', label: 'Inventario', icono: 'clipboard', roles: ['admin', 'encargado_bodega', 'encargado_sucursal'] },
   { ruta: '/distribucion', label: 'Distribución', icono: 'trending', soloAdmin: true },
   { ruta: '/bodega', label: 'Bodega y reparto', icono: 'truck', roles: ['admin', 'encargado_bodega'] },

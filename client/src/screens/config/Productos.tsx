@@ -24,6 +24,12 @@ export interface Producto {
   stock_min_bodega: number | null;
   stock_seguridad_bodega: number | null;
   lead_time_dias: number | null;
+  linea_operacion: 'carne' | 'desechables' | null;
+  tipo_operativo: 'desechable' | 'materia_prima' | 'proteina' | 'precio_fijo' | 'servicio' | null;
+  precio_venta_fijo: number | null;
+  markup_caja: number;
+  peso_caja_lb: number | null;
+  produccion_dias: number[];
   activo: boolean;
 }
 
@@ -42,12 +48,19 @@ interface FormState {
   requiere_refrigeracion: boolean;
   stock_min_bodega: string;
   stock_seguridad_bodega: string;
+  linea_operacion: string;
+  tipo_operativo: string;
+  precio_venta_fijo: string;
+  markup_caja: string;
+  peso_caja_lb: string;
+  produccion_dias: number[];
 }
 
 const VACIO: FormState = {
   id: null, nombre: '', sku: '', categoria_id: '', unidad_distribucion_id: '', unidad_compra_id: '',
   unidad_almacen_id: '', factor_compra_almacen: '1', factor_almacen_distribucion: '1', ultimo_costo: '',
   administrado_bodega: true, requiere_refrigeracion: false, stock_min_bodega: '', stock_seguridad_bodega: '',
+  linea_operacion: '', tipo_operativo: '', precio_venta_fijo: '', markup_caja: '0', peso_caja_lb: '', produccion_dias: [],
 };
 
 const numOrUndef = (s: string) => (s.trim() === '' ? undefined : Number(s));
@@ -91,6 +104,8 @@ export default function Productos() {
       ultimo_costo: p.ultimo_costo?.toString() ?? '',
       administrado_bodega: p.administrado_bodega, requiere_refrigeracion: p.requiere_refrigeracion,
       stock_min_bodega: p.stock_min_bodega?.toString() ?? '', stock_seguridad_bodega: p.stock_seguridad_bodega?.toString() ?? '',
+      linea_operacion: p.linea_operacion ?? '', tipo_operativo: p.tipo_operativo ?? '', precio_venta_fijo: p.precio_venta_fijo?.toString() ?? '',
+      markup_caja: p.markup_caja.toString(), peso_caja_lb: p.peso_caja_lb?.toString() ?? '', produccion_dias: p.produccion_dias,
     });
     setError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -118,6 +133,12 @@ export default function Productos() {
       requiere_refrigeracion: form.requiere_refrigeracion,
       stock_min_bodega: form.stock_min_bodega.trim() === '' ? null : Number(form.stock_min_bodega),
       stock_seguridad_bodega: form.stock_seguridad_bodega.trim() === '' ? null : Number(form.stock_seguridad_bodega),
+      linea_operacion: form.linea_operacion || null,
+      tipo_operativo: form.tipo_operativo || null,
+      precio_venta_fijo: form.precio_venta_fijo.trim() === '' ? null : Number(form.precio_venta_fijo),
+      markup_caja: Number(form.markup_caja || 0),
+      peso_caja_lb: form.peso_caja_lb.trim() === '' ? null : Number(form.peso_caja_lb),
+      produccion_dias: form.produccion_dias,
     };
     try {
       if (form.id == null) await api('/catalogo/productos', { method: 'POST', body });
@@ -194,6 +215,24 @@ export default function Productos() {
           <input value={form.ultimo_costo} onChange={(e) => setForm({ ...form, ultimo_costo: e.target.value })} inputMode="decimal" placeholder="0.00" />
         </label>
 
+        <details className="prod-extra" open={form.linea_operacion === 'carne'}>
+          <summary>Operación semanal y facturación</summary>
+          <label>Línea
+            <select value={form.linea_operacion} onChange={(e) => setForm({ ...form, linea_operacion: e.target.value })}>
+              <option value="">— Catálogo general —</option><option value="carne">Carne</option><option value="desechables">Desechables</option>
+            </select>
+          </label>
+          <label>Tipo operativo
+            <select value={form.tipo_operativo} onChange={(e) => setForm({ ...form, tipo_operativo: e.target.value })}>
+              <option value="">— Ninguno —</option><option value="desechable">Desechable</option><option value="materia_prima">Materia prima</option><option value="proteina">Proteína producida</option><option value="precio_fijo">Precio fijo</option><option value="servicio">Servicio / catering</option>
+            </select>
+          </label>
+          <label>Precio de venta fijo (vacío = usar costo)<input value={form.precio_venta_fijo} onChange={(e) => setForm({ ...form, precio_venta_fijo: e.target.value })} inputMode="decimal" placeholder="0.00" /></label>
+          <label>Markup por caja (solo proteína)<input value={form.markup_caja} onChange={(e) => setForm({ ...form, markup_caja: e.target.value })} inputMode="decimal" /></label>
+          <label>Peso estándar por caja (lb)<input value={form.peso_caja_lb} onChange={(e) => setForm({ ...form, peso_caja_lb: e.target.value })} inputMode="decimal" /></label>
+          <div><span className="muted">Días sugeridos de producción</span><div className="dist-suc-mini">{['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((dia, i) => <label className="chip" key={dia}><input type="checkbox" checked={form.produccion_dias.includes(i)} onChange={(e) => setForm({ ...form, produccion_dias: e.target.checked ? [...form.produccion_dias, i].sort() : form.produccion_dias.filter((d) => d !== i) })} /> {dia}</label>)}</div></div>
+        </details>
+
         <label className="ubic-check">
           <input type="checkbox" checked={form.administrado_bodega} onChange={(e) => setForm({ ...form, administrado_bodega: e.target.checked })} />
           <span>Se administra desde la bodega central</span>
@@ -236,6 +275,7 @@ export default function Productos() {
                   <div className="muted">
                     {p.sku}
                     {p.ultimo_costo != null ? ` · $${p.ultimo_costo.toFixed(2)}` : ' · sin costo'}
+                    {p.linea_operacion ? ` · ${p.linea_operacion}` : ''}{p.peso_caja_lb ? ` · ${p.peso_caja_lb} lb/caja` : ''}
                   </div>
                 </div>
                 <div className="form-actions">

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { num } from '../lib/num.js';
+import { num, num0 } from '../lib/num.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
 
@@ -127,6 +127,12 @@ function productoDTO(p: ProductoConRel) {
     stock_min_bodega: num(p.stock_min_bodega),
     stock_seguridad_bodega: num(p.stock_seguridad_bodega),
     lead_time_dias: p.lead_time_dias,
+    linea_operacion: p.linea_operacion,
+    tipo_operativo: p.tipo_operativo,
+    precio_venta_fijo: num(p.precio_venta_fijo),
+    markup_caja: num0(p.markup_caja),
+    peso_caja_lb: num(p.peso_caja_lb),
+    produccion_dias: p.produccion_dias,
     activo: p.activo,
   };
 }
@@ -161,6 +167,12 @@ const productoSchema = z.object({
   stock_min_bodega: z.coerce.number().nonnegative().optional().nullable(),
   stock_seguridad_bodega: z.coerce.number().nonnegative().optional().nullable(),
   lead_time_dias: z.coerce.number().int().nonnegative().optional().nullable(),
+  linea_operacion: z.enum(['carne', 'desechables']).optional().nullable(),
+  tipo_operativo: z.enum(['desechable', 'materia_prima', 'proteina', 'precio_fijo', 'servicio']).optional().nullable(),
+  precio_venta_fijo: z.coerce.number().nonnegative().optional().nullable(),
+  markup_caja: z.coerce.number().nonnegative().optional(),
+  peso_caja_lb: z.coerce.number().positive().optional().nullable(),
+  produccion_dias: z.array(z.coerce.number().int().min(0).max(6)).max(7).optional(),
 });
 
 /** Valida que categoría y unidades referidas pertenezcan al negocio. */
@@ -210,6 +222,12 @@ catalogoRouter.post(
         stock_min_bodega: b.stock_min_bodega ?? null,
         stock_seguridad_bodega: b.stock_seguridad_bodega ?? null,
         lead_time_dias: b.lead_time_dias ?? null,
+        linea_operacion: b.linea_operacion ?? null,
+        tipo_operativo: b.tipo_operativo ?? null,
+        precio_venta_fijo: b.precio_venta_fijo ?? null,
+        markup_caja: b.markup_caja ?? 0,
+        peso_caja_lb: b.peso_caja_lb ?? null,
+        produccion_dias: [...new Set(b.produccion_dias ?? [])],
       },
     });
     res.status(201).json({ id: Number(p.id) });
@@ -264,6 +282,12 @@ catalogoRouter.patch(
         stock_min_bodega: b.stock_min_bodega === undefined ? undefined : b.stock_min_bodega,
         stock_seguridad_bodega: b.stock_seguridad_bodega === undefined ? undefined : b.stock_seguridad_bodega,
         lead_time_dias: b.lead_time_dias === undefined ? undefined : b.lead_time_dias,
+        linea_operacion: b.linea_operacion === undefined ? undefined : b.linea_operacion,
+        tipo_operativo: b.tipo_operativo === undefined ? undefined : b.tipo_operativo,
+        precio_venta_fijo: b.precio_venta_fijo === undefined ? undefined : b.precio_venta_fijo,
+        markup_caja: b.markup_caja,
+        peso_caja_lb: b.peso_caja_lb === undefined ? undefined : b.peso_caja_lb,
+        produccion_dias: b.produccion_dias === undefined ? undefined : [...new Set(b.produccion_dias)],
         activo: b.activo,
       },
     });
