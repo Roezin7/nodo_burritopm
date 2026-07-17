@@ -146,11 +146,12 @@ function Produccion({ catalogo, resumen, busy, setBusy, onDone, setError }: { ca
         <div className="workspace-card-head"><h2>Nueva producción</h2></div>
         <div className="form-grid form-grid--batch">
           <label className="field"><span>Fecha de producción</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => <option key={p.id} value={p.id}>{p.nombre} · {p.peso_caja_lb ?? '?'} lb/caja</option>)}</select></label>
-          <label className="field field--number"><span>Cajas de entrada</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={entrada} onChange={(e) => setEntrada(e.target.value)} /></label>
+          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => <option key={p.id} value={p.id}>{p.nombre} · {p.peso_caja_lb ?? '?'} lb comprada</option>)}</select></label>
+          <label className="field field--number"><span>Cajas de materia prima</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={entrada} onChange={(e) => setEntrada(e.target.value)} /></label>
         </div>
-        <div className="form-divider"><span>Cajas producidas</span></div>
-        <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>{p.peso_caja_lb ?? '?'} lb/caja · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
+        <div className="production-weight-flow"><span><strong>Entrada</strong>{materiaActual?.peso_caja_lb ?? '?'} lb por caja comprada</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
+        <div className="form-divider"><span>Cajas terminadas producidas</span></div>
+        <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>Caja terminada de {p.peso_caja_lb ?? '?'} lb · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
         {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima o revisa el catálogo.</span></div>}
         <div className="form-submit"><button className="btn btn-primary" disabled={busy || !entrada || pesoSalida <= 0} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar producción'}</button></div>
       </section>
@@ -158,12 +159,12 @@ function Produccion({ catalogo, resumen, busy, setBusy, onDone, setError }: { ca
         <span className="eyebrow">Resultado</span><h3>Yield</h3>
         <div className={`yield-number ${yieldActual > 100 ? 'is-alert' : ''}`}>{yieldActual.toFixed(1)}<small>%</small></div>
         <div className="yield-bar"><span style={{ width: `${Math.min(100, yieldActual)}%` }} /></div>
-        <dl><div><dt>Peso de entrada</dt><dd>{pesoEntradaEstimado.toFixed(1)} lb</dd></div><div><dt>Peso de salida</dt><dd>{pesoSalida.toFixed(1)} lb</dd></div><div><dt>Desperdicio</dt><dd>{Math.max(0, pesoEntradaEstimado - pesoSalida).toFixed(1)} lb</dd></div></dl>
+        <dl><div><dt>Materia prima</dt><dd>{pesoEntradaEstimado.toFixed(1)} lb</dd></div><div><dt>Producto terminado</dt><dd>{pesoSalida.toFixed(1)} lb</dd></div><div><dt>Desperdicio</dt><dd>{Math.max(0, pesoEntradaEstimado - pesoSalida).toFixed(1)} lb</dd></div></dl>
       </aside>
     </div>
 
     <section className="workspace-card"><div className="workspace-card-head"><h2>Producción registrada</h2><span>{resumen.producciones.length}</span></div>
-      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span></header><div className="batch-metrics"><span><small>Entrada</small><strong>{p.cajas_entrada} cajas · {p.peso_entrada_lb} lb</strong></span><span><small>Salida</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Desperdicio</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} cajas</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
+      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Desperdicio</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} cajas terminadas</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
     </section>
   </div>;
 }

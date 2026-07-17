@@ -161,7 +161,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
           <section className="workspace-card product-picker">
             <div className="workspace-card-head"><h2>Productos</h2><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" /></div>
             <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
-              <span><strong>{p.nombre}</strong><small>{p.peso_caja_lb ? `${p.peso_caja_lb} lb por caja` : p.unidad} · {usd(p.precio)}</small></span>
+              <span><strong>{p.nombre}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {usd(p.precio)}</small></span>
               <div className="input-suffix input-suffix--compact"><input inputMode="decimal" type="number" min="0" step={esPieza(p) ? '1' : '0.5'} value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>{unidadCorta(p)}</span></div>
             </label>)}</div>
           </section>
@@ -219,7 +219,7 @@ function OrdenImprimible({ datos, catalogo, onClose }: { datos: { linea: Linea; 
   const fechas = [...new Set(datos.pedidos.map((p) => p.fecha_entrega))].sort();
   return <div className="modal-backdrop" onClick={onClose}><div className="modal-card invoice-print operation-order-print" onClick={(e) => e.stopPropagation()}>
     <header className="print-order-head"><div><span className="eyebrow">M&amp;G Management and Logistics Inc.</span><h1>Orden total de {datos.linea}</h1><p>{datos.inicio} al {datos.fin}</p></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
-    <section className="print-order-totals"><h2>Totales de producción / surtido</h2>{totales.map((p) => <div key={p.id}><span><strong>{p.nombre}</strong><small>{p.peso_caja_lb ? `${p.peso_caja_lb} lb por caja` : p.unidad}</small></span><strong>{p.cantidad.toLocaleString('es-MX')} {unidadCorta(p)}</strong><span>{p.peso_caja_lb ? `${(p.cantidad * p.peso_caja_lb).toLocaleString('es-MX')} lb` : ''}</span></div>)}</section>
+    <section className="print-order-totals"><h2>Totales de producción / surtido</h2>{totales.map((p) => <div key={p.id}><span><strong>{p.nombre}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad}</small></span><strong>{p.cantidad.toLocaleString('es-MX')} {unidadCorta(p)}</strong><span>{p.peso_caja_lb ? `${(p.cantidad * p.peso_caja_lb).toLocaleString('es-MX')} lb` : ''}</span></div>)}</section>
     <section className="print-order-detail"><h2>Detalle por sucursal</h2>{fechas.map((dia) => <div className="print-order-day" key={dia}><h3>{fechaLarga(dia)}</h3>{datos.pedidos.filter((p) => p.fecha_entrega === dia).map((p) => <div className="print-location" key={p.id}><strong>{p.ubicacion.nombre}</strong><span>{p.lineas.map((l) => `${l.nombre}: ${l.cantidad.toLocaleString('es-MX')}`).join(' · ')}</span>{p.notas && <small>{p.notas}</small>}</div>)}</div>)}</section>
     {!datos.pedidos.length && <div className="empty-state"><strong>No hay pedidos confirmados en esta semana</strong></div>}
     <button className="btn btn-primary btn-block" disabled={!datos.pedidos.length} onClick={() => window.print()}>Imprimir / guardar PDF</button>

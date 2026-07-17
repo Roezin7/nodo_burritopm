@@ -233,7 +233,7 @@ export default function Productos() {
           </label>
           <label>Precio de venta fijo (vacío = usar costo)<input value={form.precio_venta_fijo} onChange={(e) => setForm({ ...form, precio_venta_fijo: e.target.value })} inputMode="decimal" placeholder="0.00" /></label>
           <label>Markup por caja (solo proteína)<input value={form.markup_caja} onChange={(e) => setForm({ ...form, markup_caja: e.target.value })} inputMode="decimal" /></label>
-          <label>Peso estándar por caja (lb)<input value={form.peso_caja_lb} onChange={(e) => setForm({ ...form, peso_caja_lb: e.target.value })} inputMode="decimal" /></label>
+          <label>{form.tipo_operativo === 'materia_prima' ? 'Peso promedio de caja comprada (lb)' : form.tipo_operativo === 'proteina' ? 'Peso de caja terminada (lb)' : 'Peso por caja (lb)'}<input value={form.peso_caja_lb} onChange={(e) => setForm({ ...form, peso_caja_lb: e.target.value })} inputMode="decimal" /></label>
           <label>Orden en pedidos y libros<input type="number" min="0" value={form.orden_operativo} onChange={(e) => setForm({ ...form, orden_operativo: e.target.value })} inputMode="numeric" /></label>
           <div><span className="muted">Días sugeridos de producción</span><div className="dist-suc-mini">{['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((dia, i) => <label className="chip" key={dia}><input type="checkbox" checked={form.produccion_dias.includes(i)} onChange={(e) => setForm({ ...form, produccion_dias: e.target.checked ? [...form.produccion_dias, i].sort() : form.produccion_dias.filter((d) => d !== i) })} /> {dia}</label>)}</div></div>
         </details>
@@ -280,7 +280,7 @@ export default function Productos() {
                   <div className="muted">
                     {p.sku}
                     {p.ultimo_costo != null ? ` · $${p.ultimo_costo.toFixed(2)}` : ' · sin costo'}
-                    {p.linea_operacion ? ` · ${p.linea_operacion}` : ''}{p.peso_caja_lb ? ` · ${p.peso_caja_lb} lb/caja` : ''}
+                    {p.linea_operacion ? ` · ${p.linea_operacion}` : ''}{p.peso_caja_lb ? ` · ${p.peso_caja_lb} lb/${p.tipo_operativo === 'materia_prima' ? 'caja comprada' : 'caja terminada'}` : ''}
                   </div>
                 </div>
                 <div className="form-actions">
