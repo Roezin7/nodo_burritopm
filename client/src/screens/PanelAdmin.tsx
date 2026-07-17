@@ -46,17 +46,17 @@ export default function PanelAdmin() {
 
     <div className="overview-grid">
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Quién genera la venta de la semana</div></div><Link className="link-btn" to="/pedidos">Ver pedidos →</Link></div>
+        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Quién genera la venta de la semana</div></div><Link className="link-btn" to="/semana/ventas">Ver ventas →</Link></div>
         {p.ventas.por_empresa.map((e) => <div className="company-sale" key={e.codigo}><div className="overview-row-head"><span><strong>{e.codigo}</strong> · {e.nombre}</span><strong>{usd(e.total)}</strong></div><div className="company-track"><span className="company-meat" style={{ width: `${(e.carne / maxEmpresa) * 100}%` }} /><span className="company-disposable" style={{ width: `${(e.desechables / maxEmpresa) * 100}%` }} /></div><small>Carne {usd(e.carne)} · Desechables {usd(e.desechables)}</small></div>)}
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Bodega Adison y Carnicería</div></div><Link className="link-btn" to="/semana/inventario">Revisar →</Link></div>
+        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Bodega Adison y Carnicería</div></div><Link className="link-btn" to="/semana/seguimiento">Revisar →</Link></div>
         <Desglose filas={[{ label: 'Materia prima fresca', valor: p.inventario.materia_prima_fresca }, { label: 'Materia prima congelada', valor: p.inventario.materia_prima_congelada, tono: 'bar-frozen' }, { label: 'Carne terminada', valor: p.inventario.carne_terminada, tono: 'bar-meat' }, { label: 'Desechables', valor: p.inventario.desechables, tono: 'bar-disposable' }]} />
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to="/semana/cierre">Abrir cierre →</Link></div>
+        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to="/semana/seguimiento">Ver seguimiento →</Link></div>
         <div className="cash-grid"><div><small>Por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Cobro vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>requiere seguimiento</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>Pago vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere seguimiento</span></div></div>
       </section>
 

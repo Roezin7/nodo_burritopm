@@ -74,7 +74,7 @@ export const paradaLabel = (estado: string) => PARADA[estado]?.label ?? estado;
 // ── Stepper de 5 pasos (menú interactivo) ──────────────────────────────────
 export type PasoFlujo = 'conteo' | 'plan' | 'bodega' | 'ruta' | 'recepcion';
 const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] = [
-  { clave: 'conteo', label: 'Pedidos', ruta: '/pedidos', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'conteo', label: 'Ventas', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'plan', label: 'Preparación', ruta: '/distribucion', roles: ['admin'] },
   { clave: 'bodega', label: 'Despacho', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', label: 'Reparto', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },

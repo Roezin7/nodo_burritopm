@@ -44,6 +44,7 @@ interface ResultadoConfirmacion {
   borradores_vacios: number;
   cobertura_bpm: { fecha: string; total: number; confirmados: number; pendientes: string[] }[];
 }
+interface ResultadoPreparaciones { creadas: { id: number }[]; existentes: number; borradores_omitidos: number }
 
 export default function Pedidos({ integrado = false }: { integrado?: boolean }) {
   const { usuario } = useAuth();
@@ -141,9 +142,21 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
       const r = await api<ResultadoConfirmacion>('/operacion/pedidos/confirmar-todos', {
         method: 'POST', body: { linea, desde, hasta },
       });
+      let proceso = '';
+      try {
+        const preparaciones = await api<ResultadoPreparaciones>('/operacion/distribuciones/crear-todas', {
+          method: 'POST', body: { linea, desde, hasta },
+        });
+        const aprobacion = await api<{ aprobadas: number }>('/distribuciones/aprobar-todas', {
+          method: 'POST', body: { desde, hasta },
+        });
+        proceso = ` · ${preparaciones.creadas.length} preparaciones creadas · ${aprobacion.aprobadas} listas para despacho`;
+      } catch (e) {
+        setError(e instanceof ApiError ? `Las ventas quedaron confirmadas, pero el proceso automático requiere atención: ${e.message}` : 'Las ventas quedaron confirmadas, pero no se pudo generar el proceso automático.');
+      }
       const pendientes = r.cobertura_bpm.flatMap((c) => c.pendientes.map((nombre) => `${c.fecha}: ${nombre}`));
       const detalle = pendientes.length ? ` · BPM pendiente: ${pendientes.slice(0, 3).join(', ')}${pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : ''}` : ' · BPM completo';
-      toast.ok(`${r.confirmados} pedidos confirmados${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}`);
+      toast.ok(`${r.confirmados} ventas confirmadas${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${proceso}${detalle}`);
       setRefrescoHistorial((n) => n + 1);
       if (desde === hasta && ubicacionId) {
         const rows = await api<Pedido[]>(`/operacion/pedidos?ubicacion_id=${ubicacionId}&linea=${linea}&desde=${desde}&hasta=${hasta}`);
@@ -162,8 +175,8 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   const visibles = productos.filter((p) => !q || `${nombreEnOrden(p.sku, p.nombre, linea)} ${p.tipo}`.toLowerCase().includes(q));
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
-      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Pedidos</span><h1>Pedido semanal</h1></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
-      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 3</span><h2>Pedidos</h2></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Ventas</span><h1>Venta semanal</h1></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 3</span><h2>Ventas</h2></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
         {admin && <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Capturar</button><button className={vista === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setVista('historial')}>Historial por sucursal</button></div>}
         <div className="segmented order-line-switch">
@@ -186,13 +199,13 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
               <div className="input-suffix input-suffix--compact"><input inputMode="decimal" type="number" min="0" step={esPieza(p) ? '1' : '0.5'} value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>{unidadCorta(p)}</span></div>
             </label>)}</div>
           </section>
-          <label className="workspace-card field order-notes"><span>Notas del pedido <em>opcional</em></span><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
+          <label className="workspace-card field order-notes"><span>Notas de la venta <em>opcional</em></span><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
         </section>
         <aside className="order-summary">
-          <span className="eyebrow">Resumen del pedido</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha} · {linea}</p>
+          <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha} · {linea}</p>
           <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total</dt><dd>{usd(total)}</dd></div></dl>
           <div className="order-actions"><button className="btn btn-secondary" disabled={busy || !ubicacionId} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || !ubicacionId || unidades <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar'}</button></div>
-          {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={busy} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
+          {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={busy} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar ventas y generar proceso</button>}
           {admin && <div className="order-print-actions"><span>Orden semanal consolidada</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne', fecha)}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables', fecha)}>Imprimir desechables</button></div>}
         </aside>
       </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} semanas={catalogo.semanas} onPrint={() => void abrirImpresion(linea, fechaHistorial)} onConfirmar={() => { const rango = rangoSemana(fechaHistorial); void confirmarTodos(rango.inicio, rango.fin); }} confirmando={busy} />}
@@ -219,10 +232,10 @@ function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion
       <div><span className="eyebrow">Periodo</span><h2>Semana {semanaActual?.semana ?? '—'}</h2><p>{rango.inicio} al {rango.fin}</p></div>
       <div className="history-week-controls"><button className="icon-btn" disabled={!anterior} aria-label="Semana anterior" onClick={() => anterior && setFecha(anterior.inicia_at)}>←</button><select aria-label="Semana" value={semanaActual?.inicia_at ?? fecha} onChange={(e) => setFecha(e.target.value)}>{semanas.map((s) => <option key={s.id} value={s.inicia_at}>Semana {s.semana} · {s.inicia_at} al {s.termina_at}</option>)}</select><button className="icon-btn" disabled={!siguiente} aria-label="Semana siguiente" onClick={() => siguiente && setFecha(siguiente.inicia_at)}>→</button></div>
       <label className="field"><span>Sucursal</span><select value={ubicacion} onChange={(e) => setUbicacion(e.target.value)}><option value="todas">Todas las sucursales</option>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}</select></label>
-      <div className="history-primary-actions"><button className="btn btn-secondary" disabled={cargando || confirmando} onClick={onConfirmar}>{confirmando ? 'Confirmando…' : 'Confirmar todos'}</button><button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir por ruta</button></div>
+      <div className="history-primary-actions"><button className="btn btn-secondary" disabled={cargando || confirmando} onClick={onConfirmar}>{confirmando ? 'Generando…' : 'Confirmar y generar proceso'}</button><button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir por ruta</button></div>
     </section>
     {cargando ? <Spinner label="Cargando pedidos…" /> : <>
-      <div className="metric-strip metric-strip--four"><div><span>Sucursales</span><strong>{new Set(filtrados.map((p) => p.ubicacion.id)).size}</strong></div><div><span>Pedidos</span><strong>{filtrados.length}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(total)}</strong></div></div>
+      <div className="metric-strip metric-strip--four"><div><span>Sucursales</span><strong>{new Set(filtrados.map((p) => p.ubicacion.id)).size}</strong></div><div><span>Ventas</span><strong>{filtrados.length}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(total)}</strong></div></div>
       {fechas.map((dia) => <section className="history-day" key={dia}><div className="section-heading"><div><span className="eyebrow">Entrega</span><h2>{fechaLarga(dia)}</h2></div><span>{filtrados.filter((p) => p.fecha_entrega === dia).length} sucursales</span></div><div className="history-location-grid">{filtrados.filter((p) => p.fecha_entrega === dia).map((p) => <PedidoHistorico key={p.id} pedido={p} />)}</div></section>)}
       {!filtrados.length && <div className="empty-state"><strong>No hay pedidos de {linea} esta semana</strong><span>Cambia la semana, la línea o la sucursal.</span></div>}
     </>}

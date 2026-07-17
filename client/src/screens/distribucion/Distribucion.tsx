@@ -124,7 +124,7 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
           <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear esta preparación'}</button>
         </div>
         <div className="preparation-batch-actions"><span>Semana {rangoSemana(fecha).inicio} al {rangoSemana(fecha).fin}</span><button className="btn btn-secondary" disabled={creando} onClick={() => void crearTodas()}>Crear todas</button><button className="btn btn-secondary" disabled={creando} onClick={() => void aprobarTodas()}>Aprobar todas</button></div>
-        <Link className="preparation-orders-link" to="/semana/pedidos">Revisar o capturar pedidos →</Link>
+        <Link className="preparation-orders-link" to="/semana/ventas">Revisar o capturar ventas →</Link>
       </section>
 
       <h3 className="seccion-title">Preparaciones</h3>

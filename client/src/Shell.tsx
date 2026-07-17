@@ -19,7 +19,7 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/semana', label: 'Semana', icono: 'clipboard', grupo: 'operacion' },
+  { ruta: '/semana', label: 'Operación', icono: 'clipboard', grupo: 'operacion' },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
 ];
 

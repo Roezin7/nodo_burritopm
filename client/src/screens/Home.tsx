@@ -78,7 +78,7 @@ interface Modulo {
 }
 
 const MODULOS: Modulo[] = [
-  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y fecha', ruta: '/semana/pedidos', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'pedidos', titulo: 'Ventas', icono: 'clipboard', desc: 'Carne y desechables por restaurante y semana', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Materia prima, lotes y cuentas por pagar', ruta: '/semana/compras', soloAdmin: true },
   { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/semana/produccion', soloAdmin: true },
   { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
@@ -135,7 +135,7 @@ export default function Home() {
       <ActivarAvisos />
       <TareaHoy />
       <div className="quick-actions" aria-label="Acciones rápidas">
-        <Link to="/semana"><span><Icono name="clipboard" size={20} /></span><strong>Abrir semana</strong><small>Compras a cierre</small></Link>
+        <Link to="/semana"><span><Icono name="clipboard" size={20} /></span><strong>Abrir captura</strong><small>Compras, producción y ventas</small></Link>
         <Link to="/incidencias"><span><Icono name="alert" size={20} /></span><strong>Incidencias</strong><small>Diferencias por resolver</small></Link>
       </div>
       <PanelAdmin />

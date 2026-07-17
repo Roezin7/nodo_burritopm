@@ -3534,8 +3534,56 @@ textarea { resize: vertical; }
 .inventory-capture-actions .field { margin-right: auto; }
 .inventory-embedded .data-row > span:nth-child(2) { min-width: 120px; }
 
+/* Operación simplificada: tres capturas y seguimiento de solo lectura. */
+.weekly-operation__head--simple { grid-template-columns: 1fr auto; align-items: center; }
+.weekly-mode-tabs { display: inline-grid; grid-template-columns: 1fr 1fr; padding: 0.25rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.weekly-mode-tabs a { min-width: 120px; padding: 0.58rem 1rem; border-radius: 9px; color: var(--ink-3); font-size: 0.78rem; font-weight: 750; text-align: center; text-decoration: none; }
+.weekly-mode-tabs a.is-active { color: var(--ink); background: var(--surface); box-shadow: var(--sh-sm); }
+.capture-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; max-width: 720px; margin-bottom: 1rem; }
+.capture-tabs a { display: flex; align-items: center; gap: 0.65rem; min-height: 54px; padding: 0.65rem 0.85rem; border: 1px solid var(--border); border-radius: 12px; color: var(--ink-3); background: var(--surface); text-decoration: none; box-shadow: var(--sh-sm); }
+.capture-tabs a > span { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: 50%; color: var(--ink-3); background: var(--surface-2); font-size: 0.72rem; font-weight: 800; }
+.capture-tabs a strong { font-size: 0.86rem; }
+.capture-tabs a.is-active { border-color: color-mix(in srgb, var(--brand) 48%, var(--border)); color: var(--brand); background: var(--brand-tint); }
+.capture-tabs a.is-active > span { color: white; background: var(--brand); }
+.capture-tabs--role { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-width: none; }
+.tracking-head { align-items: flex-start; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+.tracking-head p { margin: 0.25rem 0 0; color: var(--ink-3); font-size: 0.8rem; }
+.tracking-input-summary { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 0.8rem; margin-bottom: 0.85rem; padding: 0.85rem 1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.tracking-input-summary > div { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 0.1rem 0.6rem; }
+.tracking-input-summary > div span { color: var(--ink-3); font-size: 0.76rem; }
+.tracking-input-summary > div strong { grid-row: span 2; font-size: 1.6rem; }
+.tracking-input-summary > div small { color: var(--ink-3); font-size: 0.7rem; }
+.tracking-input-summary > span { color: var(--ink-3); }
+.tracking-stage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem; }
+.tracking-stage { padding: 0.9rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--sh-sm); }
+.tracking-stage header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.55rem; align-items: center; }
+.tracking-stage header > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; }
+.tracking-stage header small { overflow: hidden; color: var(--ink-3); font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.tracking-stage header .chip { grid-column: 1 / -1; justify-self: start; margin-top: 0.2rem; font-style: normal; }
+.tracking-stage-number { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; color: var(--brand); background: var(--brand-tint); font-size: 0.72rem; font-weight: 800; }
+.tracking-stage-value { display: flex; align-items: baseline; gap: 0.3rem; margin-top: 0.9rem; }
+.tracking-stage-value strong { font-size: 1.8rem; }
+.tracking-stage-value span { color: var(--ink-3); font-size: 0.75rem; }
+.tracking-stage-bar { height: 5px; margin-top: 0.55rem; overflow: hidden; border-radius: 99px; background: var(--surface-2); }
+.tracking-stage-bar span { display: block; height: 100%; border-radius: inherit; background: var(--brand); }
+.tracking-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-top: 0.7rem; }
+.tracking-result-card { padding: 1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.tracking-result-card > strong { display: block; margin-top: 0.35rem; font-size: 1.75rem; }
+.tracking-result-card > p { margin: 0.15rem 0 0.8rem; color: var(--ink-3); font-size: 0.76rem; }
+.tracking-result-card > div { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; padding-top: 0.65rem; border-top: 1px solid var(--border); color: var(--ink-2); font-size: 0.72rem; }
+.tracking-alerts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.7rem; padding: 0.75rem; border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent); border-radius: 12px; background: var(--warning-bg); }
+.tracking-alerts > strong { margin-right: 0.4rem; font-size: 0.78rem; }
+.tracking-alerts > div { display: flex; flex-direction: column; padding: 0.35rem 0.55rem; border-radius: 8px; background: var(--surface); font-size: 0.72rem; }
+.tracking-alerts small { color: var(--ink-3); }
+.manual-tools { margin-top: 0.85rem; padding: 0.75rem 0.9rem; border: 1px dashed var(--border); border-radius: 12px; color: var(--ink-3); }
+.manual-tools summary { cursor: pointer; font-size: 0.75rem; font-weight: 750; }
+.manual-tools p { margin: 0.55rem 0; font-size: 0.72rem; }
+.manual-tools > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.manual-tools a { padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; color: var(--ink-2); background: var(--surface); font-size: 0.72rem; text-decoration: none; }
+
 @media (max-width: 900px) {
   .weekly-operation__head { grid-template-columns: 1fr; gap: 0.7rem; }
+  .tracking-stage-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 620px) {
@@ -3545,4 +3593,11 @@ textarea { resize: vertical; }
   .simple-entry-total, .inventory-capture-actions { align-items: stretch; flex-direction: column; }
   .simple-entry-total .btn, .inventory-capture-actions .btn, .inventory-capture-actions .field { width: 100%; }
   .weekly-next { justify-content: space-between; }
+  .weekly-mode-tabs { width: 100%; }
+  .weekly-mode-tabs a { min-width: 0; }
+  .capture-tabs { grid-template-columns: repeat(3, minmax(92px, 1fr)); overflow-x: auto; }
+  .capture-tabs a { flex-direction: column; gap: 0.25rem; text-align: center; }
+  .tracking-input-summary { grid-template-columns: 1fr; }
+  .tracking-input-summary > span { display: none; }
+  .tracking-stage-grid, .tracking-result-grid { grid-template-columns: 1fr; }
 }

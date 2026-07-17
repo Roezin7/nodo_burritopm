@@ -143,7 +143,7 @@ dashboardRouter.get(
       }),
       prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: { gte: periodo.lunes, lte: periodo.sabado }, estado: { not: 'cancelada' } } }),
       prisma.distribuciones.findMany({
-        where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.lunes, lte: periodo.sabado }, estado: { notIn: [...DIST_FINAL] } },
+        where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.lunes, lte: periodo.sabado }, estado: { not: 'cancelada' } },
         include: { rutas: { include: { paradas: true } } },
       }),
       prisma.producto_ubicacion.findMany({
@@ -202,7 +202,10 @@ dashboardRouter.get(
     const cajasProduccion = producciones.reduce((a, p) => a + p.salidas.reduce((x, s) => x + num0(s.cajas), 0), 0);
     const costoProduccion = producciones.reduce((a, p) => a + num0(p.costo_entrada), 0);
     const comprasTotal = comprasSemana.reduce((a, c) => a + num0(c.total), 0);
-    const paradasPendientes = distribuciones.reduce((a, d) => a + d.rutas.reduce((x, r) => x + r.paradas.filter((p) => !['confirmada', 'con_incidencia', 'omitida'].includes(p.estado)).length, 0), 0);
+    const distribucionesAbiertas = distribuciones.filter((d) => !DIST_FINAL.includes(d.estado as (typeof DIST_FINAL)[number]));
+    const rutasSemana = distribuciones.flatMap((d) => d.rutas);
+    const paradasSemana = rutasSemana.flatMap((r) => r.paradas);
+    const paradasPendientes = paradasSemana.filter((p) => !['confirmada', 'con_incidencia', 'omitida'].includes(p.estado)).length;
     const existenciaDe = new Map(existencias.map((e) => [`${e.ubicacion_id}:${e.product_id}`, num0(e.cantidad_disponible)]));
     const bajoMinimo = parametros.filter((p) => (existenciaDe.get(`${p.ubicacion_id}:${p.product_id}`) ?? 0) < num0(p.stock_min)).length;
 
@@ -223,7 +226,13 @@ dashboardRouter.get(
       inventario: { total: r2(inventarioTotal), materia_prima_fresca: r2(materiaFresca), materia_prima_congelada: r2(materiaCongelada), carne_terminada: r2(carneTerminada), desechables: r2(desechables) },
       cartera: { por_cobrar: r2(porCobrar), vencido_cobrar: r2(vencidoCobrar), facturas_pendientes: facturasPendientes.length, por_pagar: r2(porPagar), vencido_pagar: r2(vencidoPagar), compras_pendientes: comprasPendientes.length, balance_neto: r2(inventarioTotal + porCobrar - porPagar) },
       produccion: { costo: r2(costoProduccion), cajas: r2(cajasProduccion), yield: pesoEntrada > 0 ? r2((pesoSalida / pesoEntrada) * 100) : 0, compras_semana: r2(comprasTotal) },
-      operacion: { pedidos_confirmados: pedidos.filter((p) => !['borrador', 'cancelado'].includes(p.estado)).length, pedidos_borrador: borradores, distribuciones_abiertas: distribuciones.length, paradas_pendientes: paradasPendientes, productos_bajo_minimo: bajoMinimo },
+      operacion: { pedidos_confirmados: pedidos.filter((p) => !['borrador', 'cancelado'].includes(p.estado)).length, pedidos_borrador: borradores, distribuciones_abiertas: distribucionesAbiertas.length, paradas_pendientes: paradasPendientes, productos_bajo_minimo: bajoMinimo },
+      seguimiento: {
+        preparacion: { total: distribuciones.length, completadas: distribuciones.filter((d) => d.aprobado_at != null).length },
+        despacho: { total: distribuciones.filter((d) => d.aprobado_at != null).length, completadas: distribuciones.filter((d) => d.cargado_at != null).length },
+        reparto: { total: rutasSemana.length, completadas: rutasSemana.filter((r) => ['completada', 'cerrada'].includes(r.estado)).length },
+        recepcion: { total: paradasSemana.length, completadas: paradasSemana.filter((p) => ['confirmada', 'con_incidencia'].includes(p.estado)).length },
+      },
       alertas,
     });
   }),
