@@ -99,6 +99,19 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       take: 52,
     }),
   ]);
+  const calendarioPedidos = ubicaciones
+    .filter((u) => u.tipo === 'sucursal' && u.empresa_cliente_id)
+    .flatMap((u) => {
+      const destinoFisico = u.entrega_en_ubicacion_id ?? u.id;
+      const porDia = new Map<string, { ubicacion_id: number; linea: LineaOperacion; dia_semana: number; rutas: { id: number; nombre: string; codigo: string; conductor: string }[] }>();
+      for (const plantilla of plantillas.filter((p) => p.activo && p.paradas.some((parada) => parada.ubicacion_id === destinoFisico))) {
+        const clave = `${plantilla.linea_operacion}:${plantilla.dia_semana}`;
+        const entrada = porDia.get(clave) ?? { ubicacion_id: Number(u.id), linea: plantilla.linea_operacion, dia_semana: plantilla.dia_semana, rutas: [] };
+        entrada.rutas.push({ id: Number(plantilla.id), nombre: plantilla.nombre, codigo: plantilla.codigo, conductor: plantilla.conductor });
+        porDia.set(clave, entrada);
+      }
+      return [...porDia.values()];
+    });
   return {
     empresas: empresas.map((e) => ({ ...e, id: Number(e.id) })),
     ubicaciones: ubicaciones.map((u) => ({
@@ -119,6 +132,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       dia_semana: p.dia_semana, conductor: p.conductor,
       paradas: p.paradas.map((x) => ({ ubicacion_id: Number(x.ubicacion_id), nombre: x.ubicacion.nombre, orden: x.orden, opcional: x.opcional })),
     })) : [],
+    calendario_pedidos: calendarioPedidos,
     semanas: semanas.map((s) => ({
       id: Number(s.id), anio: s.anio, semana: s.semana, inicia_at: iso(s.inicia_at), termina_at: iso(s.termina_at), estado: s.estado,
     })),
@@ -195,8 +209,15 @@ export async function guardarPedido(
   const porId = new Map(productos.map((p) => [p.id.toString(), p]));
   const dia = fecha(input.fecha_entrega).getUTCDay();
   if (!esAdmin) {
-    const permitido = input.linea === 'carne' ? [1, 3, 4, 6].includes(dia) : dia === 3;
-    if (!permitido) throw new HttpError(400, 'La fecha no corresponde a un día de entrega de esta operación');
+    const destinoFisico = ubicacion.entrega_en_ubicacion_id ?? ubicacion.id;
+    const permitido = await prisma.plantilla_ruta_paradas.findFirst({
+      where: {
+        ubicacion_id: destinoFisico,
+        plantilla: { negocio_id: negocioId, linea_operacion: input.linea, dia_semana: dia, activo: true },
+      },
+      select: { plantilla_id: true },
+    });
+    if (!permitido) throw new HttpError(400, 'La fecha no corresponde a una entrega programada para este restaurante');
   }
 
   const result = await prisma.$transaction(async (tx) => {

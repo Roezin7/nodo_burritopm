@@ -10,6 +10,7 @@ interface Catalogo {
   ubicaciones: { id: number; nombre: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
   productos: { id: number; sku: string; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; peso_caja_lb: number | null }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: Linea; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
+  calendario_pedidos: { ubicacion_id: number; linea: Linea; dia_semana: number; rutas: { id: number; nombre: string; codigo: string; conductor: string }[] }[];
   semanas: { id: number; anio: number; semana: number; inicia_at: string; termina_at: string; estado: string }[];
 }
 interface Pedido {
@@ -20,17 +21,38 @@ interface Pedido {
 }
 
 function hoy() { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }); }
-function siguienteMiercoles() {
-  const d = new Date(`${hoy()}T12:00:00`);
-  let n = (3 - d.getDay() + 7) % 7;
-  if (n === 0) n = 7;
-  d.setDate(d.getDate() + n);
-  return d.toLocaleDateString('en-CA');
-}
 const usd = (n: number | null) => n == null ? 'Precio pendiente' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const esPieza = (p: { unidad: string }) => p.unidad.toLowerCase().includes('pieza');
 const unidadCorta = (p: { unidad: string }) => esPieza(p) ? 'pzas' : 'cajas';
 const fechaLarga = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const fechaEntregaCorta = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
+function numeroSemana(iso: string) {
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  const dia = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dia);
+  const inicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
+}
+interface EntregaOpcion {
+  fecha: string;
+  semana: number;
+  rutas: Catalogo['calendario_pedidos'][number]['rutas'];
+}
+function proximasEntregas(calendario: Catalogo['calendario_pedidos'], ubicacionId: string, linea: Linea): EntregaOpcion[] {
+  const programadas = calendario.filter((c) => String(c.ubicacion_id) === ubicacionId && c.linea === linea);
+  if (!programadas.length) return [];
+  const desde = new Date(`${hoy()}T12:00:00`);
+  const resultado: EntregaOpcion[] = [];
+  for (let desplazamiento = 1; desplazamiento <= 56 && resultado.length < 8; desplazamiento += 1) {
+    const fecha = new Date(desde);
+    fecha.setDate(fecha.getDate() + desplazamiento);
+    const programa = programadas.find((c) => c.dia_semana === fecha.getDay());
+    if (!programa) continue;
+    const iso = fecha.toLocaleDateString('en-CA');
+    resultado.push({ fecha: iso, semana: numeroSemana(iso), rutas: programa.rutas });
+  }
+  return resultado;
+}
 function rangoSemana(valor: string) {
   const d = new Date(`${valor}T12:00:00`);
   const desplazamiento = d.getDay() === 0 ? -6 : 1 - d.getDay();
@@ -52,7 +74,8 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
   const [linea, setLinea] = useState<Linea>('carne');
   const [ubicacionId, setUbicacionId] = useState('');
-  const [fecha, setFecha] = useState(siguienteMiercoles());
+  const [fecha, setFecha] = useState('');
+  const [fechaManual, setFechaManual] = useState(false);
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
   const [notas, setNotas] = useState('');
   const [buscar, setBuscar] = useState('');
@@ -87,6 +110,16 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
     () => catalogo ? productosParaPedido(catalogo.productos, linea, ubicacionSeleccionada?.empresa?.codigo) : [],
     [catalogo, linea, ubicacionSeleccionada?.empresa?.codigo],
   );
+  const entregas = useMemo(
+    () => catalogo ? proximasEntregas(catalogo.calendario_pedidos, ubicacionId, linea) : [],
+    [catalogo, ubicacionId, linea],
+  );
+  const entregaSeleccionada = entregas.find((e) => e.fecha === fecha);
+
+  useEffect(() => {
+    setFechaManual(false);
+    setFecha(entregas[0]?.fecha ?? '');
+  }, [entregas]);
 
   useEffect(() => {
     if (vista !== 'captura' || !ubicacionId || !fecha) return;
@@ -186,7 +219,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
         <section className="order-capture">
           <div className="workspace-card order-context">
             <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
-            <label className="field"><span>Fecha de entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
+            <label className="field order-delivery-field"><span className="order-delivery-label">Pedido correspondiente{admin && <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setFechaManual((actual) => { if (actual && entregas[0]) setFecha(entregas[0].fecha); return !actual; }); }}>{fechaManual ? 'Usar próxima entrega' : 'Otra fecha'}</button>}</span>{fechaManual ? <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /> : <select value={fecha} disabled={!entregas.length} onChange={(e) => setFecha(e.target.value)}>{!entregas.length && <option value="">Sin entrega configurada</option>}{entregas.map((e, i) => <option key={e.fecha} value={e.fecha}>{i === 0 ? 'Próximo · ' : ''}Semana {e.semana} · {fechaEntregaCorta(e.fecha)}</option>)}</select>}<small className="order-delivery-hint">{fechaManual ? 'Fecha excepcional seleccionada por el administrador.' : entregaSeleccionada ? `${entregaSeleccionada.rutas.map((r) => r.nombre).join(' / ')} · ${[...new Set(entregaSeleccionada.rutas.map((r) => r.conductor))].join(', ')}` : 'Este restaurante no aparece en una ruta activa para esta línea.'}</small></label>
           </div>
           {ubic?.entrega_en && <p className="notice">Se factura a <strong>{ubic.nombre}</strong> y se entrega físicamente en <strong>{ubic.entrega_en.nombre}</strong>.</p>}
           <section className="workspace-card product-picker">
@@ -199,11 +232,11 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
           <label className="workspace-card field order-notes"><span>Notas de la venta <em>opcional</em></span><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
         </section>
         <aside className="order-summary">
-          <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha} · {linea}</p>
+          <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha ? `Semana ${numeroSemana(fecha)} · ${fechaLarga(fecha)}` : 'Sin entrega programada'} · {linea}</p>
           <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total</dt><dd>{usd(total)}</dd></div></dl>
-          <div className="order-actions"><button className="btn btn-secondary" disabled={busy || !ubicacionId} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || !ubicacionId || unidades <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar'}</button></div>
-          {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={busy} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
-          {admin && <div className="order-print-actions"><span>Orden semanal consolidada</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne', fecha)}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables', fecha)}>Imprimir desechables</button></div>}
+          <div className="order-actions"><button className="btn btn-secondary" disabled={busy || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || !ubicacionId || !fecha || unidades <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar'}</button></div>
+          {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={busy || !fecha} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
+          {admin && <div className="order-print-actions"><span>Orden semanal consolidada</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion || !fecha} onClick={() => void abrirImpresion('carne', fecha)}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion || !fecha} onClick={() => void abrirImpresion('desechables', fecha)}>Imprimir desechables</button></div>}
         </aside>
       </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} semanas={catalogo.semanas} onPrint={() => void abrirImpresion(linea, fechaHistorial)} onConfirmar={() => { const rango = rangoSemana(fechaHistorial); void confirmarTodos(rango.inicio, rango.fin); }} confirmando={busy} />}
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}
