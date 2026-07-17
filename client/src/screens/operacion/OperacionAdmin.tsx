@@ -106,19 +106,19 @@ function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catal
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la compra.'); } finally { setBusy(false); }
   }
   return <div className="operation-stack">
-    <section className="workspace-card form-workspace simple-entry-card">
+    <section className="workspace-card form-workspace">
         <div className="workspace-card-head"><h2>Nueva compra</h2><div className="segmented segmented--small"><button className={linea === 'carne' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea('carne')}>Carne</button><button className={linea === 'desechables' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea('desechables')}>Desechables</button></div></div>
         <div className="form-grid form-grid--purchase">
-          <label className="field field--wide"><span>Proveedor</span><select value={proveedor} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
+          <label className="field"><span>Proveedor</span><select value={proveedor} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
           <label className="field"><span>Fecha</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <label className="field field--wide"><span>Producto</span><select value={producto} onChange={(e) => setProducto(e.target.value)}>{productosCompra.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
+          <label className="field"><span>Producto</span><select value={producto} onChange={(e) => setProducto(e.target.value)}>{productosCompra.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
           <label className="field field--number"><span>{seleccionado?.unidad ?? 'Cantidad'} recibida</span><input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={cajas} onChange={(e) => setCajas(e.target.value)} /></label>
           {requierePeso && <label className="field field--number"><span>Peso total</span><div className="input-suffix"><input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={peso} onChange={(e) => setPeso(e.target.value)} /><span>lb</span></div></label>}
           <label className="field field--number"><span>Costo total</span><div className="input-prefix"><span>$</span><input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={costo} onChange={(e) => setCosto(e.target.value)} /></div></label>
           <label className="field field--wide"><span>Factura / referencia</span><input value={referencia} onChange={(e) => setReferencia(e.target.value)} /></label>
           {requierePeso && <label className="check-card"><input type="checkbox" checked={congelado} onChange={(e) => setCongelado(e.target.checked)} /><span><strong>Congelado</strong></span></label>}
         </div>
-        <div className="simple-entry-total"><span>{requierePeso && <>Peso promedio <strong>{pesoCaja.toFixed(2)} lb/caja</strong> · </>}Costo por {seleccionado?.unidad?.toLowerCase() ?? 'unidad'} <strong>{usd(costoCaja)}</strong>{requierePeso && <> · por lb <strong>{usd(costoLibra)}</strong></>}</span><button className="btn btn-primary" disabled={busy || !proveedor || !producto || !cajas || !costo || (requierePeso && !peso)} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar compra'}</button></div>
+        <div className="form-submit form-submit--summary"><div className="form-summary">{requierePeso && <span>Peso promedio <strong>{pesoCaja.toFixed(2)} lb/caja</strong></span>}<span>Costo por {seleccionado?.unidad?.toLowerCase() ?? 'unidad'} <strong>{usd(costoCaja)}</strong></span>{requierePeso && <span>Costo por lb <strong>{usd(costoLibra)}</strong></span>}</div><button className="btn btn-primary" disabled={busy || !proveedor || !producto || !cajas || !costo || (requierePeso && !peso)} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar compra'}</button></div>
     </section>
 
     {resumen.lotes.length > 0 && <section className="workspace-section"><div className="section-heading"><h2>Materia prima disponible</h2><span>{resumen.lotes.length} lotes</span></div>
@@ -126,7 +126,7 @@ function Compras({ catalogo, resumen, busy, setBusy, onDone, setError }: { catal
     </section>}
 
     <section className="workspace-card"><div className="workspace-card-head"><h2>Compras registradas</h2></div>
-      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span>{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void pagarCompra(c.id)}>Pagada</button>}<button className="btn btn-secondary btn-sm btn-peligro" disabled={busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></article>)}</div>
+      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void pagarCompra(c.id)}>Marcar pagada</button>}<button className="btn btn-danger-ghost btn-sm" disabled={busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>)}</div>
     </section>
   </div>;
 }
