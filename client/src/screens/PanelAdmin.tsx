@@ -51,12 +51,12 @@ export default function PanelAdmin() {
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Bodega Adison y Carnicería</div></div><Link className="link-btn" to="/semana/seguimiento">Revisar →</Link></div>
+        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Bodega Adison y Carnicería</div></div><Link className="link-btn" to="/semana/inventario">Revisar →</Link></div>
         <Desglose filas={[{ label: 'Materia prima fresca', valor: p.inventario.materia_prima_fresca }, { label: 'Materia prima congelada', valor: p.inventario.materia_prima_congelada, tono: 'bar-frozen' }, { label: 'Carne terminada', valor: p.inventario.carne_terminada, tono: 'bar-meat' }, { label: 'Desechables', valor: p.inventario.desechables, tono: 'bar-disposable' }]} />
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to="/semana/seguimiento">Ver seguimiento →</Link></div>
+        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to="/semana/cierre">Abrir cierre →</Link></div>
         <div className="cash-grid"><div><small>Por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Cobro vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>requiere seguimiento</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>Pago vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere seguimiento</span></div></div>
       </section>
 

@@ -12,11 +12,6 @@ import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
 import OperacionAdmin from './screens/operacion/OperacionAdmin';
 import SemanaOperacion from './screens/operacion/SemanaOperacion';
-import InventarioOperacion from './screens/operacion/InventarioOperacion';
-import Distribucion from './screens/distribucion/Distribucion';
-import Bodega from './screens/bodega/Bodega';
-import Ruta from './screens/ruta/Ruta';
-import Recepcion from './screens/recepcion/Recepcion';
 import { useState, useEffect, type JSX } from 'react';
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
@@ -59,18 +54,12 @@ function AppBody() {
         <Route path="/compras" element={<Navigate to="/semana/compras" replace />} />
         <Route path="/produccion" element={<Navigate to="/semana/produccion" replace />} />
         <Route path="/rutas" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="rutas" /></SoloRol>} />
-        <Route path="/facturacion" element={<Navigate to="/control/cierre" replace />} />
+        <Route path="/facturacion" element={<Navigate to="/semana/cierre" replace />} />
         <Route path="/operacion" element={<Navigate to="/semana" replace />} />
-        <Route path="/distribucion" element={<Navigate to="/control/preparacion" replace />} />
+        <Route path="/distribucion" element={<Navigate to="/semana/preparacion" replace />} />
         <Route path="/bodega" element={<Navigate to="/semana/despacho" replace />} />
         <Route path="/ruta" element={<Navigate to="/semana/reparto" replace />} />
         <Route path="/recepcion" element={<Navigate to="/semana/recepcion" replace />} />
-        <Route path="/control/preparacion" element={<SoloRol roles={['admin']}><Distribucion /></SoloRol>} />
-        <Route path="/control/despacho" element={<SoloRol roles={['admin']}><Bodega /></SoloRol>} />
-        <Route path="/control/reparto" element={<SoloRol roles={['admin']}><Ruta /></SoloRol>} />
-        <Route path="/control/recepcion" element={<SoloRol roles={['admin']}><Recepcion /></SoloRol>} />
-        <Route path="/control/inventario" element={<SoloRol roles={['admin']}><InventarioOperacion /></SoloRol>} />
-        <Route path="/control/cierre" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="cierre" /></SoloRol>} />
         <Route path="/incidencias" element={<SoloRol roles={['admin']}><Incidencias /></SoloRol>} />
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -3,7 +3,7 @@ import { useAuth, type Rol } from '../../auth';
 import Pedidos from './Pedidos';
 import OperacionAdmin from './OperacionAdmin';
 import InventarioOperacion from './InventarioOperacion';
-import SeguimientoSemana from './SeguimientoSemana';
+import Distribucion from '../distribucion/Distribucion';
 import Bodega from '../bodega/Bodega';
 import Ruta from '../ruta/Ruta';
 import Recepcion from '../recepcion/Recepcion';
@@ -14,6 +14,15 @@ const capturas = [
   { clave: 'ventas', label: 'Ventas', numero: 3 },
 ] as const;
 
+const proceso = [
+  { clave: 'preparacion', label: 'Preparación', numero: 4 },
+  { clave: 'despacho', label: 'Despacho', numero: 5 },
+  { clave: 'reparto', label: 'Reparto', numero: 6 },
+  { clave: 'recepcion', label: 'Recepción', numero: 7 },
+  { clave: 'inventario', label: 'Inventario', numero: 8 },
+  { clave: 'cierre', label: 'Cierre', numero: 9 },
+] as const;
+
 const tareasPorRol = [
   { clave: 'ventas', label: 'Ventas', roles: ['encargado_sucursal'] },
   { clave: 'despacho', label: 'Despacho', roles: ['encargado_bodega'] },
@@ -22,9 +31,8 @@ const tareasPorRol = [
   { clave: 'inventario', label: 'Inventario', roles: ['encargado_bodega'] },
 ] as const;
 
-type Captura = (typeof capturas)[number]['clave'];
+type PasoAdmin = (typeof capturas)[number]['clave'] | (typeof proceso)[number]['clave'];
 type Tarea = (typeof tareasPorRol)[number]['clave'];
-const pasosAutomaticos = new Set(['preparacion', 'despacho', 'reparto', 'recepcion', 'inventario', 'cierre']);
 
 export default function SemanaOperacion() {
   const { usuario } = useAuth();
@@ -33,29 +41,36 @@ export default function SemanaOperacion() {
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to="/semana/ventas" replace />;
-    if (paso && pasosAutomaticos.has(paso)) return <Navigate to="/semana/seguimiento" replace />;
-    const actual = (paso ?? 'compras') as Captura | 'seguimiento';
-    if (![...capturas.map((p) => p.clave), 'seguimiento'].includes(actual)) return <Navigate to="/semana/compras" replace />;
-    const enCaptura = actual !== 'seguimiento';
+    if (paso === 'seguimiento') return <Navigate to="/semana/preparacion" replace />;
+    const actual = (paso ?? 'compras') as PasoAdmin;
+    const todos = [...capturas, ...proceso];
+    if (!todos.some((p) => p.clave === actual)) return <Navigate to="/semana/compras" replace />;
+    const enCaptura = capturas.some((p) => p.clave === actual);
+    const pestanas = enCaptura ? capturas : proceso;
 
     return <div className="page weekly-operation weekly-operation--simple">
       <header className="weekly-operation__head weekly-operation__head--simple">
-        <div><span className="eyebrow">Operación semanal</span><h1>{enCaptura ? 'Captura' : 'Seguimiento'}</h1></div>
-        <nav className="weekly-mode-tabs" aria-label="Tipo de vista">
+        <div><span className="eyebrow">Operación semanal</span><h1>{enCaptura ? 'Captura' : 'Proceso'}</h1></div>
+        <nav className="weekly-mode-tabs" aria-label="Grupo de operación">
           <NavLink to="/semana/compras" className={enCaptura ? 'is-active' : ''}>Captura</NavLink>
-          <NavLink to="/semana/seguimiento" className={!enCaptura ? 'is-active' : ''}>Seguimiento</NavLink>
+          <NavLink to="/semana/preparacion" className={!enCaptura ? 'is-active' : ''}>Proceso</NavLink>
         </nav>
       </header>
 
-      {enCaptura && <nav className="capture-tabs" aria-label="Datos que se capturan">
-        {capturas.map((p) => <NavLink key={p.clave} to={`/semana/${p.clave}`} className={p.clave === actual ? 'is-active' : ''}><span>{p.numero}</span><strong>{p.label}</strong></NavLink>)}
-      </nav>}
+      <nav className={`capture-tabs ${enCaptura ? '' : 'process-tabs'}`} aria-label={enCaptura ? 'Datos que se capturan' : 'Proceso operativo'}>
+        {pestanas.map((p) => <NavLink key={p.clave} to={`/semana/${p.clave}`} className={p.clave === actual ? 'is-active' : ''}><span>{p.numero}</span><strong>{p.label}</strong></NavLink>)}
+      </nav>
 
       <div className="weekly-operation__content">
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado />}
         {actual === 'produccion' && <OperacionAdmin seccion="produccion" integrado />}
         {actual === 'ventas' && <Pedidos integrado />}
-        {actual === 'seguimiento' && <SeguimientoSemana />}
+        {actual === 'preparacion' && <Distribucion integrado />}
+        {actual === 'despacho' && <Bodega integrado />}
+        {actual === 'reparto' && <Ruta integrado />}
+        {actual === 'recepcion' && <Recepcion integrado />}
+        {actual === 'inventario' && <InventarioOperacion integrado />}
+        {actual === 'cierre' && <OperacionAdmin seccion="cierre" integrado />}
       </div>
     </div>;
   }
