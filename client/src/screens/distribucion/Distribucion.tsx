@@ -374,13 +374,13 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
         <>
           <p className="muted">
             Valor total: <strong>{usd(prod.total_valor)}</strong>
-            {prod.total_faltante_valor > 0 && <> · Faltante en bodega: <strong>{usd(prod.total_faltante_valor)}</strong></>}
+            {prod.total_faltante_valor > 0 && <> · Pendiente de conciliar: <strong>{usd(prod.total_faltante_valor)}</strong></>}
           </p>
           {prod.items.length > 12 && (
             <div className="dist-filtros">
               <input className="inv-search" type="search" placeholder="Buscar producto…" value={q} onChange={(e) => setQ(e.target.value)} />
               <button type="button" className={`chip ${soloFaltante ? 'chip--danger' : 'chip--muted'}`} style={{ cursor: 'pointer', border: 0 }} onClick={() => setSoloFaltante((v) => !v)}>
-                Solo con faltante
+                Solo por conciliar
               </button>
             </div>
           )}
@@ -395,8 +395,8 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
                 <div>
                   <strong>{nombreEnOrden(it.sku, it.nombre, prod.linea)}</strong> <span className="chip chip--info">{it.unidad}</span>
                   <div className="muted">
-                    Pedido: {it.total_aprobada} · Bodega: {it.bodega_disponible} · Surtible: {it.surtible}
-                    {it.faltante > 0 && <> · <span className="txt-danger">Faltan {it.faltante}</span></>}
+                    Pedido: {it.total_aprobada} · Saldo registrado: {it.bodega_disponible}
+                    {it.faltante > 0 && <> · <span className="txt-danger">Por conciliar {it.faltante}</span></>}
                   </div>
                   <div className="dist-suc-mini">
                     {it.sucursales.map((s, i) => (

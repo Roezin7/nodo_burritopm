@@ -4,6 +4,7 @@ import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../a
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import * as svc from './service.js';
 import { prisma } from '../db.js';
+import * as conciliacion from './conciliacion.js';
 
 export const operacionRouter = Router();
 const linea = z.enum(['carne', 'desechables']);
@@ -14,9 +15,10 @@ operacionRouter.use(requireAuth);
 
 /** Catálogos compartidos: empresas, ubicaciones, productos, proveedores y rutas. */
 operacionRouter.get('/catalogo', asyncHandler(async (req, res) => {
+  const q = z.object({ fecha_referencia: fecha.optional() }).parse(req.query);
   const esAdmin = req.auth!.rol === 'admin';
   const asignadas = esAdmin ? undefined : (await prisma.usuario_ubicaciones.findMany({ where: { usuario_id: req.auth!.usuarioId }, select: { ubicacion_id: true } })).map((r) => r.ubicacion_id);
-  res.json(await svc.catalogoOperacion(req.auth!.negocioId, esAdmin, asignadas));
+  res.json(await svc.catalogoOperacion(req.auth!.negocioId, esAdmin, asignadas, q.fecha_referencia));
 }));
 
 /** Pedidos propios para restaurantes; el admin puede consultar cualquier ubicación. */
@@ -69,6 +71,19 @@ operacionRouter.get('/produccion', soloAdmin, asyncHandler(async (req, res) => {
   res.json(await svc.resumenProduccion(req.auth!.negocioId, q.desde, q.hasta));
 }));
 
+/** Auditoría semanal: inventario inicial + entradas − salidas = cortes de miércoles y sábado. */
+operacionRouter.get('/conciliacion', soloAdmin, asyncHandler(async (req, res) => {
+  const q = z.object({ desde: fecha, hasta: fecha, ubicacion_id: id.optional() })
+    .refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.query);
+  res.json(await conciliacion.obtenerConciliacionSemanal(req.auth!.negocioId, q.desde, q.hasta, q.ubicacion_id ? BigInt(q.ubicacion_id) : undefined));
+}));
+
+/** Fija una fotografía inicial reconstruida sin alterar el inventario vivo. */
+operacionRouter.post('/conciliacion/inicializar', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ desde: fecha, ubicacion_id: id.optional() }).parse(req.body);
+  res.status(201).json(await conciliacion.fijarInventarioInicialSemanal(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.ubicacion_id ? BigInt(b.ubicacion_id) : undefined));
+}));
+
 operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     proveedor_id: id, ubicacion_id: id, fecha, referencia: z.string().trim().max(120).nullable().optional(),
@@ -87,6 +102,7 @@ operacionRouter.put('/inventario-final', soloAdmin, asyncHandler(async (req, res
   const b = z.object({
     ubicacion_id: id,
     fecha,
+    motivo: z.string().trim().max(500).nullable().optional(),
     lineas: z.array(z.object({ product_id: id, cantidad: z.coerce.number().nonnegative() })).min(1),
   }).parse(req.body);
   res.json(await svc.guardarInventarioFinal(req.auth!.negocioId, req.auth!.usuarioId, b));
@@ -110,6 +126,11 @@ operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => 
     salidas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive() })).min(1),
   }).parse(req.body);
   res.status(201).json(await svc.registrarProduccion(req.auth!.negocioId, req.auth!.usuarioId, b));
+}));
+
+/** Elimina un batch incorrecto y revierte materia prima, salidas y movimientos. */
+operacionRouter.delete('/produccion/:id', soloAdmin, asyncHandler(async (req, res) => {
+  res.json(await svc.eliminarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id))));
 }));
 
 operacionRouter.patch('/lotes/:id', soloAdmin, asyncHandler(async (req, res) => {

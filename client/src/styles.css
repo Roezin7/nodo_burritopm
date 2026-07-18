@@ -3111,6 +3111,25 @@ a.flujo-paso { text-decoration: none; }
   text-transform: uppercase;
 }
 .nav-group .nav-link { min-height: 39px; padding-top: 0.52rem; padding-bottom: 0.52rem; }
+
+/* Conciliación semanal: tabla compacta, desplazable sin romper el flujo en móvil. */
+.weekly-reconciliation { display: grid; gap: 1rem; }
+.weekly-reconciliation .workspace-card-head { align-items: flex-start; }
+.weekly-reconciliation .workspace-card-head h2 { margin: 0.15rem 0; }
+.weekly-reconciliation .workspace-card-head p { margin: 0; color: var(--ink-3); }
+.reconciliation-status, .reconciliation-links { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; }
+.reconciliation-links a { color: var(--primary); font-weight: 700; text-decoration: underline; }
+.reconciliation-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-input); }
+.reconciliation-table { width: 100%; min-width: 1120px; border-collapse: collapse; font-size: 0.82rem; }
+.reconciliation-table th, .reconciliation-table td { padding: 0.65rem 0.7rem; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.reconciliation-table th { color: var(--ink-3); background: var(--surface-2); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.035em; }
+.reconciliation-table th:first-child, .reconciliation-table td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.reconciliation-table thead th:first-child { background: var(--surface-2); z-index: 2; }
+.reconciliation-table td:first-child { min-width: 190px; }
+.reconciliation-table td:first-child small { display: block; color: var(--ink-3); margin-top: 0.2rem; }
+.reconciliation-table tr.is-different td { background-color: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
+.reconciliation-table tr.is-different td:first-child { background-color: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
+.batch-card-actions { display: flex; align-items: center; gap: 0.55rem; }
 .nav-foot { flex: 0 0 auto; }
 .nav-foot button.nav-link { width: 100%; border: 0; background: transparent; text-align: left; }
 .nav-foot button.nav-link:hover { background: var(--surface-2); }

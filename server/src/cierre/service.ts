@@ -2,7 +2,9 @@ import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { precioVentaProducto } from '../operacion/service.js';
+import { preciosVentaSemana } from '../operacion/service.js';
+import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
+import { eliminarConteo } from '../conteos/service.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -37,20 +39,6 @@ export async function asegurarSemana(negocioId: bigint, fechaCierre: string) {
   });
 }
 
-async function precioSemanal(negocioId: bigint, productId: bigint, inicio: Date, fin: Date) {
-  const p = await prisma.products.findFirst({ where: { id: productId, negocio_id: negocioId } });
-  if (!p) throw new HttpError(404, 'Producto no encontrado');
-  if (p.precio_venta_fijo != null) return num0(p.precio_venta_fijo);
-  if (p.tipo_operativo !== 'proteina') return precioVentaProducto(p) ?? 0;
-  const salidas = await prisma.produccion_salidas.findMany({
-    where: { product_id: productId, produccion: { negocio_id: negocioId, fecha: { gte: inicio, lte: fin } } },
-    select: { cajas: true, costo_total: true },
-  });
-  const cajas = salidas.reduce((a, s) => a + num0(s.cajas), 0);
-  const costo = salidas.reduce((a, s) => a + num0(s.costo_total), 0);
-  return cajas > 0 ? r2(costo / cajas + num0(p.markup_caja)) : precioVentaProducto(p) ?? 0;
-}
-
 async function cantidadFacturable(linea: {
   cantidad: Prisma.Decimal;
   distribucion_lineas: { cantidad_recibida: Prisma.Decimal | null; cantidad_cargada: Prisma.Decimal | null; cantidad_aprobada: Prisma.Decimal | null; cantidad_sugerida: Prisma.Decimal }[];
@@ -59,9 +47,11 @@ async function cantidadFacturable(linea: {
   return r3(linea.distribucion_lineas.reduce((a, d) => a + (num(d.cantidad_recibida) ?? num(d.cantidad_cargada) ?? num(d.cantidad_aprobada) ?? num0(d.cantidad_sugerida)), 0));
 }
 
-function numeroFactura(anio: number, semana: number, empresa: string, ubicacion: string, linea: LineaOperacion) {
+export function numeroFactura(anio: number, semana: number, empresa: string, ubicacion: string, linea: LineaOperacion) {
   const limpio = (s: string, n: number) => s.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, n) || 'X';
-  return `${anio}-${String(semana).padStart(2, '0')}-${limpio(empresa, 4)}-${limpio(ubicacion, 5)}-${linea === 'carne' ? 'M' : 'D'}`;
+  // El código completo distingue, por ejemplo, NAPER de NAPER2. Recortarlo a cinco
+  // caracteres hacía que dos sucursales intentaran crear el mismo folio.
+  return `${anio}-${String(semana).padStart(2, '0')}-${limpio(empresa, 8)}-${limpio(ubicacion, 12)}-${linea === 'carne' ? 'M' : 'D'}`;
 }
 
 async function valuacionInventario(negocioId: bigint) {
@@ -136,6 +126,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   if (distribucionesActivas) {
     throw new HttpError(409, `Faltan ${distribucionesActivas} preparación(es) por despachar o recibir antes del cierre.`);
   }
+  await validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
   const pedidos = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['borrador', 'cancelado'] } },
     include: {
@@ -145,10 +136,13 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   });
   if (!pedidos.length) throw new HttpError(400, 'No hay pedidos confirmados para cerrar esta semana');
 
-  const precios = new Map<string, number>();
-  for (const p of [...new Map(pedidos.flatMap((o) => o.lineas).map((l) => [l.product_id.toString(), l.producto])).values()]) {
-    precios.set(p.id.toString(), await precioSemanal(negocioId, p.id, semana.inicia_at, semana.termina_at));
+  const productosVendidos = [...new Map(pedidos.flatMap((o) => o.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
+  const preciosCalculados = await preciosVentaSemana(negocioId, productosVendidos, iso(semana.inicia_at), iso(semana.termina_at));
+  const proteinasSinProduccion = productosVendidos.filter((p) => p.tipo_operativo === 'proteina' && preciosCalculados.get(p.id.toString()) == null);
+  if (proteinasSinProduccion.length) {
+    throw new HttpError(409, `Falta registrar producción semanal para calcular costo + $15 de: ${proteinasSinProduccion.map((p) => p.nombre).join(', ')}.`);
   }
+  const precios = new Map([...preciosCalculados].map(([id, precio]) => [id, precio ?? 0]));
   type Grupo = { empresa: (typeof pedidos)[number]['empresa']; ubicacion: (typeof pedidos)[number]['ubicacion']; linea: LineaOperacion; items: Map<string, { productId: bigint; descripcion: string; cantidad: number; precio: number }> };
   const grupos = new Map<string, Grupo>();
   for (const pedido of pedidos) {
@@ -168,8 +162,12 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   }
 
   const facturas = await prisma.$transaction(async (tx) => {
-    const anteriores = await tx.facturas.findMany({ where: { semana_id: semana.id, estado: { not: 'anulada' } } });
-    if (anteriores.length) await tx.facturas.updateMany({ where: { id: { in: anteriores.map((f) => f.id) } }, data: { estado: 'anulada' } });
+    // Conserva todo el historial para que un recierre genere v2, v3, etc. Consultar solo las
+    // facturas vigentes hacía que una semana reabierta intentara crear otra v1 y chocara con
+    // la llave única.
+    const anteriores = await tx.facturas.findMany({ where: { semana_id: semana.id }, orderBy: { version: 'desc' } });
+    const vigentes = anteriores.filter((f) => f.estado !== 'anulada');
+    if (vigentes.length) await tx.facturas.updateMany({ where: { id: { in: vigentes.map((f) => f.id) } }, data: { estado: 'anulada' } });
     const creadas = [];
     for (const g of grupos.values()) {
       const items = [...g.items.values()].filter((i) => i.cantidad > 0);
@@ -195,12 +193,13 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   return { semana_id: Number(semana.id), anio: semana.anio, semana: semana.semana, facturas: facturas.length, balance };
 }
 
-export async function reabrirSemana(negocioId: bigint, semanaId: bigint) {
+export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuarioId: bigint) {
   const s = await prisma.semanas_operativas.findFirst({ where: { id: semanaId, negocio_id: negocioId } });
   if (!s) throw new HttpError(404, 'Semana no encontrada');
   if (s.estado !== 'cerrada') throw new HttpError(409, 'La semana no está cerrada');
   const pagadas = await prisma.facturas.count({ where: { semana_id: s.id, estado: 'pagada' } });
   if (pagadas) throw new HttpError(409, 'No se puede reabrir una semana con facturas pagadas');
+  const carniceria = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, codigo: 'CARN', activo: true }, select: { id: true } });
   const pedidos = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, fecha_entrega: { gte: s.inicia_at, lte: s.termina_at }, estado: 'cerrado' },
     select: { id: true },
@@ -212,13 +211,27 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint) {
   }) : [];
   const conPreparacion = vinculados.map((p) => p.pedido_id);
   const sinPreparacion = pedidos.filter((p) => !conPreparacion.some((id) => id === p.id)).map((p) => p.id);
+  const inventariosFinales = await prisma.conteos.findMany({
+    where: {
+      negocio_id: negocioId, fecha: { gte: s.inicia_at, lte: s.termina_at },
+      notas: { startsWith: 'inventario_final_operativo' },
+    },
+    orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+    select: { id: true },
+  });
   await prisma.$transaction([
     prisma.facturas.updateMany({ where: { semana_id: s.id, estado: 'emitida' }, data: { estado: 'anulada' } }),
     prisma.semanas_operativas.update({ where: { id: s.id }, data: { estado: 'reabierta', cerrado_at: null, cerrado_por: null } }),
     prisma.pedidos_operativos.updateMany({ where: { id: { in: conPreparacion } }, data: { estado: 'en_preparacion' } }),
     prisma.pedidos_operativos.updateMany({ where: { id: { in: sinPreparacion } }, data: { estado: 'confirmado' } }),
   ]);
-  return { ok: true };
+  // El inventario físico era el ancla del cierre anterior. Se revierte para que compras y
+  // producción retroactivas se apliquen una sola vez; el admin lo captura de nuevo al terminar.
+  for (const inventario of inventariosFinales) await eliminarConteo(negocioId, inventario.id);
+  // La apertura se fija después de quitar el ajuste final. Esto también repara semanas antiguas
+  // que fueron cerradas antes de que existiera la fotografía de inventario inicial.
+  if (carniceria) await asegurarInventarioInicialSemanal(negocioId, usuarioId, iso(s.inicia_at), carniceria.id);
+  return { ok: true, inventarios_finales_revertidos: inventariosFinales.length };
 }
 
 export async function listarCierres(negocioId: bigint) {

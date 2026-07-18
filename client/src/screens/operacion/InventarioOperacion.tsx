@@ -40,6 +40,7 @@ interface InventarioGuardado {
   ubicacion: string;
   ajustes: number;
   tipo: 'trazable' | 'anterior';
+  motivo: string | null;
   lineas: { product_id: number; cantidad: number }[] | null;
 }
 
@@ -59,6 +60,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const [editando, setEditando] = useState(false);
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
+  const [observacion, setObservacion] = useState('');
   const [busy, setBusy] = useState(false);
   const [historial, setHistorial] = useState<InventarioGuardado[]>([]);
 
@@ -119,9 +121,12 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     transito: a.transito + i.transito,
     valor: a.valor + i.valor,
   }), { disponible: 0, reservado: 0, transito: 0, valor: 0 });
+  const almacenActual = almacenes.find((a) => String(a.id) === almacenId);
 
   function iniciarCierre() {
     setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(i.disponible)])));
+    if (almacenActual?.codigo === 'CARN') setFecha(semana.fin);
+    setObservacion('');
     setEditando(true);
   }
 
@@ -131,7 +136,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     try {
       const r = await api<{ ajustes: number }>('/operacion/inventario-final', {
         method: 'PUT',
-        body: { ubicacion_id: Number(almacenId), fecha, lineas: stock.items.map((i) => ({ product_id: i.product_id, cantidad: Number(cantidades[i.product_id] || 0) })) },
+        body: { ubicacion_id: Number(almacenId), fecha, motivo: observacion.trim() || null, lineas: stock.items.map((i) => ({ product_id: i.product_id, cantidad: Number(cantidades[i.product_id] || 0) })) },
       });
       await recargar();
       setEditando(false);
@@ -156,7 +161,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
       {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
-    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 8 : 7}</span><h2>Inventario final</h2></div>{admin && semana.actual && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 8 : 7}</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">
@@ -195,8 +200,8 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
       </section>
-      {admin && <section className="workspace-card inventory-history"><div className="workspace-card-head"><div><h2>Inventarios de semana {semana.numero}</h2><p>Capturas físicas guardadas dentro del periodo seleccionado.</p></div><span>{historialSemana.length}</span></div>{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.tipo === 'anterior' && <small>Captura de la versión anterior; también puede revertirse.</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin inventario final</strong><span>No hay captura física guardada en esta semana.</span></div>}</section>}
-      {editando && <div className="inventory-capture-actions"><label className="field"><span>Fecha dentro de semana {semana.numero}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
+      {admin && <section className="workspace-card inventory-history"><div className="workspace-card-head"><div><h2>Inventarios de semana {semana.numero}</h2><p>Capturas físicas guardadas dentro del periodo seleccionado.</p></div><span>{historialSemana.length}</span></div>{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>Motivo: {inventario.motivo}</small>}{inventario.tipo === 'anterior' && <small>Captura de la versión anterior; también puede revertirse.</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin inventario final</strong><span>No hay captura física guardada en esta semana.</span></div>}</section>}
+      {editando && <div className="inventory-capture-actions"><label className="field"><span>{almacenActual?.codigo === 'CARN' ? 'Cierre del sábado' : `Fecha dentro de semana ${semana.numero}`}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} disabled={almacenActual?.codigo === 'CARN'} onChange={(e) => setFecha(e.target.value)} /></label><label className="field field--wide"><span>Observación del ajuste</span><input value={observacion} maxLength={500} placeholder="Ej. diferencia de conteo reportada por producción" onChange={(e) => setObservacion(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
       {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}
   </div>;

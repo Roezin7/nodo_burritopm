@@ -23,6 +23,19 @@ interface Cierre {
   facturas: Factura[];
 }
 interface Factura { id: number; numero: string; version: number; empresa: string; ubicacion: string; linea: string; emitida_at: string; vence_at: string; estado: string; total: number; pagado: number; lineas: { descripcion: string; cantidad: number; precio: number; importe: number }[] }
+interface ConciliacionFila {
+  product_id: number; sku: string; nombre: string; tipo: string | null; unidad: string;
+  inicial: number; actual: number; fisico_final: number | null;
+  compras1: number; compras2: number; produccionEntrada1: number; produccionEntrada2: number;
+  produccionSalida1: number; produccionSalida2: number; salidas1: number; salidas2: number;
+  pedidos1: number; pedidos2: number; saldoMiercoles: number; teoricoFinal: number; diferenciaFinal: number | null;
+}
+interface Conciliacion {
+  ubicacion: { id: number; nombre: string };
+  periodo: { desde: string; hasta: string; corte_miercoles: string };
+  inicial_fijado: boolean; final_capturado: boolean; origen_inicial: 'fijado' | 'cierre_anterior' | 'reconstruido'; filas: ConciliacionFila[];
+  resumen: { saldos_provisionales: number; diferencias_fisicas: number; producciones: number; pedidos: number };
+}
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -65,7 +78,7 @@ export default function OperacionAdmin({ seccion, integrado = false, semana = cr
       {error && <p className="error-msg">{error}</p>}
       {semanaCerrada && ['compras', 'produccion'].includes(seccion) && <p className="notice notice--warning">La semana {semana.numero} está cerrada y se muestra en modo consulta. Reábrela desde Cierre para hacer correcciones.</p>}
       {seccion === 'compras' && <Compras catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={async (mensaje = 'Compra registrada e inventario actualizado.') => { await cargar(); toast.ok(mensaje); }} setError={setError} />}
-      {seccion === 'produccion' && <Produccion catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Batch calculado y guardado.'); }} setError={setError} />}
+      {seccion === 'produccion' && <Produccion catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={cargar} setError={setError} />}
       {seccion === 'rutas' && <Rutas catalogo={catalogo} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Ruta actualizada.'); }} setError={setError} />}
       {seccion === 'cierre' && <Cierres cierres={cierres} semana={semana} busy={busy} setBusy={setBusy} onDone={cargar} setError={setError} />}
     </div>
@@ -142,6 +155,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
 }
 
 function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; bloqueada: boolean; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
+  const toast = useToast();
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const materias = catalogo.productos.filter((p) => p.tipo === 'materia_prima');
   const [materia, setMateria] = useState(String(materias[0]?.id ?? '')); const [fecha, setFecha] = useState(fechaDentroDeSemana(semana)); const [entrada, setEntrada] = useState(''); const [salidas, setSalidas] = useState<Record<number, string>>({});
@@ -150,7 +164,9 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const materiaActual = materias.find((p) => String(p.id) === materia);
   const terminados = catalogo.productos.filter((p) => p.linea === 'carne' && p.tipo === 'proteina' && (recetas[materiaActual?.sku ?? ''] ?? []).includes(p.sku));
   const lotesMateria = resumen.lotes.filter((l) => String(l.product_id) === materia);
-  const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= fecha).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
+  // El admin suele capturar todo el sábado: cualquier compra fresca de la misma semana puede
+  // respaldar el batch, aunque se haya registrado después que la fecha de producción.
+  const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= semana.fin).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
   const cajasFrescas = lotesFrescos.reduce((a, l) => a + l.cajas, 0);
   const cajasCongeladas = lotesMateria.filter((l) => l.congelado).reduce((a, l) => a + l.cajas, 0);
   const pesoFresco = lotesFrescos.reduce((a, l) => a + l.peso_lb, 0);
@@ -176,7 +192,18 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     try {
       await api('/operacion/produccion', { method: 'POST', body: { ubicacion_id: carniceria.id, materia_prima_id: Number(materia), fecha, cajas_materia_prima: Number(entrada), salidas: terminados.filter((p) => Number(salidas[p.id] || 0) > 0).map((p) => ({ product_id: p.id, cajas: Number(salidas[p.id]) })) } });
       setEntrada(''); setSalidas({}); await onDone();
+      toast.ok('Batch calculado y guardado.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la producción.'); } finally { setBusy(false); }
+  }
+  async function eliminar(id: number) {
+    if (!window.confirm('¿Eliminar este batch? Se revertirán la materia prima, las cajas producidas y sus costos.')) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/operacion/produccion/${id}`, { method: 'DELETE' });
+      await onDone();
+      toast.ok('Producción eliminada y saldos recalculados.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la producción.'); }
+    finally { setBusy(false); }
   }
   const yieldActual = pesoEntradaEstimado > 0 ? (pesoSalida / pesoEntradaEstimado) * 100 : 0;
   return <div className="operation-stack">
@@ -185,11 +212,11 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
         <div className="workspace-card-head"><h2>Nueva producción</h2></div>
         <div className="form-grid form-grid--batch">
           <label className="field"><span>Fecha dentro de semana {semana.numero}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= fecha).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} cajas frescas</option>; })}</select></label>
+          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= semana.fin).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} cajas frescas de la semana</option>; })}</select></label>
           <label className="field field--number"><span>Cajas de materia prima</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={entrada} onChange={(e) => setEntrada(e.target.value)} /></label>
         </div>
         <div className={`production-stock-link ${insuficiente ? 'is-alert' : ''}`}><span><strong>Disponible para producir</strong>{cajasFrescas.toLocaleString('es-MX')} cajas frescas · {pesoFresco.toLocaleString('es-MX')} lb</span><span>{cajasCongeladas > 0 ? `${cajasCongeladas.toLocaleString('es-MX')} congeladas (descongela antes de usar)` : 'Sin cajas congeladas'}</span></div>
-        {insuficiente && <p className="error-msg">La producción excede las compras frescas disponibles.</p>}
+        {insuficiente && <p className="error-msg">Registra primero las cajas compradas de esta semana para calcular su peso y costo real.</p>}
         <div className="production-weight-flow"><span><strong>Entrada FIFO</strong>{pesoCajaConsumida ? pesoCajaConsumida.toFixed(2) : '?'} lb promedio de las cajas que se usarán · {usd(consumoEstimado.costoTotal)}</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
         <div className="form-divider"><span>Cajas terminadas producidas</span></div>
         <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>Caja terminada de {p.peso_caja_lb ?? '?'} lb · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
@@ -205,7 +232,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     </div>
 
     <section className="workspace-card"><div className="workspace-card-head"><h2>Producción registrada</h2><span>{resumen.producciones.length}</span></div>
-      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Desperdicio</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} cajas terminadas</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
+      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Desperdicio</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} cajas terminadas</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
     </section>
   </div>;
 }
@@ -226,6 +253,46 @@ function Rutas({ catalogo, busy, setBusy, onDone, setError }: { catalogo: Catalo
   </section>; })}</div>;
 }
 
+function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; setError: (v: string) => void }) {
+  const toast = useToast();
+  const [reporte, setReporte] = useState<Conciliacion | null>(null);
+  async function cargar() {
+    try { setReporte(await api<Conciliacion>(`/operacion/conciliacion?desde=${semana.inicio}&hasta=${semana.fin}`)); }
+    catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la conciliación semanal.'); }
+  }
+  useEffect(() => { setReporte(null); void cargar(); }, [semana.inicio, semana.fin]);
+  async function fijarInicio() {
+    setBusy(true); setError('');
+    try {
+      await api('/operacion/conciliacion/inicializar', { method: 'POST', body: { desde: semana.inicio } });
+      await cargar(); toast.ok('Inventario inicial fijado sin modificar existencias.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo fijar el inventario inicial.'); }
+    finally { setBusy(false); }
+  }
+  const q = (n: number) => Math.abs(n) < 0.0001 ? '—' : n.toLocaleString('es-MX', { maximumFractionDigits: 3 });
+  if (!reporte) return <section className="workspace-card"><Spinner label="Calculando conciliación…" /></section>;
+  return <section className="workspace-card weekly-reconciliation">
+    <div className="workspace-card-head">
+      <div><span className="eyebrow">Auditoría de Carnicería</span><h2>Conciliación semanal</h2><p>Inicio + compras y producción − salidas reales = inventario teórico.</p></div>
+      {!reporte.inicial_fijado && <button className="btn btn-primary" disabled={busy} onClick={() => void fijarInicio()}>Fijar inventario inicial</button>}
+    </div>
+    <div className="reconciliation-status">
+      <span className={`chip ${reporte.inicial_fijado ? 'chip--ok' : 'chip--warn'}`}>{reporte.inicial_fijado ? 'Inicio fijado' : reporte.origen_inicial === 'cierre_anterior' ? 'Inicio tomado del sábado anterior' : 'Inicio reconstruido, falta fijar'}</span>
+      <span className={`chip ${reporte.final_capturado ? 'chip--ok' : 'chip--warn'}`}>{reporte.final_capturado ? 'Físico final capturado' : 'Falta inventario final'}</span>
+      {reporte.resumen.saldos_provisionales > 0 && <span className="chip chip--danger">{reporte.resumen.saldos_provisionales} saldos pendientes</span>}
+      {reporte.resumen.diferencias_fisicas > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fisicas} diferencias documentadas</span>}
+    </div>
+    <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Capturar físico final</Link></div>
+    <div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto</th><th>Inicio</th><th>+ Entradas L–X</th><th>− Uso/salida X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida S</th><th>Teórico final</th><th>Físico final</th><th>Diferencia</th></tr></thead><tbody>{reporte.filas.map((f) => {
+      const entradas1 = f.compras1 + f.produccionSalida1; const salidas1 = f.produccionEntrada1 + f.salidas1;
+      const entradas2 = f.compras2 + f.produccionSalida2; const salidas2 = f.produccionEntrada2 + f.salidas2;
+      const diferencia = f.diferenciaFinal ?? 0;
+      return <tr key={f.product_id} className={Math.abs(diferencia) > 0.0001 || f.actual < -0.0001 ? 'is-different' : ''}><td><strong>{f.nombre}</strong><small>{f.tipo?.replaceAll('_', ' ')} · pedidos {q(f.pedidos1)} / {q(f.pedidos2)}</small></td><td>{q(f.inicial)}</td><td>{q(entradas1)}</td><td>{q(salidas1)}</td><td><strong>{q(f.saldoMiercoles)}</strong></td><td>{q(entradas2)}</td><td>{q(salidas2)}</td><td><strong>{q(f.teoricoFinal)}</strong></td><td>{f.fisico_final == null ? 'Pendiente' : q(f.fisico_final)}</td><td className={Math.abs(diferencia) > 0.0001 ? 'txt-danger' : ''}>{f.diferenciaFinal == null ? '—' : q(diferencia)}</td></tr>;
+    })}</tbody></table></div>
+    {!reporte.filas.length && <div className="empty-state"><strong>Sin movimiento de carne</strong><span>No hay productos que conciliar en esta semana.</span></div>}
+  </section>;
+}
+
 function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres: Cierre[]; semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
   const [factura, setFactura] = useState<Factura | null>(null);
   useEffect(() => setFactura(null), [semana.inicio, semana.fin]);
@@ -233,10 +300,11 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   const nombresExcel: Record<string, string> = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' };
   async function descargar(id: number, tipo: string) { const res = await fetch(`/api/cierre/${id}/excel/${tipo}`, { headers: { Authorization: `Bearer ${getToken()}` } }); if (!res.ok) { setError('No se pudo generar el Excel.'); return; } const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nombresExcel[tipo] ?? `${tipo}.xlsx`; a.click(); URL.revokeObjectURL(url); }
   async function pagar(f: Factura) { setBusy(true); setError(''); try { await api(`/cierre/facturas/${f.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); } finally { setBusy(false); } }
-  async function reabrir(id: number) { if (!window.confirm('Se anularán las facturas emitidas de esta semana para poder corregir y volver a cerrar. ¿Continuar?')) return; setBusy(true); setError(''); try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); } finally { setBusy(false); } }
+  async function reabrir(id: number) { if (!window.confirm('Se anularán las facturas y se revertirá el inventario final de esta semana. Después podrás corregir compras o producción y capturar de nuevo el físico final. ¿Continuar?')) return; setBusy(true); setError(''); try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); } finally { setBusy(false); } }
   const libros = [['weekly-order', 'Weekly Order'], ['disposables', 'Disposables'], ['production', 'Production'], ['billing', 'Billing'], ['lbt', 'LBT'], ['aurora', 'Aurora']] as const;
   const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   return <div className="operation-stack">
+    <ConciliacionSemanal semana={semana} busy={busy} setBusy={setBusy} setError={setError} />
     <section className="close-week-card"><div><span className="eyebrow">Semana {semana.numero}</span><h2>Cerrar y facturar</h2><p>{semana.inicio} al {semana.fin}</p></div><div className="close-week-action"><button className="btn btn-primary" disabled={busy || semana.fin > hoy() || cierreSeleccionado?.estado === 'cerrada'} onClick={() => void cerrar()}>{busy ? 'Procesando…' : cierreSeleccionado?.estado === 'cerrada' ? 'Semana cerrada' : semana.fin > hoy() ? 'Semana en curso' : 'Cerrar semana'}</button></div></section>
 
     <div className="week-list">{cierreSeleccionado ? [cierreSeleccionado].map((s) => <section className="week-card" key={s.id}><header><div><span className={`status-dot status-dot--${s.estado}`} /> <strong>Semana {s.semana} · {s.anio}</strong><p>{s.inicia_at} al {s.termina_at}</p></div><div className="week-balance"><span>Balance</span><strong>{usd(s.balance_neto)}</strong></div></header>

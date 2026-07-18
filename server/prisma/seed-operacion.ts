@@ -25,6 +25,11 @@ const desechables = [
 ] as const;
 
 const bpmActivas = ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON'];
+const ubicacionesBpm = [
+  ['Lombard', 'LOMBA'], ['Lisle', 'LISLE'], ['Naperville II', 'NAPER2'], ['Naperville', 'NAPER'],
+  ['Batavia', 'BATAV'], ['West Chicago', 'WESTC'], ['Carol Stream', 'CAROL'], ['Glendale Heights', 'GLEND'],
+  ['Schaumburg', 'SCHAU'], ['Rolling Meadows', 'ROLLI'], ['Algonquin', 'ALGON'],
+] as const;
 const nuevas = [
   ['Crystal Lake', 'CRYST', false], ['Lake Zurich', 'LAKEZ', false], ['Frankfort', 'FRANK', false], ['Plainfield', 'PLAIN', false],
   ['Taquería Aurora', 'AUROR', true], ['Burlington', 'BURLI', true],
@@ -69,13 +74,23 @@ const rutas: { codigo: string; nombre: string; linea: LineaOperacion; dia: numbe
   { codigo: 'DES-SUR-MIE', nombre: 'Desechables Sur · miércoles', linea: 'desechables', dia: 3, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'ALGON', 'TNA'] },
 ];
 
-async function seedDesechables(negocioId: bigint) {
+async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: bigint) {
   for (const [indice, [nombre, costo, venta]] of desechables.entries()) {
-    const producto = await prisma.products.findFirst({ where: { negocio_id: negocioId, nombre: { equals: nombre, mode: 'insensitive' } } });
-    if (!producto) throw new Error(`El catálogo actual no contiene el desechable: ${nombre}`);
+    const sku = `BPM-${String(indice + 1).padStart(4, '0')}`;
+    const producto = await prisma.products.findFirst({
+      where: { negocio_id: negocioId, OR: [{ nombre: { equals: nombre, mode: 'insensitive' } }, { sku }] },
+    }) ?? await prisma.products.create({
+      data: {
+        negocio_id: negocioId, nombre, sku, categoria_id: categoriaId,
+        unidad_distribucion_id: cajaId, unidad_compra_id: cajaId, unidad_almacen_id: cajaId,
+        linea_operacion: 'desechables', tipo_operativo: 'desechable',
+        costo_promedio: costo, ultimo_costo: costo, precio_venta_fijo: venta, orden_operativo: indice + 1,
+      },
+    });
     await prisma.products.update({
       where: { id: producto.id },
       data: {
+        categoria_id: producto.categoria_id ?? categoriaId,
         linea_operacion: producto.linea_operacion ?? 'desechables', tipo_operativo: producto.tipo_operativo ?? 'desechable',
         costo_promedio: producto.costo_promedio ?? costo, ultimo_costo: producto.ultimo_costo ?? costo,
         precio_venta_fijo: producto.precio_venta_fijo ?? venta,
@@ -91,12 +106,25 @@ async function main() {
   const caja = await prisma.unidades.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Caja' } }, update: {}, create: { negocio_id: org.id, nombre: 'Caja' } });
   const pieza = await prisma.unidades.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Pieza' } }, update: {}, create: { negocio_id: org.id, nombre: 'Pieza' } });
   const catCarne = await prisma.categorias.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Carnicería' } }, update: {}, create: { negocio_id: org.id, nombre: 'Carnicería', orden: 0 } });
+  const catDesechables = await prisma.categorias.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Desechables' } }, update: {}, create: { negocio_id: org.id, nombre: 'Desechables', orden: 1 } });
 
   const empresas = {
     BPM: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'BPM' } }, update: {}, create: { negocio_id: org.id, codigo: 'BPM', nombre: 'Burrito Parrilla Mexicana', tipo: 'interna', dias_credito_carne: 14, dias_credito_desechables: 14 } }),
     AUR: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'AUR' } }, update: {}, create: { negocio_id: org.id, codigo: 'AUR', nombre: 'Taquería Aurora', tipo: 'externa', dias_credito_carne: 7, dias_credito_desechables: 7 } }),
     LBT: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'LBT' } }, update: {}, create: { negocio_id: org.id, codigo: 'LBT', nombre: 'Los Burritos Tapatíos', tipo: 'externa', dias_credito_carne: 0, dias_credito_desechables: 0 } }),
   };
+  for (const [nombre, codigo] of ubicacionesBpm) {
+    await prisma.ubicaciones.upsert({
+      where: { negocio_id_codigo: { negocio_id: org.id, codigo } },
+      update: { empresa_cliente_id: empresas.BPM.id },
+      create: { negocio_id: org.id, nombre, codigo, tipo: 'sucursal', empresa_cliente_id: empresas.BPM.id },
+    });
+  }
+  await prisma.ubicaciones.upsert({
+    where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'BOD' } },
+    update: {},
+    create: { negocio_id: org.id, nombre: 'Bodega Adison', codigo: 'BOD', tipo: 'bodega' },
+  });
   await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo: { in: bpmActivas } }, data: { empresa_cliente_id: empresas.BPM.id } });
   for (const [nombre, codigo, activo] of nuevas) {
     const empresa = codigo.startsWith('T') ? empresas.LBT.id : ['AUROR', 'BURLI'].includes(codigo) ? empresas.AUR.id : empresas.BPM.id;
@@ -113,7 +141,7 @@ async function main() {
     await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo }, data: { orden_operativo: indice + 1 } });
   }
 
-  await seedDesechables(org.id);
+  await seedDesechables(org.id, catDesechables.id, caja.id);
   const ordenCarne: Record<string, number> = {
     'MEAT-STEAK': 1, 'MEAT-CHICKEN': 2, 'MEAT-PASTOR-BPM': 3, 'MEAT-PASTOR-TAP': 3,
     'MEAT-ASADA': 4, 'MEAT-FAJITAS': 5, 'MEAT-MILANESA': 6, 'MEAT-TAMAL': 7,

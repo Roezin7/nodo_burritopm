@@ -173,7 +173,7 @@ function OperacionView({ op, verificacionCarga, repartoHabilitado, integrado, on
       {vista === 'total' ? (
         <>
           {totalFaltante > 0 && (
-            <p className="aviso-falt">⚠ Bodega no alcanza para {totalFaltante} producto{totalFaltante > 1 ? 's' : ''}. Solo se cargará lo disponible; el resto no sale (no se descuadra el inventario).</p>
+            <p className="aviso-falt">Hay {totalFaltante} producto{totalFaltante > 1 ? 's' : ''} pendiente{totalFaltante > 1 ? 's' : ''} de respaldar con producción o compras. Se registrará la carga real completa y la diferencia quedará visible para el cierre semanal.</p>
           )}
           <div className="card">
             <div className="card-head"><strong>Todo lo que sube al camión</strong><span className="muted">{op.total_carga.length} productos</span></div>
@@ -181,8 +181,8 @@ function OperacionView({ op, verificacionCarga, repartoHabilitado, integrado, on
               <div key={t.product_id} className={`carga-total-item ${t.faltante > 0 ? 'carga-total-item--falt' : ''}`}>
                 <span>
                   <strong>{nombreEnOrden(t.sku, t.nombre, op.linea)}</strong> {t.categoria && <small className="muted"> · {t.categoria}</small>}
-                  <small className="muted carga-bodega"> · en bodega {t.bodega_disponible}</small>
-                  {t.faltante > 0 && <small className="txt-danger"> · faltan {t.faltante}</small>}
+                  <small className="muted carga-bodega"> · saldo registrado {t.bodega_disponible}</small>
+                  {t.faltante > 0 && <small className="txt-danger"> · por conciliar {t.faltante}</small>}
                 </span>
                 <span className="carga-total-qty">{t.total_a_cargar} <small>{t.unidad}</small></span>
               </div>

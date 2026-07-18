@@ -19,7 +19,7 @@ cierreRouter.post('/cerrar', asyncHandler(async (req, res) => {
 }));
 
 cierreRouter.post('/:id/reabrir', asyncHandler(async (req, res) => {
-  res.json(await svc.reabrirSemana(req.auth!.negocioId, BigInt(id.parse(req.params.id))));
+  res.json(await svc.reabrirSemana(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
 }));
 
 cierreRouter.get('/facturas/:id', asyncHandler(async (req, res) => {

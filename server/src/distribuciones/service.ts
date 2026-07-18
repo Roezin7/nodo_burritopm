@@ -6,6 +6,7 @@ import { aplicarMovimiento } from '../ledger/service.js';
 import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.js';
 import { avisarConfirmarRecepcion, avisarPedidoEnCamino } from '../push/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
+import { asegurarInventarioInicialSemanal, repararPedidosHuerfanos } from '../operacion/conciliacion.js';
 
 /** Último pedido CERRADO de la sucursal: mapa product_id(string) → cantidad pedida, y su id. */
 async function pedidoCerradoSucursal(ubicacionId: bigint) {
@@ -240,6 +241,7 @@ export type EstadoDistribucionValor =
   | 'cerrada_con_incidencias' | 'cancelada';
 
 export async function listarDistribuciones(negocioId: bigint, desde?: string, hasta?: string) {
+  await repararPedidosHuerfanos(negocioId);
   const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const ds = await prisma.distribuciones.findMany({
     where: { negocio_id: negocioId, fecha_entrega: rango },
@@ -534,11 +536,11 @@ export async function consolidado(negocioId: bigint, id: bigint, vista: 'product
     });
   }
   const items = [...m.values()].map((g) => {
-    const surtible = Math.min(g.total_aprobada, g.bodega_disponible);
     const faltante = redondear3(Math.max(0, g.total_aprobada - g.bodega_disponible));
     return {
       ...g,
-      surtible: redondear3(surtible),
+      // La disponibilidad es informativa: una captura tardía de producción no reduce la venta.
+      surtible: redondear3(g.total_aprobada),
       faltante,
       valor: valor(g.total_aprobada, g.costo_unitario),
     };
@@ -662,10 +664,14 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
 
-  // Tope por producto: la bodega no puede cargar más de lo que tiene en existencias. Vamos
-  // descontando del "restante" línea por línea (orden estable por id) para que la suma cargada
-  // de cada producto nunca exceda lo disponible → el inventario no se descuadra (sin negativos).
-  const restante = await disponibleBodega(negocioId);
+  if (dist.fecha_entrega) {
+    for (const bodega of [...new Map([...bodegas.values()].filter((b) => b.codigo === 'CARN').map((b) => [b.id.toString(), b])).values()]) {
+      await asegurarInventarioInicialSemanal(negocioId, usuarioId, dist.fecha_entrega.toISOString().slice(0, 10), bodega.id);
+    }
+  }
+
+  // La carga registra lo que físicamente salió aunque producción se capture después. Un saldo
+  // negativo es provisional y visible en la conciliación; nunca se recorta una venta real.
   let totalCargado = 0;
   const sucursalesConCarga = new Set<string>(); // solo estas serán paradas de la ruta
 
@@ -676,10 +682,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       const aprobada = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
       const solicitada = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? aprobada;
       const pedida = Math.max(0, Math.min(solicitada, aprobada));
-      const pk = l.product_id.toString();
-      const disp = redondear3(restante.get(pk) ?? 0);
-      const cargada = Math.max(0, Math.min(pedida, disp)); // nunca más de lo disponible
-      restante.set(pk, redondear3(disp - cargada));
+      const cargada = pedida;
       const costo = num(l.costo_unitario);
 
       // Lo realmente cargado sale de disponible y entra a tránsito (movimiento idempotente).
@@ -700,6 +703,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           comentario: 'Carga al camión (salida de bodega)',
           idempotencyKey: `carga:${l.id}`,
           deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }],
+          permitirDisponibleNegativo: true,
         });
       }
       if (cargada + 0.0001 < aprobada) {
@@ -725,9 +729,9 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
         data: { cantidad_cargada: cargada, cantidad_recibida: cargada <= 0 ? 0 : null, estado_linea: cargada <= 0 ? 'no_surtido' : null },
       });
     }
-    // Sin existencias en bodega no hay nada que salga: no se genera tránsito ni ruta (rollback).
+    // Una preparación completamente en cero no genera tránsito ni ruta.
     if (totalCargado <= 0) {
-      throw new HttpError(409, 'No hay existencias en la bodega central para surtir esta distribución. Registra un ingreso antes de cargar.');
+      throw new HttpError(409, 'La preparación no tiene cantidades para cargar.');
     }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
     if (negocio?.reparto_habilitado) {

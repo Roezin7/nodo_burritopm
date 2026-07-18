@@ -9,7 +9,7 @@ import { crearSemana, etiquetaRango, inicioDeSemana, type SemanaSeleccionada } f
 type Linea = 'carne' | 'desechables';
 interface Catalogo {
   ubicaciones: { id: number; nombre: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
-  productos: { id: number; sku: string; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; peso_caja_lb: number | null }[];
+  productos: { id: number; sku: string; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; precio_pendiente: boolean; peso_caja_lb: number | null }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: Linea; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
   calendario_pedidos: { ubicacion_id: number; linea: Linea; dia_semana: number; rutas: { id: number; nombre: string; codigo: string; conductor: string }[] }[];
   semanas: { id: number; anio: number; semana: number; inicia_at: string; termina_at: string; estado: string }[];
@@ -76,12 +76,12 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [refrescoHistorial, setRefrescoHistorial] = useState(0);
 
   useEffect(() => {
-    api<Catalogo>('/operacion/catalogo').then((c) => {
+    api<Catalogo>(`/operacion/catalogo?fecha_referencia=${semana.inicio}`).then((c) => {
       setCatalogo(c);
       const asignada = admin ? c.ubicaciones.find((u) => u.tipo === 'sucursal' && u.empresa) : c.ubicaciones.find((u) => usuario?.ubicaciones?.some((x) => x.id === u.id));
       if (asignada) setUbicacionId(String(asignada.id));
     }).catch(() => setError('No se pudo cargar el catálogo de pedidos.'));
-  }, [admin, usuario]);
+  }, [admin, usuario, semana.inicio]);
 
   const ubicaciones = useMemo(() => {
     if (!catalogo) return [];
@@ -230,7 +230,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
           <section className="workspace-card product-picker">
             <div className="workspace-card-head"><h2>Productos</h2><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" /></div>
             <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
-              <span><strong>{nombreEnVenta(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {usd(p.precio)}</small></span>
+              <span><strong>{nombreEnVenta(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {p.precio_pendiente ? 'Costo semanal + $15 al capturar producción' : usd(p.precio)}</small></span>
               <div className="input-suffix input-suffix--compact"><input disabled={cargandoPedido || !editable} inputMode="decimal" type="number" min="0" step={esPieza(p) ? '1' : '0.5'} value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>{unidadCorta(p)}</span></div>
             </label>)}</div>
           </section>

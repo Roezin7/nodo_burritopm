@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularConsumoFifo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularConsumoFifo, calcularPrecioProteinaSemanal, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -8,6 +8,11 @@ const d = (n: number) => new Prisma.Decimal(n);
 describe('reglas de precio de carne', () => {
   it('suma $15 una sola vez a una proteína producida', () => {
     expect(precioVentaProducto({ tipo_operativo: 'proteina', precio_venta_fijo: null, ultimo_costo: d(123.45), costo_promedio: d(120), markup_caja: d(15) })).toBe(138.45);
+  });
+
+  it('usa el costo promedio ponderado de toda la producción semanal más $15', () => {
+    expect(calcularPrecioProteinaSemanal(10, 1200, 15)).toBe(135);
+    expect(calcularPrecioProteinaSemanal(0, 0, 15)).toBeNull();
   });
 
   it('respeta el precio fijo sin aplicar markup', () => {

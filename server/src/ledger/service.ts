@@ -28,6 +28,9 @@ export interface MovimientoParams {
   comentario?: string;
   idempotencyKey: string;
   deltas: DeltaExistencia[];
+  // Durante una semana abierta puede faltar capturar producción/compras que respaldan una
+  // salida real. Solo disponible puede quedar provisionalmente negativo; el cierre lo concilia.
+  permitirDisponibleNegativo?: boolean;
 }
 
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -35,7 +38,7 @@ const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 
 /** Aplica un delta a la fila de existencias (la crea si no existe), con costo promedio
  *  ponderado cuando entra inventario disponible con costo. */
-async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia) {
+async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia, permitirDisponibleNegativo = false) {
   const actual = await tx.existencias.findUnique({
     where: { ubicacion_id_product_id: { ubicacion_id: d.ubicacionId, product_id: d.productId } },
   });
@@ -47,7 +50,7 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia) 
   if (![dispNue, reservadaNueva, transitoNuevo].every(Number.isFinite)) {
     throw new HttpError(400, 'El movimiento contiene una cantidad de inventario no válida');
   }
-  if (dispNue < -0.0001 || reservadaNueva < -0.0001 || transitoNuevo < -0.0001) {
+  if ((!permitirDisponibleNegativo && dispNue < -0.0001) || reservadaNueva < -0.0001 || transitoNuevo < -0.0001) {
     throw new HttpError(409, 'Inventario insuficiente para completar el movimiento');
   }
 
@@ -103,7 +106,7 @@ export async function aplicarMovimiento(tx: Tx, p: MovimientoParams): Promise<bo
       idempotency_key: p.idempotencyKey,
     },
   });
-  for (const d of p.deltas) await ajustarExistencia(tx, p.negocioId, d);
+  for (const d of p.deltas) await ajustarExistencia(tx, p.negocioId, d, p.permitirDisponibleNegativo ?? false);
   return true;
 }
 

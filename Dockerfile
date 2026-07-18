@@ -31,4 +31,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
 
 # Migraciones + bootstraps idempotentes. El seed conserva precios y rutas existentes,
 # y vuelve a aplicar el orden de los libros y las unidades normalizadas de producción.
-CMD ["sh", "-c", "npx --workspace server prisma migrate deploy && npm run seed -w server && npm run seed:operacion -w server && APPLY_EXCEL_IMPORT=1 IMPORT_EXCEL_ONCE=1 npm run import:excel:3q -w server && APPLY_EXCEL_IMPORT=1 npm run backfill:meat-supplies -w server && npm start"]
+CMD ["sh", "-c", "npx --workspace server prisma migrate deploy && npm run seed -w server && npm run seed:operacion -w server && APPLY_EXCEL_IMPORT=1 IMPORT_EXCEL_ONCE=1 npm run import:excel:3q -w server && APPLY_EXCEL_IMPORT=1 npm run backfill:meat-supplies -w server && APPLY_WEEK29_RESET=1 npm run reset:week29:meat -w server && npm start"]

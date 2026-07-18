@@ -279,12 +279,11 @@ export async function eliminarConteo(negocioId: bigint, conteoId: bigint) {
         where: { ubicacion_id_product_id: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) } },
       });
       const siguiente = num0(existencia?.cantidad_disponible) - d;
-      if (siguiente < -0.0001) {
-        throw new HttpError(409, 'Este inventario ya fue utilizado. Revierte primero las operaciones posteriores para no dejar existencias negativas.');
-      }
       await tx.existencias.updateMany({
         where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) },
-        data: { cantidad_disponible: Math.max(0, siguiente) },
+        // Al reabrir una semana puede quedar un déficit provisional hasta recapturar la
+        // producción. Es preferible mostrarlo en auditoría a inventar existencias.
+        data: { cantidad_disponible: siguiente },
       });
     }
     for (const ajuste of ajustesLote) {
