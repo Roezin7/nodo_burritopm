@@ -8,6 +8,7 @@ const d = (n: number) => new Prisma.Decimal(n);
 describe('reglas de precio de carne', () => {
   it('suma $15 una sola vez a una proteína producida', () => {
     expect(precioVentaProducto({ tipo_operativo: 'proteina', precio_venta_fijo: null, ultimo_costo: d(123.45), costo_promedio: d(120), markup_caja: d(15) })).toBe(138.45);
+    expect(precioVentaProducto({ tipo_operativo: 'proteina', precio_venta_fijo: null, ultimo_costo: d(203.04), costo_promedio: d(203.04), markup_caja: d(15) })).toBe(218.04);
   });
 
   it('usa el costo promedio ponderado de toda la producción semanal más $15', () => {

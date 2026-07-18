@@ -1193,13 +1193,14 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
     prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: { include: { unidad_distribucion: true } } } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
     prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } }, include: { producto: true }, orderBy: [{ congelado: 'asc' }, { fecha: 'asc' }] }),
   ]);
-  const productosSalida = [...new Map(producciones.flatMap((p) => p.salidas).map((s) => [s.product_id.toString(), s.producto])).values()];
-  const preciosSemanales = desde && hasta ? await preciosVentaSemana(negocioId, productosSalida, desde, hasta) : null;
   return {
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
     compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado })) })),
-    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: preciosSemanales?.get(s.product_id.toString()) ?? num0(s.precio_venta_caja) })) })),
+    // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
+    // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
+    // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.
+    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: num0(s.precio_venta_caja) })) })),
     lotes: lotes.map((l) => ({ id: Number(l.id), fecha: iso(l.fecha), producto: l.producto.nombre, product_id: Number(l.product_id), cajas: num0(l.cajas_disponibles), peso_lb: num0(l.peso_disponible_lb), costo: num0(l.costo_disponible), congelado: l.congelado })),
   };
 }
