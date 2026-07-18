@@ -64,6 +64,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [notas, setNotas] = useState('');
   const [buscar, setBuscar] = useState('');
   const [vista, setVista] = useState<'captura' | 'historial'>('captura');
+  const [modoCaptura, setModoCaptura] = useState<'semana' | 'individual'>('semana');
   const [historial, setHistorial] = useState<Pedido[]>([]);
   const [historialUbicacion, setHistorialUbicacion] = useState('todas');
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
@@ -111,7 +112,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   }, [admin, semana.inicio]);
 
   useEffect(() => {
-    if (vista !== 'captura' || !ubicacionId || !fecha) {
+    if (vista !== 'captura' || (admin && modoCaptura === 'semana') || !ubicacionId || !fecha) {
       setEstado(null); setVersion(null); setNotas(''); setCantidades({}); setCargandoPedido(false);
       return;
     }
@@ -141,7 +142,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       .catch((e) => { if (vigente) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el pedido.'); })
       .finally(() => { if (vigente) setCargandoPedido(false); });
     return () => { vigente = false; };
-  }, [ubicacionId, linea, fecha, vista, catalogo, ubicacionSeleccionada?.empresa?.codigo]);
+  }, [ubicacionId, linea, fecha, vista, modoCaptura, admin, catalogo, ubicacionSeleccionada?.empresa?.codigo]);
 
   useEffect(() => { setImpresion(null); }, [semana.inicio, semana.fin]);
 
@@ -209,10 +210,11 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const editable = !semanaCerrada && (!estado || ['borrador', 'confirmado'].includes(estado));
   const q = buscar.trim().toLowerCase();
   const visibles = productos.filter((p) => !q || `${nombreEnVenta(p.sku, p.nombre, linea)} ${p.tipo}`.toLowerCase().includes(q));
+  const capturaSemanal = admin && modoCaptura === 'semana';
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
-      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Ventas</span><h1>Venta semanal</h1></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
-      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 3</span><h2>Ventas</h2></div>{vista === 'captura' && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Ventas</span><h1>Venta semanal</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 3</span><h2>Ventas</h2></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
         {admin && <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Capturar</button><button className={vista === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setVista('historial')}>Historial por sucursal</button></div>}
         <div className="segmented order-line-switch">
@@ -220,8 +222,12 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
         </div>
       </div>
+      {admin && vista === 'captura' && <section className="workspace-card weekly-capture-mode">
+        <div><span className="eyebrow">Forma de captura</span><strong>{capturaSemanal ? 'Toda la semana' : 'Una orden'}</strong><small>{capturaSemanal ? 'Todos los días programados por restaurante, en una sola vista.' : 'Captura o corrige una sucursal y fecha específica.'}</small></div>
+        <div className="segmented segmented--small"><button className={capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('semana')}>Semana completa</button><button className={!capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('individual')}>Orden individual</button></div>
+      </section>}
       {error && <p className="error-msg">{error}</p>}
-      {vista === 'captura' ? <div className="order-workspace">
+      {vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className="order-workspace">
         <section className="order-capture">
           <div className="workspace-card order-context">
             <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
@@ -250,6 +256,163 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}
     </div>
   );
+}
+
+const clavePedidoSemanal = (ubicacionId: number, fechaEntrega: string) => `${ubicacionId}|${fechaEntrega}`;
+const claveCantidadSemanal = (ubicacionId: number, fechaEntrega: string, productId: number) => `${ubicacionId}|${fechaEntrega}|${productId}`;
+const pedidoEditable = (pedido?: Pedido) => !pedido || ['borrador', 'confirmado'].includes(pedido.estado);
+
+function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCerrada, onActualizado }: {
+  catalogo: Catalogo;
+  linea: Linea;
+  semana: SemanaSeleccionada;
+  ubicaciones: Catalogo['ubicaciones'];
+  semanaCerrada: boolean;
+  onActualizado: () => void;
+}) {
+  const toast = useToast();
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [cantidades, setCantidades] = useState<Record<string, string>>({});
+  const [cambios, setCambios] = useState<string[]>([]);
+  const [buscar, setBuscar] = useState('');
+  const [cargando, setCargando] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [refresco, setRefresco] = useState(0);
+
+  const programadas = useMemo(() => ubicaciones.map((ubicacion) => ({
+    ubicacion,
+    entregas: entregasDeSemana(catalogo.calendario_pedidos, String(ubicacion.id), linea, semana),
+    productos: productosParaPedido(catalogo.productos, linea, ubicacion.empresa?.codigo),
+  })).filter((fila) => fila.entregas.length > 0), [ubicaciones, catalogo, linea, semana.inicio, semana.fin]);
+
+  useEffect(() => {
+    let vigente = true;
+    setCargando(true); setError('');
+    api<Pedido[]>(`/operacion/pedidos?linea=${linea}&desde=${semana.inicio}&hasta=${semana.fin}`)
+      .then((rows) => {
+        if (!vigente) return;
+        const valores: Record<string, string> = {};
+        for (const pedido of rows) {
+          const fila = programadas.find((x) => x.ubicacion.id === pedido.ubicacion.id);
+          if (!fila) continue;
+          const porSku = new Map(fila.productos.map((p) => [p.sku, p.id]));
+          for (const detalle of pedido.lineas) {
+            let productId = detalle.product_id;
+            if (detalle.sku === 'MEAT-PASTOR-BPM' && fila.ubicacion.empresa?.codigo === 'LBT') productId = porSku.get('MEAT-PASTOR-TAP') ?? productId;
+            if (detalle.sku === 'MEAT-PASTOR-TAP' && fila.ubicacion.empresa?.codigo !== 'LBT') productId = porSku.get('MEAT-PASTOR-BPM') ?? productId;
+            valores[claveCantidadSemanal(pedido.ubicacion.id, pedido.fecha_entrega, productId)] = String(detalle.cantidad);
+          }
+        }
+        setPedidos(rows);
+        setCantidades(valores);
+        setCambios([]);
+      })
+      .catch((e) => { if (vigente) setError(e instanceof ApiError ? e.message : 'No se pudieron cargar las ventas de la semana.'); })
+      .finally(() => { if (vigente) setCargando(false); });
+    return () => { vigente = false; };
+  }, [linea, semana.inicio, semana.fin, refresco, programadas]);
+
+  const porClave = useMemo(() => new Map(pedidos.map((p) => [clavePedidoSemanal(p.ubicacion.id, p.fecha_entrega), p])), [pedidos]);
+  const filtro = buscar.trim().toLowerCase();
+  const visibles = programadas.filter(({ ubicacion }) => !filtro || `${ubicacion.nombre} ${ubicacion.empresa?.nombre ?? ''}`.toLowerCase().includes(filtro));
+  const unidades = programadas.reduce((total, fila) => total + fila.entregas.reduce((subtotal, entrega) => subtotal + fila.productos.reduce(
+    (suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0), 0,
+  ), 0), 0);
+  const importe = programadas.reduce((total, fila) => total + fila.entregas.reduce((subtotal, entrega) => subtotal + fila.productos.reduce(
+    (suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0) * (producto.precio ?? 0), 0,
+  ), 0), 0);
+  const ventasCapturadas = programadas.flatMap((fila) => fila.entregas.map((entrega) => porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha)))).filter((p) => p?.lineas.length).length;
+
+  function cambiarCantidad(ubicacionId: number, fechaEntrega: string, productId: number, valor: string) {
+    const clavePedido = clavePedidoSemanal(ubicacionId, fechaEntrega);
+    setCantidades((actual) => ({ ...actual, [claveCantidadSemanal(ubicacionId, fechaEntrega, productId)]: valor }));
+    setCambios((actual) => actual.includes(clavePedido) ? actual : [...actual, clavePedido]);
+  }
+
+  async function guardarSemana(confirmar: boolean) {
+    const objetivos = new Set(cambios);
+    if (confirmar) {
+      for (const fila of programadas) for (const entrega of fila.entregas) {
+        const clave = clavePedidoSemanal(fila.ubicacion.id, entrega.fecha);
+        const existente = porClave.get(clave);
+        if (existente?.estado === 'borrador' && existente.lineas.length > 0) objetivos.add(clave);
+      }
+    }
+
+    const payload = [...objetivos].flatMap((clave) => {
+      const [ubicacionRaw, fechaEntrega] = clave.split('|');
+      const fila = programadas.find((x) => x.ubicacion.id === Number(ubicacionRaw) && x.entregas.some((e) => e.fecha === fechaEntrega));
+      if (!fila) return [];
+      const existente = porClave.get(clave);
+      if (!pedidoEditable(existente)) return [];
+      const lineas = fila.productos.map((producto) => ({
+        product_id: producto.id,
+        cantidad: Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, fechaEntrega, producto.id)] || 0),
+      }));
+      if (!existente && !lineas.some((l) => l.cantidad > 0)) return [];
+      return [{
+        ubicacion_id: fila.ubicacion.id,
+        linea,
+        fecha_entrega: fechaEntrega,
+        actualizado_at: existente?.actualizado_at ?? null,
+        confirmar,
+        notas: existente?.notas ?? null,
+        lineas,
+      }];
+    });
+
+    if (!payload.length) {
+      setCambios([]);
+      toast.ok(confirmar ? 'No hay borradores pendientes por confirmar.' : 'No hay cambios con cantidades para guardar.');
+      return;
+    }
+
+    setBusy(true); setError('');
+    try {
+      const resultado = await api<{ guardados: number; confirmados: number; borradores: number } | Encolado>('/operacion/pedidos/semana', {
+        method: 'PUT', body: { pedidos: payload },
+      });
+      if (fueEncolado(resultado)) {
+        setCambios([]);
+        toast.ok('Semana guardada sin conexión; se enviará automáticamente al recuperar la red.');
+        return;
+      }
+      toast.ok(confirmar
+        ? `${resultado.guardados} ventas guardadas · ${resultado.confirmados} confirmadas.`
+        : `${resultado.guardados} ventas actualizadas.`);
+      setRefresco((n) => n + 1);
+      onActualizado();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la semana. Ninguna venta fue modificada.'); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="weekly-sales-capture">
+    <section className="workspace-card weekly-sales-toolbar">
+      <div><span className="eyebrow">Semana {semana.numero}</span><h2>Pedidos por restaurante</h2><p>{etiquetaRango(semana)}</p></div>
+      <label className="field"><span>Buscar restaurante</span><input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre o empresa" /></label>
+      <div className="weekly-sales-toolbar-actions"><button className="btn btn-secondary" disabled={cargando || busy || semanaCerrada || cambios.length === 0} onClick={() => void guardarSemana(false)}>Guardar cambios</button><button className="btn btn-primary" disabled={cargando || busy || semanaCerrada} onClick={() => void guardarSemana(true)}>{busy ? 'Guardando…' : 'Guardar y confirmar'}</button></div>
+    </section>
+    {error && <p className="error-msg">{error}</p>}
+    {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
+    <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(importe)}</strong></div></div>
+    {cargando ? <Spinner label="Cargando semana…" /> : <div className="weekly-sales-locations">{visibles.map((fila) => {
+      const totalRestaurante = fila.entregas.reduce((total, entrega) => total + fila.productos.reduce((suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0), 0), 0);
+      return <section className="workspace-card weekly-sales-location" key={fila.ubicacion.id}>
+        <header><div><span className="eyebrow">{fila.ubicacion.empresa?.codigo}</span><h2>{fila.ubicacion.nombre}</h2><small>{fila.ubicacion.entrega_en ? `Entrega en ${fila.ubicacion.entrega_en.nombre}` : fila.ubicacion.empresa?.nombre}</small></div><strong>{totalRestaurante.toLocaleString('es-MX')} unidades</strong></header>
+        <div className="weekly-sales-table-wrap"><table className="weekly-sales-table"><thead><tr><th>Producto</th>{fila.entregas.map((entrega) => {
+          const pedido = porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha));
+          return <th key={entrega.fecha}><strong>{fechaEntregaCorta(entrega.fecha)}</strong><span className={`order-status order-status--${pedido?.estado ?? 'pendiente'}`}>{pedido?.estado.replaceAll('_', ' ') ?? 'sin capturar'}</span></th>;
+        })}</tr></thead><tbody>{fila.productos.map((producto) => <tr key={producto.id}><td><strong>{nombreEnVenta(producto.sku, producto.nombre, linea)}</strong><small>{producto.peso_caja_lb ? `${producto.peso_caja_lb} lb/caja` : producto.unidad} · {producto.precio_pendiente ? 'Precio pendiente' : usd(producto.precio)}</small></td>{fila.entregas.map((entrega) => {
+          const pedido = porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha));
+          const clave = claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id);
+          return <td key={entrega.fecha}><div className="input-suffix input-suffix--compact"><input aria-label={`${nombreEnVenta(producto.sku, producto.nombre, linea)} ${fechaEntregaCorta(entrega.fecha)}`} disabled={semanaCerrada || !pedidoEditable(pedido)} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onChange={(e) => cambiarCantidad(fila.ubicacion.id, entrega.fecha, producto.id, e.target.value)} /><span>{unidadCorta(producto)}</span></div></td>;
+        })}</tr>)}</tbody><tfoot><tr><th>Total</th>{fila.entregas.map((entrega) => <th key={entrega.fecha}>{fila.productos.reduce((suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0), 0).toLocaleString('es-MX')}</th>)}</tr></tfoot></table></div>
+      </section>;
+    })}</div>}
+    {!cargando && !visibles.length && <div className="empty-state"><strong>No hay restaurantes programados</strong><span>Revisa la línea seleccionada, la búsqueda o la configuración de rutas.</span></div>}
+    {!semanaCerrada && cambios.length > 0 && <div className="weekly-sales-savebar"><span><strong>{cambios.length}</strong> ventas con cambios sin guardar</span><div><button className="btn btn-secondary" disabled={busy} onClick={() => void guardarSemana(false)}>Guardar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarSemana(true)}>Guardar y confirmar</button></div></div>}
+  </div>;
 }
 
 function HistorialPedidos({ pedidos, cargando, linea, semana, ubicacion, setUbicacion, ubicaciones, onPrint, onConfirmar, confirmando }: {

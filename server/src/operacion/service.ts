@@ -271,12 +271,7 @@ export interface GuardarPedidoInput {
   lineas: { product_id: number; cantidad: number; notas?: string | null }[];
 }
 
-export async function guardarPedido(
-  negocioId: bigint,
-  usuarioId: bigint,
-  input: GuardarPedidoInput,
-  esAdmin: boolean,
-) {
+async function prepararPedido(negocioId: bigint, input: GuardarPedidoInput, esAdmin: boolean) {
   await asegurarSemanaEditable(negocioId, input.fecha_entrega);
   const ubicacion = await prisma.ubicaciones.findFirst({
     where: { id: BigInt(input.ubicacion_id), negocio_id: negocioId, tipo: 'sucursal', activo: true },
@@ -319,8 +314,19 @@ export async function guardarPedido(
     if (!permitido) throw new HttpError(400, 'La fecha no corresponde a una entrega programada para este restaurante');
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    let pedido = await tx.pedidos_operativos.findUnique({
+  return { input, ubicacion, empresaId, porId, preciosSemana };
+}
+
+async function guardarPedidoEnTx(
+  tx: Prisma.TransactionClient,
+  negocioId: bigint,
+  usuarioId: bigint,
+  preparado: Awaited<ReturnType<typeof prepararPedido>>,
+) {
+  const { input, ubicacion, empresaId, porId, preciosSemana } = preparado;
+  const positivas = input.lineas.filter((l) => l.cantidad > 0);
+  const debeConfirmar = input.confirmar === true && positivas.length > 0;
+  let pedido = await tx.pedidos_operativos.findUnique({
       where: { ubicacion_id_linea_operacion_fecha_entrega: { ubicacion_id: ubicacion.id, linea_operacion: input.linea, fecha_entrega: fecha(input.fecha_entrega) } },
     });
     if (pedido && input.actualizado_at !== undefined
@@ -335,18 +341,21 @@ export async function guardarPedido(
     pedido = pedido
       ? await tx.pedidos_operativos.update({
           where: { id: pedido.id },
-          data: { estado: input.confirmar ? 'confirmado' : pedido.estado, confirmado_at: input.confirmar ? new Date() : pedido.confirmado_at, notas: input.notas },
+          data: {
+            estado: positivas.length === 0 ? 'borrador' : debeConfirmar ? 'confirmado' : pedido.estado,
+            confirmado_at: positivas.length === 0 ? null : debeConfirmar ? new Date() : pedido.confirmado_at,
+            notas: input.notas,
+          },
         })
       : await tx.pedidos_operativos.create({
           data: {
             negocio_id: negocioId, empresa_cliente_id: empresaId, ubicacion_id: ubicacion.id,
             linea_operacion: input.linea, fecha_entrega: fecha(input.fecha_entrega), capturado_por: usuarioId,
-            estado: input.confirmar ? 'confirmado' : 'borrador', confirmado_at: input.confirmar ? new Date() : null, notas: input.notas,
+            estado: debeConfirmar ? 'confirmado' : 'borrador', confirmado_at: debeConfirmar ? new Date() : null, notas: input.notas,
           },
         });
 
     await tx.pedido_operativo_lineas.deleteMany({ where: { pedido_id: pedido.id } });
-    const positivas = input.lineas.filter((l) => l.cantidad > 0);
     if (positivas.length) {
       await tx.pedido_operativo_lineas.createMany({
         data: positivas.map((l) => {
@@ -355,9 +364,49 @@ export async function guardarPedido(
         }),
       });
     }
-    return pedido;
-  });
-  return { id: Number(result.id), estado: result.estado, actualizado_at: result.actualizado_at.toISOString() };
+  return { id: Number(pedido.id), estado: pedido.estado, actualizado_at: pedido.actualizado_at.toISOString() };
+}
+
+export async function guardarPedido(
+  negocioId: bigint,
+  usuarioId: bigint,
+  input: GuardarPedidoInput,
+  esAdmin: boolean,
+) {
+  const preparado = await prepararPedido(negocioId, input, esAdmin);
+  return prisma.$transaction(
+    (tx) => guardarPedidoEnTx(tx, negocioId, usuarioId, preparado),
+    { isolationLevel: 'Serializable' },
+  );
+}
+
+/**
+ * Guarda las órdenes reales de varias sucursales y fechas en una sola transacción.
+ * La vista semanal nunca crea un pedido consolidado: facturación, rutas e inventario
+ * siguen vinculados a la ubicación y entrega originales.
+ */
+export async function guardarPedidosSemana(
+  negocioId: bigint,
+  usuarioId: bigint,
+  inputs: GuardarPedidoInput[],
+) {
+  const claves = inputs.map((p) => `${p.ubicacion_id}:${p.linea}:${p.fecha_entrega}`);
+  if (new Set(claves).size !== claves.length) throw new HttpError(400, 'Hay pedidos repetidos para la misma sucursal y fecha');
+
+  const preparados: Awaited<ReturnType<typeof prepararPedido>>[] = [];
+  for (const input of inputs) preparados.push(await prepararPedido(negocioId, input, true));
+  const pedidos = await prisma.$transaction(async (tx) => {
+    const guardados: Awaited<ReturnType<typeof guardarPedidoEnTx>>[] = [];
+    for (const preparado of preparados) guardados.push(await guardarPedidoEnTx(tx, negocioId, usuarioId, preparado));
+    return guardados;
+  }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 30_000 });
+
+  return {
+    guardados: pedidos.length,
+    confirmados: pedidos.filter((p) => p.estado === 'confirmado').length,
+    borradores: pedidos.filter((p) => p.estado === 'borrador').length,
+    pedidos,
+  };
 }
 
 /**

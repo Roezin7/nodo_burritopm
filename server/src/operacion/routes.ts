@@ -33,10 +33,27 @@ operacionRouter.get('/pedidos', requireRole('admin', 'encargado_sucursal'), asyn
 }));
 
 const lineaPedido = z.object({ product_id: id, cantidad: z.coerce.number().nonnegative(), notas: z.string().trim().max(300).nullable().optional() });
+const pedidoSchema = z.object({
+  ubicacion_id: id,
+  linea,
+  fecha_entrega: fecha,
+  actualizado_at: z.string().datetime().nullable().optional(),
+  confirmar: z.boolean().optional(),
+  notas: z.string().trim().max(500).nullable().optional(),
+  lineas: z.array(lineaPedido),
+});
 operacionRouter.put('/pedidos', requireRole('admin', 'encargado_sucursal'), asyncHandler(async (req, res) => {
-  const b = z.object({ ubicacion_id: id, linea, fecha_entrega: fecha, actualizado_at: z.string().datetime().nullable().optional(), confirmar: z.boolean().optional(), notas: z.string().trim().max(500).nullable().optional(), lineas: z.array(lineaPedido) }).parse(req.body);
+  const b = pedidoSchema.parse(req.body);
   if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, BigInt(b.ubicacion_id)))) throw new HttpError(403, 'No tienes acceso a esa ubicación');
   res.json(await svc.guardarPedido(req.auth!.negocioId, req.auth!.usuarioId, b, req.auth!.rol === 'admin'));
+}));
+
+/** Guarda en un solo paso las órdenes por restaurante y fecha capturadas en la vista semanal. */
+operacionRouter.put('/pedidos/semana', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ pedidos: z.array(pedidoSchema).min(1).max(100) })
+    .refine((v) => new Set(v.pedidos.map((p) => p.linea)).size === 1, { message: 'La captura semanal debe corresponder a una sola línea' })
+    .parse(req.body);
+  res.json(await svc.guardarPedidosSemana(req.auth!.negocioId, req.auth!.usuarioId, b.pedidos));
 }));
 
 /** Confirma en bloque los pedidos capturados de una fecha o semana. */
