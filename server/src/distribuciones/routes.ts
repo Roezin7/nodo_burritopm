@@ -8,6 +8,7 @@ import * as rutas from './rutas.service.js';
 export const distribucionesRouter = Router();
 
 const idParam = z.coerce.number().int().positive();
+const fechaParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const sucursal = requireRole('admin', 'encargado_sucursal');
 
 // La planeación (calcular/aprobar) es del admin; la operación de bodega la hace
@@ -22,8 +23,9 @@ distribucionesRouter.get(
   sucursal,
   asyncHandler(async (req, res) => {
     const ubicacionId = BigInt(idParam.parse(req.query.ubicacion));
+    const q = z.object({ desde: fechaParam.optional(), hasta: fechaParam.optional() }).parse(req.query);
     if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
-    res.json(await svc.recepcionesPendientes(req.auth!.negocioId, ubicacionId));
+    res.json(await svc.recepcionesPendientes(req.auth!.negocioId, ubicacionId, q.desde, q.hasta));
   }),
 );
 
@@ -33,8 +35,9 @@ distribucionesRouter.get(
   sucursal,
   asyncHandler(async (req, res) => {
     const ubicacionId = BigInt(idParam.parse(req.query.ubicacion));
+    const q = z.object({ desde: fechaParam.optional(), hasta: fechaParam.optional() }).parse(req.query);
     if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
-    res.json(await svc.recepcionesHistorial(req.auth!.negocioId, ubicacionId));
+    res.json(await svc.recepcionesHistorial(req.auth!.negocioId, ubicacionId, q.desde, q.hasta));
   }),
 );
 
@@ -61,7 +64,8 @@ distribucionesRouter.get(
   '/',
   bodega,
   asyncHandler(async (req, res) => {
-    res.json(await svc.listarDistribuciones(req.auth!.negocioId));
+    const q = z.object({ desde: fechaParam.optional(), hasta: fechaParam.optional() }).parse(req.query);
+    res.json(await svc.listarDistribuciones(req.auth!.negocioId, q.desde, q.hasta));
   }),
 );
 
@@ -70,8 +74,7 @@ distribucionesRouter.post(
   '/aprobar-todas',
   soloAdmin,
   asyncHandler(async (req, res) => {
-    const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-    const b = z.object({ desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
+    const b = z.object({ desde: fechaParam, hasta: fechaParam }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
     res.json(await svc.aprobarDistribucionesEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta));
   }),
 );

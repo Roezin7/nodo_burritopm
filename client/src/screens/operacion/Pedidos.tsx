@@ -4,6 +4,7 @@ import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { filasOrden, nombreEnVenta, productosParaPedido } from '../../operationOrder';
+import { crearSemana, etiquetaRango, inicioDeSemana, type SemanaSeleccionada } from '../../semana';
 
 type Linea = 'carne' | 'desechables';
 interface Catalogo {
@@ -26,40 +27,23 @@ const esPieza = (p: { unidad: string }) => p.unidad.toLowerCase().includes('piez
 const unidadCorta = (p: { unidad: string }) => esPieza(p) ? 'pzas' : 'cajas';
 const fechaLarga = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const fechaEntregaCorta = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
-function numeroSemana(iso: string) {
-  const d = new Date(`${iso}T00:00:00.000Z`);
-  const dia = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dia);
-  const inicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d.getTime() - inicio.getTime()) / 86400000) + 1) / 7);
-}
 interface EntregaOpcion {
   fecha: string;
   semana: number;
   rutas: Catalogo['calendario_pedidos'][number]['rutas'];
 }
-function proximasEntregas(calendario: Catalogo['calendario_pedidos'], ubicacionId: string, linea: Linea): EntregaOpcion[] {
+function entregasDeSemana(calendario: Catalogo['calendario_pedidos'], ubicacionId: string, linea: Linea, semana: SemanaSeleccionada): EntregaOpcion[] {
   const programadas = calendario.filter((c) => String(c.ubicacion_id) === ubicacionId && c.linea === linea);
   if (!programadas.length) return [];
-  const desde = new Date(`${hoy()}T12:00:00`);
   const resultado: EntregaOpcion[] = [];
-  for (let desplazamiento = 1; desplazamiento <= 56 && resultado.length < 8; desplazamiento += 1) {
-    const fecha = new Date(desde);
-    fecha.setDate(fecha.getDate() + desplazamiento);
+  for (let iso = semana.inicio; iso <= semana.fin;) {
+    const fecha = new Date(`${iso}T12:00:00`);
     const programa = programadas.find((c) => c.dia_semana === fecha.getDay());
-    if (!programa) continue;
-    const iso = fecha.toLocaleDateString('en-CA');
-    resultado.push({ fecha: iso, semana: numeroSemana(iso), rutas: programa.rutas });
+    if (programa) resultado.push({ fecha: iso, semana: semana.numero, rutas: programa.rutas });
+    fecha.setDate(fecha.getDate() + 1);
+    iso = fecha.toLocaleDateString('en-CA');
   }
   return resultado;
-}
-function rangoSemana(valor: string) {
-  const d = new Date(`${valor}T12:00:00`);
-  const desplazamiento = d.getDay() === 0 ? -6 : 1 - d.getDay();
-  d.setDate(d.getDate() + desplazamiento);
-  const inicio = d.toLocaleDateString('en-CA');
-  d.setDate(d.getDate() + 5);
-  return { inicio, fin: d.toLocaleDateString('en-CA') };
 }
 interface ResultadoConfirmacion {
   confirmados: number;
@@ -67,7 +51,7 @@ interface ResultadoConfirmacion {
   cobertura_bpm: { fecha: string; total: number; confirmados: number; pendientes: string[] }[];
 }
 
-export default function Pedidos({ integrado = false }: { integrado?: boolean }) {
+export default function Pedidos({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
@@ -80,7 +64,6 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   const [notas, setNotas] = useState('');
   const [buscar, setBuscar] = useState('');
   const [vista, setVista] = useState<'captura' | 'historial'>('captura');
-  const [fechaHistorial, setFechaHistorial] = useState(hoy());
   const [historial, setHistorial] = useState<Pedido[]>([]);
   const [historialUbicacion, setHistorialUbicacion] = useState('todas');
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
@@ -94,7 +77,6 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
   useEffect(() => {
     api<Catalogo>('/operacion/catalogo').then((c) => {
       setCatalogo(c);
-      if (c.semanas[0]) setFechaHistorial(c.semanas[0].inicia_at);
       const asignada = admin ? c.ubicaciones.find((u) => u.tipo === 'sucursal' && u.empresa) : c.ubicaciones.find((u) => usuario?.ubicaciones?.some((x) => x.id === u.id));
       if (asignada) setUbicacionId(String(asignada.id));
     }).catch(() => setError('No se pudo cargar el catálogo de pedidos.'));
@@ -111,15 +93,20 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
     [catalogo, linea, ubicacionSeleccionada?.empresa?.codigo],
   );
   const entregas = useMemo(
-    () => catalogo ? proximasEntregas(catalogo.calendario_pedidos, ubicacionId, linea) : [],
-    [catalogo, ubicacionId, linea],
+    () => catalogo ? entregasDeSemana(catalogo.calendario_pedidos, ubicacionId, linea, semana) : [],
+    [catalogo, ubicacionId, linea, semana.inicio, semana.fin],
   );
   const entregaSeleccionada = entregas.find((e) => e.fecha === fecha);
 
   useEffect(() => {
     setFechaManual(false);
-    setFecha(entregas[0]?.fecha ?? '');
-  }, [entregas]);
+    const proxima = entregas.find((e) => e.fecha >= hoy()) ?? entregas[0];
+    setFecha(proxima?.fecha ?? '');
+  }, [entregas, semana.inicio]);
+
+  useEffect(() => {
+    if (admin && semana.inicio < inicioDeSemana(hoy())) setVista('historial');
+  }, [admin, semana.inicio]);
 
   useEffect(() => {
     if (vista !== 'captura' || !ubicacionId || !fecha) return;
@@ -146,13 +133,12 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
 
   useEffect(() => {
     if (!admin || vista !== 'historial') return;
-    const rango = rangoSemana(fechaHistorial);
     setCargandoHistorial(true); setError('');
-    api<Pedido[]>(`/operacion/pedidos?linea=${linea}&desde=${rango.inicio}&hasta=${rango.fin}`)
+    api<Pedido[]>(`/operacion/pedidos?linea=${linea}&desde=${semana.inicio}&hasta=${semana.fin}`)
       .then(setHistorial)
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el historial.'))
       .finally(() => setCargandoHistorial(false));
-  }, [admin, vista, fechaHistorial, linea, refrescoHistorial]);
+  }, [admin, vista, semana.inicio, semana.fin, linea, refrescoHistorial]);
 
   async function guardar(confirmar: boolean) {
     if (!ubicacionId) return;
@@ -168,12 +154,11 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
     finally { setBusy(false); }
   }
 
-  async function abrirImpresion(lineaObjetivo: Linea, fechaBase: string) {
-    const rango = rangoSemana(fechaBase);
+  async function abrirImpresion(lineaObjetivo: Linea) {
     setCargandoImpresion(true); setError('');
     try {
-      const rows = await api<Pedido[]>(`/operacion/pedidos?linea=${lineaObjetivo}&desde=${rango.inicio}&hasta=${rango.fin}`);
-      setImpresion({ linea: lineaObjetivo, ...rango, pedidos: rows.filter((p) => !['borrador', 'cancelado'].includes(p.estado)) });
+      const rows = await api<Pedido[]>(`/operacion/pedidos?linea=${lineaObjetivo}&desde=${semana.inicio}&hasta=${semana.fin}`);
+      setImpresion({ linea: lineaObjetivo, inicio: semana.inicio, fin: semana.fin, pedidos: rows.filter((p) => !['borrador', 'cancelado'].includes(p.estado)) });
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo preparar la orden para imprimir.'); }
     finally { setCargandoImpresion(false); }
   }
@@ -219,7 +204,7 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
         <section className="order-capture">
           <div className="workspace-card order-context">
             <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
-            <label className="field order-delivery-field"><span className="order-delivery-label">Pedido correspondiente{admin && <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setFechaManual((actual) => { if (actual && entregas[0]) setFecha(entregas[0].fecha); return !actual; }); }}>{fechaManual ? 'Usar próxima entrega' : 'Otra fecha'}</button>}</span>{fechaManual ? <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /> : <select value={fecha} disabled={!entregas.length} onChange={(e) => setFecha(e.target.value)}>{!entregas.length && <option value="">Sin entrega configurada</option>}{entregas.map((e, i) => <option key={e.fecha} value={e.fecha}>{i === 0 ? 'Próximo · ' : ''}Semana {e.semana} · {fechaEntregaCorta(e.fecha)}</option>)}</select>}<small className="order-delivery-hint">{fechaManual ? 'Fecha excepcional seleccionada por el administrador.' : entregaSeleccionada ? `${entregaSeleccionada.rutas.map((r) => r.nombre).join(' / ')} · ${[...new Set(entregaSeleccionada.rutas.map((r) => r.conductor))].join(', ')}` : 'Este restaurante no aparece en una ruta activa para esta línea.'}</small></label>
+            <label className="field order-delivery-field"><span className="order-delivery-label">Entrega de semana {semana.numero}{admin && <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setFechaManual((actual) => { if (actual && entregas[0]) setFecha(entregas[0].fecha); return !actual; }); }}>{fechaManual ? 'Usar ruta programada' : 'Fecha excepcional'}</button>}</span>{fechaManual ? <input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /> : <select value={fecha} disabled={!entregas.length} onChange={(e) => setFecha(e.target.value)}>{!entregas.length && <option value="">Sin entrega configurada</option>}{entregas.map((e) => <option key={e.fecha} value={e.fecha}>{fechaEntregaCorta(e.fecha)}</option>)}</select>}<small className="order-delivery-hint">{fechaManual ? 'Fecha excepcional dentro de la semana seleccionada.' : entregaSeleccionada ? `${entregaSeleccionada.rutas.map((r) => r.nombre).join(' / ')} · ${[...new Set(entregaSeleccionada.rutas.map((r) => r.conductor))].join(', ')}` : 'Este restaurante no aparece en una ruta activa para esta línea.'}</small></label>
           </div>
           {ubic?.entrega_en && <p className="notice">Se factura a <strong>{ubic.nombre}</strong> y se entrega físicamente en <strong>{ubic.entrega_en.nombre}</strong>.</p>}
           <section className="workspace-card product-picker">
@@ -232,35 +217,29 @@ export default function Pedidos({ integrado = false }: { integrado?: boolean }) 
           <label className="workspace-card field order-notes"><span>Notas de la venta <em>opcional</em></span><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
         </section>
         <aside className="order-summary">
-          <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha ? `Semana ${numeroSemana(fecha)} · ${fechaLarga(fecha)}` : 'Sin entrega programada'} · {linea}</p>
+          <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha ? `Semana ${semana.numero} · ${fechaLarga(fecha)}` : 'Sin entrega programada'} · {linea}</p>
           <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total</dt><dd>{usd(total)}</dd></div></dl>
           <div className="order-actions"><button className="btn btn-secondary" disabled={busy || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || !ubicacionId || !fecha || unidades <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : 'Confirmar'}</button></div>
           {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={busy || !fecha} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
-          {admin && <div className="order-print-actions"><span>Orden semanal consolidada</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion || !fecha} onClick={() => void abrirImpresion('carne', fecha)}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion || !fecha} onClick={() => void abrirImpresion('desechables', fecha)}>Imprimir desechables</button></div>}
+          {admin && <div className="order-print-actions"><span>Orden de semana {semana.numero}</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne')}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables')}>Imprimir desechables</button></div>}
         </aside>
-      </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} fecha={fechaHistorial} setFecha={setFechaHistorial} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} semanas={catalogo.semanas} onPrint={() => void abrirImpresion(linea, fechaHistorial)} onConfirmar={() => { const rango = rangoSemana(fechaHistorial); void confirmarTodos(rango.inicio, rango.fin); }} confirmando={busy} />}
+      </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} semana={semana} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} onPrint={() => void abrirImpresion(linea)} onConfirmar={() => void confirmarTodos(semana.inicio, semana.fin)} confirmando={busy} />}
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}
     </div>
   );
 }
 
-function HistorialPedidos({ pedidos, cargando, linea, fecha, setFecha, ubicacion, setUbicacion, ubicaciones, semanas, onPrint, onConfirmar, confirmando }: {
-  pedidos: Pedido[]; cargando: boolean; linea: Linea; fecha: string; setFecha: (v: string) => void; ubicacion: string; setUbicacion: (v: string) => void;
-  ubicaciones: Catalogo['ubicaciones']; semanas: Catalogo['semanas']; onPrint: () => void; onConfirmar: () => void; confirmando: boolean;
+function HistorialPedidos({ pedidos, cargando, linea, semana, ubicacion, setUbicacion, ubicaciones, onPrint, onConfirmar, confirmando }: {
+  pedidos: Pedido[]; cargando: boolean; linea: Linea; semana: SemanaSeleccionada; ubicacion: string; setUbicacion: (v: string) => void;
+  ubicaciones: Catalogo['ubicaciones']; onPrint: () => void; onConfirmar: () => void; confirmando: boolean;
 }) {
-  const rango = rangoSemana(fecha);
-  const indiceSemana = semanas.findIndex((s) => s.inicia_at === fecha);
-  const semanaActual = semanas[indiceSemana] ?? semanas[0];
-  const anterior = semanas[indiceSemana + 1];
-  const siguiente = indiceSemana > 0 ? semanas[indiceSemana - 1] : undefined;
   const filtrados = pedidos.filter((p) => ubicacion === 'todas' || String(p.ubicacion.id) === ubicacion);
   const fechas = [...new Set(filtrados.map((p) => p.fecha_entrega))].sort();
   const unidades = filtrados.flatMap((p) => p.lineas).reduce((a, l) => a + l.cantidad, 0);
   const total = filtrados.flatMap((p) => p.lineas).reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
   return <div className="order-history">
-    <section className="workspace-card history-toolbar">
-      <div><span className="eyebrow">Periodo</span><h2>Semana {semanaActual?.semana ?? '—'}</h2><p>{rango.inicio} al {rango.fin}</p></div>
-      <div className="history-week-controls"><button className="icon-btn" disabled={!anterior} aria-label="Semana anterior" onClick={() => anterior && setFecha(anterior.inicia_at)}>←</button><select aria-label="Semana" value={semanaActual?.inicia_at ?? fecha} onChange={(e) => setFecha(e.target.value)}>{semanas.map((s) => <option key={s.id} value={s.inicia_at}>Semana {s.semana} · {s.inicia_at} al {s.termina_at}</option>)}</select><button className="icon-btn" disabled={!siguiente} aria-label="Semana siguiente" onClick={() => siguiente && setFecha(siguiente.inicia_at)}>→</button></div>
+    <section className="workspace-card history-toolbar history-toolbar--global">
+      <div><span className="eyebrow">Periodo general</span><h2>Semana {semana.numero}</h2><p>{etiquetaRango(semana)}</p></div>
       <label className="field"><span>Sucursal</span><select value={ubicacion} onChange={(e) => setUbicacion(e.target.value)}><option value="todas">Todas las sucursales</option>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}</select></label>
       <div className="history-primary-actions"><button className="btn btn-secondary" disabled={cargando || confirmando} onClick={onConfirmar}>{confirmando ? 'Confirmando…' : 'Confirmar todos'}</button><button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir por ruta</button></div>
     </section>

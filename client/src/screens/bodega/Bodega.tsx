@@ -3,8 +3,9 @@ import { api, ApiError } from '../../api';
 import { EstadoDistChip, FaseChip, FlujoStepper } from '../../flujo';
 import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
+import { crearSemana, type SemanaSeleccionada } from '../../semana';
 
-interface DistResumen { id: number; estado: string; creado_at: string; total_lineas: number }
+interface DistResumen { id: number; estado: string; creado_at: string; fecha_entrega: string | null; linea: LineaOperacion | null; total_lineas: number }
 interface OpItem {
   linea_id: number;
   product_id: number;
@@ -44,7 +45,7 @@ interface Operacion {
 const ESTADOS_BODEGA = ['aprobada', 'verificada', 'en_transito', 'parcialmente_entregada'];
 const ESTADOS_HIST = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'];
 
-export default function Bodega({ integrado = false }: { integrado?: boolean }) {
+export default function Bodega({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [op, setOp] = useState<Operacion | null>(null);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
@@ -53,12 +54,12 @@ export default function Bodega({ integrado = false }: { integrado?: boolean }) {
 
   async function cargar() {
     try {
-      setLista(await api<DistResumen[]>('/distribuciones'));
+      setLista(await api<DistResumen[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Error al cargar');
     }
   }
-  useEffect(() => { void cargar(); }, []);
+  useEffect(() => { setOp(null); void cargar(); }, [semana.inicio, semana.fin]);
   useEffect(() => {
     api<{ verificacion_carga: boolean }>('/negocio').then((n) => setVerificacionCarga(n.verificacion_carga)).catch(() => {});
   }, []);
@@ -98,7 +99,7 @@ export default function Bodega({ integrado = false }: { integrado?: boolean }) {
             <button key={d.id} className="card card-click" onClick={() => void abrir(d.id)}>
               <div className="ubic-row">
                 <div><strong>Pedido #{d.id}</strong> <FaseChip estado={d.estado} />
-                  <div className="muted">{new Date(d.creado_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' })} · {d.total_lineas} líneas</div></div>
+                  <div className="muted">{d.fecha_entrega ?? new Date(d.creado_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })} · {d.linea ?? 'operación'} · {d.total_lineas} líneas</div></div>
                 <span className="muted">›</span>
               </div>
             </button>

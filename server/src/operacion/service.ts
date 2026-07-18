@@ -725,7 +725,7 @@ export async function listarInventariosFinales(negocioId: bigint, ubicacionId?: 
   const [conteos, legacy] = await Promise.all([
     prisma.conteos.findMany({
       where: { negocio_id: negocioId, ubicacion_id: ubicacionId, notas: 'inventario_final_operativo' },
-      include: { ubicaciones: { select: { nombre: true } }, _count: { select: { lineas: true } } },
+      include: { ubicaciones: { select: { nombre: true } }, _count: { select: { lineas: true } }, lineas: { select: { product_id: true, qty: true } } },
       orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
       take: 50,
     }),
@@ -745,8 +745,8 @@ export async function listarInventariosFinales(negocioId: bigint, ubicacionId?: 
     else gruposLegacy.set(clave, { id: movimiento.id, fecha: partes[2] ?? iso(movimiento.fecha), ubicacion: movimiento.ubicacion_origen?.nombre ?? movimiento.ubicacion_destino?.nombre ?? 'Almacén', ajustes: 1 });
   }
   return [
-    ...conteos.map((c) => ({ id: `conteo-${c.id}`, fecha: c.fecha ? iso(c.fecha) : iso(c.creado_at), ubicacion: c.ubicaciones.nombre, ajustes: c._count.lineas, tipo: 'trazable' as const })),
-    ...[...gruposLegacy.values()].map((g) => ({ id: `legacy-${g.id}`, fecha: g.fecha, ubicacion: g.ubicacion, ajustes: g.ajustes, tipo: 'anterior' as const })),
+    ...conteos.map((c) => ({ id: `conteo-${c.id}`, fecha: c.fecha ? iso(c.fecha) : iso(c.creado_at), ubicacion: c.ubicaciones.nombre, ajustes: c._count.lineas, tipo: 'trazable' as const, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), cantidad: num0(l.qty) })) })),
+    ...[...gruposLegacy.values()].map((g) => ({ id: `legacy-${g.id}`, fecha: g.fecha, ubicacion: g.ubicacion, ajustes: g.ajustes, tipo: 'anterior' as const, lineas: null })),
   ].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id));
 }
 
@@ -886,10 +886,11 @@ export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, 
   return { id: Number(resultado.p.id), peso_entrada_lb: resultado.pesoEntrada, peso_salida_lb: resultado.pesoSalida, desperdicio_lb: resultado.desperdicio, yield_porcentaje: resultado.yieldPct, costo_total: resultado.costoEntrada };
 }
 
-export async function resumenProduccion(negocioId: bigint) {
+export async function resumenProduccion(negocioId: bigint, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? fecha(desde) : undefined, lte: hasta ? fecha(hasta) : undefined } : undefined;
   const [compras, producciones, lotes] = await Promise.all([
-    prisma.compras.findMany({ where: { negocio_id: negocioId }, include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 50 }),
-    prisma.producciones.findMany({ where: { negocio_id: negocioId }, include: { materia_prima: true, salidas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 50 }),
+    prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
+    prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
     prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } }, include: { producto: true }, orderBy: [{ congelado: 'asc' }, { fecha: 'asc' }] }),
   ]);
   return {

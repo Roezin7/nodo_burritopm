@@ -3,6 +3,7 @@ import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { EstadoDistChip, FlujoStepper } from '../../flujo';
 import UbicacionPicker from '../../components/UbicacionPicker';
+import { crearSemana, type SemanaSeleccionada } from '../../semana';
 
 interface LineaRec {
   linea_id: number;
@@ -13,10 +14,10 @@ interface LineaRec {
   recibida: number | null;
   estado_linea: string | null;
 }
-interface DistRec { id: number; estado: string; creado_at: string; lineas: LineaRec[] }
-interface DistHist { id: number; estado: string; recibido_at: string; con_incidencia: boolean; total_lineas: number; lineas: LineaRec[] }
+interface DistRec { id: number; estado: string; fecha_entrega: string | null; creado_at: string; lineas: LineaRec[] }
+interface DistHist { id: number; estado: string; fecha_entrega: string | null; recibido_at: string; con_incidencia: boolean; total_lineas: number; lineas: LineaRec[] }
 
-export default function Recepcion({ integrado = false }: { integrado?: boolean }) {
+export default function Recepcion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
   const esAdmin = usuario?.rol === 'admin';
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
@@ -49,14 +50,14 @@ export default function Recepcion({ integrado = false }: { integrado?: boolean }
   async function cargar() {
     if (!ubicId) return;
     setError('');
-    try { setDists(await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}`)); }
+    try { setDists(await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`)); }
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error al cargar'); }
   }
-  useEffect(() => { setHistorial([]); void cargar(); }, [ubicId]);
+  useEffect(() => { setHistorial([]); setTab(semana.actual ? 'pendientes' : 'historial'); void cargar(); }, [ubicId, semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || !ubicId || historial.length) return;
-    api<DistHist[]>(`/distribuciones/recepciones/historial?ubicacion=${ubicId}`).then(setHistorial).catch(() => {});
-  }, [tab, ubicId, historial.length]);
+    api<DistHist[]>(`/distribuciones/recepciones/historial?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`).then(setHistorial).catch(() => {});
+  }, [tab, ubicId, historial.length, semana.inicio, semana.fin]);
 
   // modoProblema=false → confirma todo tal cual lo esperado (un toque). true → usa lo ajustado.
   async function recibir(d: DistRec, modoProblema: boolean) {
@@ -108,7 +109,7 @@ export default function Recepcion({ integrado = false }: { integrado?: boolean }
                 <div key={d.id} className="card">
                   <div className="card-head">
                     <strong>Pedido #{d.id}</strong>
-                    <span className="muted">{new Date(d.recibido_at).toLocaleDateString('es-MX', { timeZone: 'America/Chicago', day: '2-digit', month: 'short' })}</span>
+                    <span className="muted">{d.fecha_entrega ?? new Date(d.recibido_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })}</span>
                   </div>
                   {d.con_incidencia && <p className="txt-danger" style={{ margin: '0 0 0.4rem' }}>Se recibió con diferencias.</p>}
                   {d.lineas.map((l) => (
@@ -131,7 +132,7 @@ export default function Recepcion({ integrado = false }: { integrado?: boolean }
               const enProblema = problema.has(d.id);
               return (
                 <div key={d.id} className="card">
-                  <div className="card-head"><strong>Pedido #{d.id}</strong> <EstadoDistChip estado={d.estado} /></div>
+                  <div className="card-head"><strong>Pedido #{d.id} · {d.fecha_entrega ?? 'sin fecha'}</strong> <EstadoDistChip estado={d.estado} /></div>
                   {d.lineas.map((l) => (
                     <div key={l.linea_id} className="dist-row">
                       <div className="conteo-prod">

@@ -6,6 +6,7 @@ import { ParadaChip, FlujoStepper, paradaLabel } from '../../flujo';
 import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import Spinner from '../../components/Spinner';
 import { nombreEnOrden, type LineaOperacion } from '../../operationOrder';
+import { crearSemana, type SemanaSeleccionada } from '../../semana';
 
 interface ParadaItem {
   linea_id: number;
@@ -31,6 +32,7 @@ interface RutaDetalle {
   distribucion_id: number;
   nombre: string | null;
   linea: LineaOperacion;
+  fecha_entrega: string | null;
   estado: string;
   repartidor: { id: number; nombre: string } | null;
   despachada_at: string | null;
@@ -40,13 +42,13 @@ interface RutaDetalle {
 const cerrada = (e: string) => ['entregada', 'confirmada', 'con_incidencia', 'omitida'].includes(e);
 const hora = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('es-MX', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit' }) : '');
 
-export default function Ruta({ integrado = false }: { integrado?: boolean }) {
+export default function Ruta({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
-  if (usuario?.rol === 'admin') return <MonitorRutas integrado={integrado} />;
-  return <RutaRepartidor integrado={integrado} />;
+  if (usuario?.rol === 'admin') return <MonitorRutas integrado={integrado} semana={semana} />;
+  return <RutaRepartidor integrado={integrado} semana={semana} />;
 }
 
-function RutaRepartidor({ integrado }: { integrado: boolean }) {
+function RutaRepartidor({ integrado, semana }: { integrado: boolean; semana: SemanaSeleccionada }) {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [historial, setHistorial] = useState<RutaDetalle[]>([]);
   const [tab, setTab] = useState<'activas' | 'historial'>('activas');
@@ -58,7 +60,7 @@ function RutaRepartidor({ integrado }: { integrado: boolean }) {
   async function cargar() {
     setCargando(true);
     try {
-      const r = (await api<(RutaDetalle | null)[]>('/rutas/mias')).filter((x): x is RutaDetalle => x != null);
+      const r = (await api<(RutaDetalle | null)[]>(`/rutas/mias?desde=${semana.inicio}&hasta=${semana.fin}`)).filter((x): x is RutaDetalle => x != null);
       setRutas(r);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudieron cargar tus rutas');
@@ -66,11 +68,11 @@ function RutaRepartidor({ integrado }: { integrado: boolean }) {
       setCargando(false);
     }
   }
-  useEffect(() => { void cargar(); }, []);
+  useEffect(() => { setHistorial([]); setTab(semana.actual ? 'activas' : 'historial'); void cargar(); }, [semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || historial.length) return;
-    api<(RutaDetalle | null)[]>('/rutas/historial').then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
-  }, [tab, historial.length]);
+    api<(RutaDetalle | null)[]>(`/rutas/historial?desde=${semana.inicio}&hasta=${semana.fin}`).then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
+  }, [tab, historial.length, semana.inicio, semana.fin]);
 
   // Celebración breve tras entregar, luego de vuelta a la lista.
   function celebrar(nombre: string) {
@@ -107,7 +109,7 @@ function RutaRepartidor({ integrado }: { integrado: boolean }) {
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
-        <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>Hoy{rutas.length ? ` · ${hechasTotal}/${totalParadas}` : ''}</button>
+        <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>En curso{rutas.length ? ` · ${hechasTotal}/${totalParadas}` : ''}</button>
         <button className={tab === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setTab('historial')}>Historial</button>
       </div>
 
@@ -298,7 +300,7 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
 }
 
 // ───────────────────── Monitor del admin (rutas activas en vivo) ─────────────
-function MonitorRutas({ integrado }: { integrado: boolean }) {
+function MonitorRutas({ integrado, semana }: { integrado: boolean; semana: SemanaSeleccionada }) {
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [historial, setHistorial] = useState<RutaDetalle[]>([]);
   const [tab, setTab] = useState<'activas' | 'historial'>('activas');
@@ -309,7 +311,7 @@ function MonitorRutas({ integrado }: { integrado: boolean }) {
 
   async function cargar() {
     try {
-      const r = (await api<(RutaDetalle | null)[]>('/rutas/activas')).filter((x): x is RutaDetalle => x != null);
+      const r = (await api<(RutaDetalle | null)[]>(`/rutas/activas?desde=${semana.inicio}&hasta=${semana.fin}`)).filter((x): x is RutaDetalle => x != null);
       setRutas(r);
       setActualizado(new Date());
       setError('');
@@ -320,14 +322,16 @@ function MonitorRutas({ integrado }: { integrado: boolean }) {
     }
   }
   useEffect(() => {
+    setHistorial([]);
+    setTab(semana.actual ? 'activas' : 'historial');
     void cargar();
     const t = setInterval(() => void cargar(), 15000); // auto-refresco cada 15 s
     return () => clearInterval(t);
-  }, []);
+  }, [semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || historial.length) return;
-    api<(RutaDetalle | null)[]>('/rutas/historial').then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
-  }, [tab, historial.length]);
+    api<(RutaDetalle | null)[]>(`/rutas/historial?desde=${semana.inicio}&hasta=${semana.fin}`).then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
+  }, [tab, historial.length, semana.inicio, semana.fin]);
 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>

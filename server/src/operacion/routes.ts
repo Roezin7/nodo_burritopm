@@ -65,7 +65,8 @@ operacionRouter.patch('/plantillas/:id', soloAdmin, asyncHandler(async (req, res
 }));
 
 operacionRouter.get('/produccion', soloAdmin, asyncHandler(async (req, res) => {
-  res.json(await svc.resumenProduccion(req.auth!.negocioId));
+  const q = z.object({ desde: fecha.optional(), hasta: fecha.optional() }).parse(req.query);
+  res.json(await svc.resumenProduccion(req.auth!.negocioId, q.desde, q.hasta));
 }));
 
 operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {

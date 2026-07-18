@@ -5,6 +5,7 @@ import { useToast, mensajeError } from '../../toast';
 import { EstadoDistChip, FaseChip, ParadaChip, FlujoStepper } from '../../flujo';
 import Spinner from '../../components/Spinner';
 import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
+import { crearSemana, hoyChicago, type SemanaSeleccionada } from '../../semana';
 
 interface DistResumen {
   id: number;
@@ -20,15 +21,7 @@ interface DistResumen {
 const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Pedido #${d.id}`;
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
-function rangoSemana(valor: string) {
-  const d = new Date(`${valor}T12:00:00`);
-  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()));
-  const inicio = d.toLocaleDateString('en-CA');
-  d.setDate(d.getDate() + 5);
-  return { inicio, fin: d.toLocaleDateString('en-CA') };
-}
-
-export default function Distribucion({ integrado = false }: { integrado?: boolean }) {
+export default function Distribucion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const toast = useToast();
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [abierta, setAbierta] = useState<number | null>(null);
@@ -36,19 +29,37 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
   const [cargando, setCargando] = useState(true);
   const [creando, setCreando] = useState(false);
   const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
-  const [fecha, setFecha] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }));
+  const [fecha, setFecha] = useState(semana.inicio);
+  const [calendario, setCalendario] = useState<{ linea: 'carne' | 'desechables'; dia_semana: number }[]>([]);
+
+  const fechasEntrega = (() => {
+    const dias = new Set(calendario.filter((c) => c.linea === linea).map((c) => c.dia_semana));
+    const fechas: string[] = [];
+    for (let iso = semana.inicio; iso <= semana.fin;) {
+      const d = new Date(`${iso}T12:00:00`);
+      if (dias.has(d.getDay())) fechas.push(iso);
+      d.setDate(d.getDate() + 1);
+      iso = d.toLocaleDateString('en-CA');
+    }
+    return fechas;
+  })();
 
   async function cargar() {
     setCargando(true);
     try {
-      setLista(await api<DistResumen[]>('/distribuciones'));
+      setLista(await api<DistResumen[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`));
     } catch {
       setError('No se pudieron cargar los pedidos');
     } finally {
       setCargando(false);
     }
   }
-  useEffect(() => { void cargar(); }, []);
+  useEffect(() => { void cargar(); }, [semana.inicio, semana.fin]);
+  useEffect(() => { api<{ calendario_pedidos: { linea: 'carne' | 'desechables'; dia_semana: number }[] }>('/operacion/catalogo').then((c) => setCalendario(c.calendario_pedidos)).catch(() => {}); }, []);
+  useEffect(() => {
+    const sugerida = fechasEntrega.find((f) => f >= hoyChicago()) ?? fechasEntrega[0] ?? '';
+    setFecha(sugerida);
+  }, [semana.inicio, linea, calendario]);
 
   async function crearPreparacion() {
     setCreando(true);
@@ -68,11 +79,10 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
   }
 
   async function crearTodas() {
-    const rango = rangoSemana(fecha);
     setCreando(true); setError('');
     try {
       const r = await api<{ creadas: { id: number; linea: string; fecha: string; pedidos: number; rutas: number }[]; existentes: number; borradores_omitidos: number }>('/operacion/distribuciones/crear-todas', {
-        method: 'POST', body: { desde: rango.inicio, hasta: rango.fin },
+        method: 'POST', body: { desde: semana.inicio, hasta: semana.fin },
       });
       toast.ok(`${r.creadas.length} preparaciones creadas${r.existentes ? ` · ${r.existentes} ya existían` : ''}${r.borradores_omitidos ? ` · ${r.borradores_omitidos} borradores omitidos` : ''}.`);
       await cargar();
@@ -81,10 +91,9 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
   }
 
   async function aprobarTodas() {
-    const rango = rangoSemana(fecha);
     setCreando(true); setError('');
     try {
-      const r = await api<{ aprobadas: number }>('/distribuciones/aprobar-todas', { method: 'POST', body: { desde: rango.inicio, hasta: rango.fin } });
+      const r = await api<{ aprobadas: number }>('/distribuciones/aprobar-todas', { method: 'POST', body: { desde: semana.inicio, hasta: semana.fin } });
       toast.ok(`${r.aprobadas} preparaciones aprobadas.`);
       await cargar();
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron aprobar las preparaciones.'); }
@@ -120,11 +129,11 @@ export default function Distribucion({ integrado = false }: { integrado?: boolea
             <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('carne')}>Carne</button>
             <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
           </div>
-          <label className="field"><span>Fecha de entrega</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
+          <label className="field"><span>Entrega de semana {semana.numero}</span><select value={fecha} disabled={!fechasEntrega.length} onChange={(e) => setFecha(e.target.value)}>{!fechasEntrega.length && <option value="">Sin ruta configurada</option>}{fechasEntrega.map((f) => <option value={f} key={f}>{new Date(`${f}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' })}</option>)}</select></label>
           <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear esta preparación'}</button>
         </div>
-        <div className="preparation-batch-actions"><span>Semana {rangoSemana(fecha).inicio} al {rangoSemana(fecha).fin}</span><button className="btn btn-secondary" disabled={creando} onClick={() => void crearTodas()}>Crear todas</button><button className="btn btn-secondary" disabled={creando} onClick={() => void aprobarTodas()}>Aprobar todas</button></div>
-        <Link className="preparation-orders-link" to="/semana/ventas">Revisar o capturar ventas →</Link>
+        <div className="preparation-batch-actions"><span>Semana {semana.numero} · {semana.inicio} al {semana.fin}</span><button className="btn btn-secondary" disabled={creando} onClick={() => void crearTodas()}>Crear todas</button><button className="btn btn-secondary" disabled={creando} onClick={() => void aprobarTodas()}>Aprobar todas</button></div>
+        <Link className="preparation-orders-link" to={`/semana/ventas?semana=${semana.inicio}`}>Revisar o capturar ventas →</Link>
       </section>
 
       <h3 className="seccion-title">Preparaciones</h3>

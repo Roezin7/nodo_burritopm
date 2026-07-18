@@ -7,6 +7,8 @@ import * as rutas from './rutas.service.js';
 export const rutasRouter = Router();
 
 const idParam = z.coerce.number().int().positive();
+const fechaParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const rangoQuery = z.object({ desde: fechaParam.optional(), hasta: fechaParam.optional() });
 // Rol unificado "Bodega y reparto": el encargado de bodega también ejecuta la ruta.
 const repartidor = requireRole('encargado_bodega', 'admin');
 
@@ -17,7 +19,8 @@ rutasRouter.get(
   '/activas',
   soloAdmin,
   asyncHandler(async (req, res) => {
-    res.json(await rutas.rutasActivas(req.auth!.negocioId));
+    const q = rangoQuery.parse(req.query);
+    res.json(await rutas.rutasActivas(req.auth!.negocioId, q.desde, q.hasta));
   }),
 );
 
@@ -26,7 +29,8 @@ rutasRouter.get(
   '/mias',
   repartidor,
   asyncHandler(async (req, res) => {
-    res.json(await rutas.rutasDelRepartidor(req.auth!.negocioId, req.auth!.usuarioId));
+    const q = rangoQuery.parse(req.query);
+    res.json(await rutas.rutasDelRepartidor(req.auth!.negocioId, req.auth!.usuarioId, q.desde, q.hasta));
   }),
 );
 
@@ -35,7 +39,8 @@ rutasRouter.get(
   '/historial',
   repartidor,
   asyncHandler(async (req, res) => {
-    res.json(await rutas.rutasHistorial(req.auth!.negocioId));
+    const q = rangoQuery.parse(req.query);
+    res.json(await rutas.rutasHistorial(req.auth!.negocioId, 100, q.desde, q.hasta));
   }),
 );
 

@@ -153,6 +153,7 @@ async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnTy
     nombre: ruta.nombre,
     conductor: plantilla?.conductor ?? repartidor?.nombre ?? null,
     linea,
+    fecha_entrega: ruta.fecha_entrega?.toISOString().slice(0, 10) ?? dist.fecha_entrega?.toISOString().slice(0, 10) ?? null,
     estado: ruta.estado,
     repartidor: repartidor ? { id: Number(repartidor.id), nombre: repartidor.nombre } : null,
     despachada_at: ruta.despachada_at?.toISOString() ?? null,
@@ -188,9 +189,10 @@ export async function rutasDeDistribucion(negocioId: bigint, distId: bigint) {
  * (no solo en rutas formalmente planeadas): si la distribución tiene ruta, usa su detalle; si no,
  * sintetiza las paradas desde las sucursales destino y su estado de recepción.
  */
-export async function rutasActivas(negocioId: bigint) {
+export async function rutasActivas(negocioId: bigint, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const dists = await prisma.distribuciones.findMany({
-    where: { negocio_id: negocioId, estado: { in: ['en_transito', 'parcialmente_entregada'] } },
+    where: { negocio_id: negocioId, estado: { in: ['en_transito', 'parcialmente_entregada'] }, fecha_entrega: rango },
     orderBy: { id: 'desc' },
     select: { id: true },
   });
@@ -261,6 +263,7 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
     distribucion_id: Number(distId),
     nombre: `Pedido #${distId}`,
     linea: dist?.linea_operacion ?? 'desechables',
+    fecha_entrega: dist?.fecha_entrega?.toISOString().slice(0, 10) ?? null,
     estado: 'en_curso',
     repartidor: null,
     despachada_at: dist?.cargado_at?.toISOString() ?? null,
@@ -273,11 +276,13 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
  * las sin asignar (autocreadas al cargar) o asignadas a él. Rol unificado: la cuadrilla
  * de reparto ve lo que está en la calle sin depender de una asignación explícita.
  */
-export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint) {
+export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const rutas = await prisma.rutas.findMany({
     where: {
       negocio_id: negocioId,
       estado: 'en_curso',
+      fecha_entrega: rango,
       OR: [{ repartidor_id: null }, { repartidor_id: repartidorId }],
     },
     orderBy: { id: 'desc' },
@@ -286,9 +291,10 @@ export async function rutasDelRepartidor(negocioId: bigint, repartidorId: bigint
 }
 
 /** Historial de rutas ya completadas (las últimas), para "Bodega y reparto" y el admin. */
-export async function rutasHistorial(negocioId: bigint, limite = 30) {
+export async function rutasHistorial(negocioId: bigint, limite = 30, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const rutas = await prisma.rutas.findMany({
-    where: { negocio_id: negocioId, estado: 'completada' },
+    where: { negocio_id: negocioId, estado: 'completada', fecha_entrega: rango },
     orderBy: { id: 'desc' },
     take: limite,
   });

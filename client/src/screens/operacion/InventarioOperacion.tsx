@@ -4,6 +4,7 @@ import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
+import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
 
 type Linea = 'todas' | 'carne' | 'desechables';
 
@@ -38,13 +39,12 @@ interface InventarioGuardado {
   ubicacion: string;
   ajustes: number;
   tipo: 'trazable' | 'anterior';
+  lineas: { product_id: number; cantidad: number }[] | null;
 }
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
-const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
-
-export default function InventarioOperacion({ integrado = false }: { integrado?: boolean }) {
+export default function InventarioOperacion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
@@ -56,7 +56,7 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
   const [error, setError] = useState('');
   const [editando, setEditando] = useState(false);
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
-  const [fecha, setFecha] = useState(hoy());
+  const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
   const [busy, setBusy] = useState(false);
   const [historial, setHistorial] = useState<InventarioGuardado[]>([]);
 
@@ -80,6 +80,7 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
       .then(([existencias, inventarios]) => { setStock(existencias); setHistorial(inventarios); })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'));
   }, [almacenId, admin]);
+  useEffect(() => { setFecha(fechaDentroDeSemana(semana)); setEditando(false); }, [semana.inicio, semana.fin]);
 
   async function recargar() {
     if (!almacenId) return;
@@ -90,14 +91,25 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
     setStock(existencias); setHistorial(inventarios);
   }
 
+  const historialSemana = historial.filter((i) => i.fecha >= semana.inicio && i.fecha <= semana.fin);
+  const capturaSemana = !semana.actual ? historialSemana.find((i) => i.tipo === 'trazable' && i.lineas?.length) : undefined;
+  const itemsPeriodo = useMemo(() => {
+    if (!capturaSemana?.lineas || !stock) return stock?.items ?? [];
+    const cantidadesCapturadas = new Map(capturaSemana.lineas.map((l) => [l.product_id, l.cantidad]));
+    return stock.items.map((i) => {
+      const disponible = cantidadesCapturadas.get(i.product_id) ?? 0;
+      return { ...i, disponible, reservada: 0, transito: 0, valor: i.costo_promedio == null ? 0 : disponible * i.costo_promedio };
+    });
+  }, [stock, capturaSemana]);
+
   const filas = useMemo(() => {
     const q = buscar.trim().toLowerCase();
-    return (stock?.items ?? []).filter((i) => {
+    return itemsPeriodo.filter((i) => {
       if (linea !== 'todas' && i.linea !== linea) return false;
       if (!editando && q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
       return editando || i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0;
     });
-  }, [stock, linea, buscar, editando]);
+  }, [itemsPeriodo, linea, buscar, editando]);
 
   const totales = filas.reduce((a, i) => ({
     disponible: a.disponible + i.disponible,
@@ -140,7 +152,7 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
   return <div className={integrado ? 'operation-embedded inventory-embedded' : 'page operation-page'}>
     {!integrado && <header className="page-head operation-page-head">
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
-      {admin && <div className="page-actions"><Link className="btn btn-secondary" to="/semana/compras">Compra</Link><Link className="btn btn-primary" to="/semana/produccion">Producción</Link></div>}
+      {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
     {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 8</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
 
@@ -154,6 +166,7 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
     </div>
 
     {error && <p className="error-msg">{error}</p>}
+    {!semana.actual && <p className="notice">{capturaSemana ? <><strong>Inventario final de semana {semana.numero}:</strong> se muestra la captura física del {capturaSemana.fecha}.</> : <><strong>Sin captura histórica:</strong> no existe inventario final trazable para la semana {semana.numero}; el saldo mostrado es el actual.</>}</p>}
     {!stock && !error ? <Spinner label="Calculando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
         <div><span>Valor</span><strong>{usd(totales.valor)}</strong></div>
@@ -180,8 +193,8 @@ export default function InventarioOperacion({ integrado = false }: { integrado?:
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
       </section>
-      {admin && historial.length > 0 && <section className="workspace-card inventory-history"><div className="workspace-card-head"><div><h2>Inventarios guardados</h2><p>Elimina una captura completa para regresar al saldo anterior.</p></div><span>{historial.length}</span></div><div className="record-list">{historial.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.tipo === 'anterior' && <small>Captura de la versión anterior; también puede revertirse.</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div></section>}
-      {editando && <div className="inventory-capture-actions"><label className="field"><span>Fecha</span><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
+      {admin && <section className="workspace-card inventory-history"><div className="workspace-card-head"><div><h2>Inventarios de semana {semana.numero}</h2><p>Capturas físicas guardadas dentro del periodo seleccionado.</p></div><span>{historialSemana.length}</span></div>{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.tipo === 'anterior' && <small>Captura de la versión anterior; también puede revertirse.</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin inventario final</strong><span>No hay captura física guardada en esta semana.</span></div>}</section>}
+      {editando && <div className="inventory-capture-actions"><label className="field"><span>Fecha dentro de semana {semana.numero}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
       {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}
   </div>;

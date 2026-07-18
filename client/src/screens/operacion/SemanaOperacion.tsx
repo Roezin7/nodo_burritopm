@@ -1,4 +1,4 @@
-import { Navigate, NavLink, useParams } from 'react-router-dom';
+import { Navigate, NavLink, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth, type Rol } from '../../auth';
 import Pedidos from './Pedidos';
 import OperacionAdmin from './OperacionAdmin';
@@ -7,6 +7,7 @@ import Distribucion from '../distribucion/Distribucion';
 import Bodega from '../bodega/Bodega';
 import Ruta from '../ruta/Ruta';
 import Recepcion from '../recepcion/Recepcion';
+import { crearSemana, etiquetaRango, moverSemana, semanasAlrededor } from '../../semana';
 
 const capturas = [
   { clave: 'compras', label: 'Compras', numero: 1 },
@@ -37,14 +38,19 @@ type Tarea = (typeof tareasPorRol)[number]['clave'];
 export default function SemanaOperacion() {
   const { usuario } = useAuth();
   const { paso } = useParams();
+  const [params, setParams] = useSearchParams();
+  const semana = crearSemana(params.get('semana') ?? undefined);
+  const opcionesSemana = semanasAlrededor(crearSemana());
+  const cambiarSemana = (inicio: string) => setParams({ semana: crearSemana(inicio).inicio });
+  const rutaSemana = (ruta: string) => `${ruta}?semana=${semana.inicio}`;
   if (!usuario) return null;
 
   if (usuario.rol === 'admin') {
-    if (paso === 'pedidos') return <Navigate to="/semana/ventas" replace />;
-    if (paso === 'seguimiento') return <Navigate to="/semana/preparacion" replace />;
+    if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
+    if (paso === 'seguimiento') return <Navigate to={rutaSemana('/semana/preparacion')} replace />;
     const actual = (paso ?? 'compras') as PasoAdmin;
     const todos = [...capturas, ...proceso];
-    if (!todos.some((p) => p.clave === actual)) return <Navigate to="/semana/compras" replace />;
+    if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/compras')} replace />;
     const enCaptura = capturas.some((p) => p.clave === actual);
     const pestanas = enCaptura ? capturas : proceso;
 
@@ -52,25 +58,27 @@ export default function SemanaOperacion() {
       <header className="weekly-operation__head weekly-operation__head--simple">
         <div><span className="eyebrow">Operación semanal</span><h1>{enCaptura ? 'Captura' : 'Proceso'}</h1></div>
         <nav className="weekly-mode-tabs" aria-label="Grupo de operación">
-          <NavLink to="/semana/compras" className={enCaptura ? 'is-active' : ''}>Captura</NavLink>
-          <NavLink to="/semana/preparacion" className={!enCaptura ? 'is-active' : ''}>Proceso</NavLink>
+          <NavLink to={rutaSemana('/semana/compras')} className={enCaptura ? 'is-active' : ''}>Captura</NavLink>
+          <NavLink to={rutaSemana('/semana/preparacion')} className={!enCaptura ? 'is-active' : ''}>Proceso</NavLink>
         </nav>
       </header>
 
+      <SelectorSemana semana={semana} opciones={opcionesSemana} onChange={cambiarSemana} />
+
       <nav className={`capture-tabs ${enCaptura ? '' : 'process-tabs'}`} aria-label={enCaptura ? 'Datos que se capturan' : 'Proceso operativo'}>
-        {pestanas.map((p) => <NavLink key={p.clave} to={`/semana/${p.clave}`} className={p.clave === actual ? 'is-active' : ''}><span>{p.numero}</span><strong>{p.label}</strong></NavLink>)}
+        {pestanas.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{p.numero}</span><strong>{p.label}</strong></NavLink>)}
       </nav>
 
       <div className="weekly-operation__content">
-        {actual === 'compras' && <OperacionAdmin seccion="compras" integrado />}
-        {actual === 'produccion' && <OperacionAdmin seccion="produccion" integrado />}
-        {actual === 'ventas' && <Pedidos integrado />}
-        {actual === 'preparacion' && <Distribucion integrado />}
-        {actual === 'despacho' && <Bodega integrado />}
-        {actual === 'reparto' && <Ruta integrado />}
-        {actual === 'recepcion' && <Recepcion integrado />}
-        {actual === 'inventario' && <InventarioOperacion integrado />}
-        {actual === 'cierre' && <OperacionAdmin seccion="cierre" integrado />}
+        {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}
+        {actual === 'produccion' && <OperacionAdmin seccion="produccion" integrado semana={semana} />}
+        {actual === 'ventas' && <Pedidos integrado semana={semana} />}
+        {actual === 'preparacion' && <Distribucion integrado semana={semana} />}
+        {actual === 'despacho' && <Bodega integrado semana={semana} />}
+        {actual === 'reparto' && <Ruta integrado semana={semana} />}
+        {actual === 'recepcion' && <Recepcion integrado semana={semana} />}
+        {actual === 'inventario' && <InventarioOperacion integrado semana={semana} />}
+        {actual === 'cierre' && <OperacionAdmin seccion="cierre" integrado semana={semana} />}
       </div>
     </div>;
   }
@@ -78,20 +86,33 @@ export default function SemanaOperacion() {
   const permitidos = tareasPorRol.filter((p) => (p.roles as readonly Rol[]).includes(usuario.rol));
   const alias = paso === 'pedidos' ? 'ventas' : paso;
   const inicio = permitidos[0]?.clave ?? 'ventas';
-  if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={`/semana/${inicio}`} replace />;
+  if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={rutaSemana(`/semana/${inicio}`)} replace />;
   const actual = alias as Tarea;
 
   return <div className="page weekly-operation weekly-operation--simple">
     <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Operación semanal</span><h1>Trabajo del día</h1></div></header>
+    <SelectorSemana semana={semana} opciones={opcionesSemana} onChange={cambiarSemana} />
     <nav className="capture-tabs capture-tabs--role" aria-label="Trabajo disponible">
-      {permitidos.map((p, i) => <NavLink key={p.clave} to={`/semana/${p.clave}`} className={p.clave === actual ? 'is-active' : ''}><span>{i + 1}</span><strong>{p.label}</strong></NavLink>)}
+      {permitidos.map((p, i) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{i + 1}</span><strong>{p.label}</strong></NavLink>)}
     </nav>
     <div className="weekly-operation__content">
-      {actual === 'ventas' && <Pedidos integrado />}
-      {actual === 'despacho' && <Bodega integrado />}
-      {actual === 'reparto' && <Ruta integrado />}
-      {actual === 'recepcion' && <Recepcion integrado />}
-      {actual === 'inventario' && <InventarioOperacion integrado />}
+      {actual === 'ventas' && <Pedidos integrado semana={semana} />}
+      {actual === 'despacho' && <Bodega integrado semana={semana} />}
+      {actual === 'reparto' && <Ruta integrado semana={semana} />}
+      {actual === 'recepcion' && <Recepcion integrado semana={semana} />}
+      {actual === 'inventario' && <InventarioOperacion integrado semana={semana} />}
     </div>
   </div>;
+}
+
+function SelectorSemana({ semana, opciones, onChange }: { semana: ReturnType<typeof crearSemana>; opciones: ReturnType<typeof semanasAlrededor>; onChange: (inicio: string) => void }) {
+  const anterior = moverSemana(semana, -1);
+  const siguiente = moverSemana(semana, 1);
+  return <section className="global-week-picker" aria-label="Semana de toda la operación">
+    <button className="icon-btn" aria-label="Semana anterior" onClick={() => onChange(anterior.inicio)}>←</button>
+    <label><span>Panorama general</span><select value={semana.inicio} onChange={(e) => onChange(e.target.value)}>{opciones.map((s) => <option key={s.inicio} value={s.inicio}>Semana {s.numero} · {s.anio} · {etiquetaRango(s)}</option>)}</select></label>
+    <button className="icon-btn" aria-label="Semana siguiente" onClick={() => onChange(siguiente.inicio)}>→</button>
+    <div className="global-week-summary"><strong>Semana {semana.numero}</strong><span>{etiquetaRango(semana)}</span></div>
+    {!semana.actual && <button className="btn btn-ghost btn-sm" onClick={() => onChange(crearSemana().inicio)}>Semana actual</button>}
+  </section>;
 }

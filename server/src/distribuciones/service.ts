@@ -188,9 +188,10 @@ export type EstadoDistribucionValor =
   | 'en_transito' | 'parcialmente_entregada' | 'entregada' | 'cerrada'
   | 'cerrada_con_incidencias' | 'cancelada';
 
-export async function listarDistribuciones(negocioId: bigint) {
+export async function listarDistribuciones(negocioId: bigint, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const ds = await prisma.distribuciones.findMany({
-    where: { negocio_id: negocioId },
+    where: { negocio_id: negocioId, fecha_entrega: rango },
     orderBy: { id: 'desc' },
     include: { _count: { select: { lineas: true } } },
   });
@@ -633,11 +634,13 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
 }
 
 /** Distribuciones en tránsito con líneas destinadas a una sucursal (para recepción). */
-export async function recepcionesPendientes(negocioId: bigint, ubicacionId: bigint) {
+export async function recepcionesPendientes(negocioId: bigint, ubicacionId: bigint, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const dists = await prisma.distribuciones.findMany({
     where: {
       negocio_id: negocioId,
       estado: { in: ['en_transito', 'parcialmente_entregada'] },
+      fecha_entrega: rango,
       lineas: { some: { ubicacion_destino_id: ubicacionId } },
     },
     include: {
@@ -651,6 +654,7 @@ export async function recepcionesPendientes(negocioId: bigint, ubicacionId: bigi
   return dists.map((d) => ({
     id: Number(d.id),
     estado: d.estado,
+    fecha_entrega: d.fecha_entrega?.toISOString().slice(0, 10) ?? null,
     creado_at: d.creado_at.toISOString(),
     lineas: d.lineas.map((l) => ({
       linea_id: Number(l.id),
@@ -665,11 +669,13 @@ export async function recepcionesPendientes(negocioId: bigint, ubicacionId: bigi
 }
 
 /** Historial de recepciones de una sucursal: distribuciones ya recibidas/cerradas que la tocaron. */
-export async function recepcionesHistorial(negocioId: bigint, ubicacionId: bigint) {
+export async function recepcionesHistorial(negocioId: bigint, ubicacionId: bigint, desde?: string, hasta?: string) {
+  const rango = desde || hasta ? { gte: desde ? new Date(`${desde}T00:00:00.000Z`) : undefined, lte: hasta ? new Date(`${hasta}T00:00:00.000Z`) : undefined } : undefined;
   const dists = await prisma.distribuciones.findMany({
     where: {
       negocio_id: negocioId,
       estado: { in: ['entregada', 'cerrada', 'cerrada_con_incidencias'] },
+      fecha_entrega: rango,
       lineas: { some: { ubicacion_destino_id: ubicacionId, cantidad_recibida: { not: null } } },
     },
     include: {
@@ -686,6 +692,7 @@ export async function recepcionesHistorial(negocioId: bigint, ubicacionId: bigin
     return {
       id: Number(d.id),
       estado: d.estado,
+      fecha_entrega: d.fecha_entrega?.toISOString().slice(0, 10) ?? null,
       recibido_at: d.creado_at.toISOString(),
       con_incidencia: conIncidencia,
       total_lineas: d.lineas.length,
