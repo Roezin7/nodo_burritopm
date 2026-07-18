@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularConsumoFifo, calcularPrecioProteinaSemanal, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -54,6 +54,17 @@ describe('materia prima con cajas de peso variable', () => {
     const calculo = calcularConsumoFifo([{ cajas: 4, peso_lb: 286, costo: 720 }], 1.5);
     expect(calculo.peso_total).toBe(107.25);
     expect(calculo.costo_total).toBe(270);
+  });
+});
+
+describe('subproducto de carnitas', () => {
+  it('deja Carnitas sin costo y conserva todo el costo en Pastor', () => {
+    const pastor = calcularCostoSalidaProduccion(3280.47, 1380, 1380, 69);
+    const carnitas = calcularCostoSalidaProduccion(3280.47, 1380, 0, 25);
+
+    expect(pastor.costoTotal).toBe(3280.47);
+    expect(pastor.costoUnidad).toBe(47.543);
+    expect(carnitas).toEqual({ costoTotal: 0, costoUnidad: 0 });
   });
 });
 

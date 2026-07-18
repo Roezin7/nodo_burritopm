@@ -14,8 +14,10 @@ interface Catalogo {
   plantillas: { id: number; nombre: string; codigo: string; linea: string; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
 }
 interface Resumen {
+  total_compras: number;
+  cantidad_compras: number;
   compras: { id: number; fecha: string; vence_at: string; proveedor: string; total: number; estado: string; lineas: { producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean }[] }[];
-  producciones: { id: number; fecha: string; materia_prima: string; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; salidas: { producto: string; cajas: number; costo_caja: number; precio: number }[] }[];
+  producciones: { id: number; fecha: string; materia_prima: string; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; salidas: { producto: string; sku: string; unidad: string; cajas: number; costo_caja: number; precio: number }[] }[];
   lotes: { id: number; fecha: string; producto: string; product_id: number; cajas: number; peso_lb: number; costo: number; congelado: boolean }[];
 }
 interface Cierre {
@@ -149,51 +151,123 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
       <div className="lot-grid">{resumen.lotes.map((l) => <article className="lot-card" key={l.id}><div className="card-head"><strong>{l.producto}</strong><span className={`chip ${l.congelado ? 'chip--info' : 'chip--ok'}`}>{l.congelado ? 'Congelado' : 'Fresco'}</span></div><div className="lot-value">{l.cajas} <small>cajas</small></div><p>{l.peso_lb.toLocaleString('es-MX')} lb · {l.cajas > 0 ? (l.peso_lb / l.cajas).toFixed(2) : '0.00'} lb/caja<br />{usd(l.costo)} · {l.cajas > 0 ? usd(l.costo / l.cajas) : usd(0)}/caja</p><footer><span>{l.fecha}</span><button className="link-btn" disabled={busy} onClick={() => void cambiarLote(l.id, !l.congelado)}>{l.congelado ? 'Descongelar' : 'Congelar'}</button></footer></article>)}</div>
     </section>}
 
-    <section className="workspace-card"><div className="workspace-card-head"><h2>Compras registradas</h2></div>
+    <section className="workspace-card"><div className="workspace-card-head"><div><h2>Compras registradas</h2><p>Semana {semana.numero} · {resumen.cantidad_compras} compra{resumen.cantidad_compras === 1 ? '' : 's'}</p></div><div className="weekly-purchase-total"><small>Total de compras</small><strong>{usd(resumen.total_compras)}</strong></div></div>
       <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void pagarCompra(c.id)}>Marcar pagada</button>}<button className="btn btn-danger-ghost btn-sm" disabled={busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>)}</div>
     </section>
   </div>;
+}
+
+interface ProduccionBorrador {
+  id: number;
+  materia: string;
+  entrada: string;
+  salidas: Record<number, string>;
+}
+
+const recetasProduccion: Record<string, string[]> = {
+  'RAW-INSIDE-SKIRT': ['MEAT-STEAK'],
+  'RAW-CHICKEN': ['MEAT-CHICKEN'],
+  'RAW-PORK-BUTT': ['MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP', 'MEAT-CARNITAS'],
+  'RAW-OUTSIDE-SKIRT': ['MEAT-ASADA', 'MEAT-FAJITAS'],
+  'RAW-INSIDE-ROUND': ['MEAT-MILANESA'],
+  'RAW-TAPATIOS-TACO': ['MEAT-TAPATIOS-TACO'],
+};
+
+function estimarConsumoDesde(
+  lotes: Resumen['lotes'],
+  omitirCajas: number,
+  tomarCajas: number,
+) {
+  const desde = Math.max(0, omitirCajas);
+  const hasta = desde + Math.max(0, tomarCajas);
+  let cursor = 0; let pesoTotal = 0; let costoTotal = 0;
+  for (const lote of lotes) {
+    const finLote = cursor + lote.cajas;
+    const cajas = Math.max(0, Math.min(hasta, finLote) - Math.max(desde, cursor));
+    if (cajas > 0 && lote.cajas > 0) {
+      pesoTotal += lote.peso_lb * (cajas / lote.cajas);
+      costoTotal += lote.costo * (cajas / lote.cajas);
+    }
+    cursor = finLote;
+    if (cursor >= hasta) break;
+  }
+  return { pesoTotal, costoTotal };
 }
 
 function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; bloqueada: boolean; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
   const toast = useToast();
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const materias = catalogo.productos.filter((p) => p.tipo === 'materia_prima');
-  const [materia, setMateria] = useState(String(materias[0]?.id ?? '')); const [fecha, setFecha] = useState(fechaDentroDeSemana(semana)); const [entrada, setEntrada] = useState(''); const [salidas, setSalidas] = useState<Record<number, string>>({});
-  useEffect(() => setFecha(fechaDentroDeSemana(semana)), [semana.inicio, semana.fin]);
-  const recetas: Record<string, string[]> = { 'RAW-INSIDE-SKIRT': ['MEAT-STEAK'], 'RAW-CHICKEN': ['MEAT-CHICKEN'], 'RAW-PORK-BUTT': ['MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP'], 'RAW-OUTSIDE-SKIRT': ['MEAT-ASADA', 'MEAT-FAJITAS'], 'RAW-INSIDE-ROUND': ['MEAT-MILANESA'], 'RAW-TAPATIOS-TACO': ['MEAT-TAPATIOS-TACO'] };
-  const materiaActual = materias.find((p) => String(p.id) === materia);
-  const terminados = catalogo.productos.filter((p) => p.linea === 'carne' && p.tipo === 'proteina' && (recetas[materiaActual?.sku ?? ''] ?? []).includes(p.sku));
-  const lotesMateria = resumen.lotes.filter((l) => String(l.product_id) === materia);
-  // El admin suele capturar todo el sábado: cualquier compra fresca de la misma semana puede
-  // respaldar el batch, aunque se haya registrado después que la fecha de producción.
-  const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= semana.fin).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
-  const cajasFrescas = lotesFrescos.reduce((a, l) => a + l.cajas, 0);
-  const cajasCongeladas = lotesMateria.filter((l) => l.congelado).reduce((a, l) => a + l.cajas, 0);
-  const pesoFresco = lotesFrescos.reduce((a, l) => a + l.peso_lb, 0);
-  const consumoEstimado = (() => {
-    let faltan = Number(entrada || 0); let pesoTotal = 0; let costoTotal = 0;
-    for (const lote of lotesFrescos) {
-      if (faltan <= 0.0001) break;
-      const usadas = Math.min(faltan, lote.cajas);
-      const proporcion = lote.cajas > 0 ? usadas / lote.cajas : 0;
-      pesoTotal += lote.peso_lb * proporcion;
-      costoTotal += lote.costo * proporcion;
-      faltan -= usadas;
-    }
-    return { pesoTotal, costoTotal };
-  })();
-  const pesoEntradaEstimado = consumoEstimado.pesoTotal;
-  const pesoCajaConsumida = Number(entrada) > 0 ? pesoEntradaEstimado / Number(entrada) : (materiaActual?.peso_caja_lb ?? 0);
-  const pesoSalida = terminados.reduce((a, p) => a + Number(salidas[p.id] || 0) * (p.peso_caja_lb ?? 0), 0);
-  const insuficiente = Number(entrada || 0) > cajasFrescas + 0.0001;
+  const siguienteId = useRef(2);
+  const crearBorrador = (materia = String(materias[0]?.id ?? '')): ProduccionBorrador => ({ id: siguienteId.current++, materia, entrada: '', salidas: {} });
+  const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
+  const [borradores, setBorradores] = useState<ProduccionBorrador[]>(() => [{ id: 1, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+
+  useEffect(() => {
+    setFecha(fechaDentroDeSemana(semana));
+    setBorradores([{ id: siguienteId.current++, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+  }, [semana.inicio, semana.fin]);
+
+  function actualizar(idBorrador: number, cambio: Partial<ProduccionBorrador>) {
+    setBorradores((actuales) => actuales.map((b) => b.id === idBorrador ? { ...b, ...cambio } : b));
+  }
+
+  function agregarProducto() {
+    if (borradores.length >= 12) return;
+    const materiasUsadas = new Set(borradores.map((b) => b.materia));
+    const siguiente = materias.find((m) => !materiasUsadas.has(String(m.id))) ?? materias[0];
+    setBorradores((actuales) => [...actuales, crearBorrador(String(siguiente?.id ?? ''))]);
+  }
+
+  const calculos = borradores.map((borrador, indice) => {
+    const materia = materias.find((p) => String(p.id) === borrador.materia);
+    const terminados = catalogo.productos.filter((p) => p.linea === 'carne' && (p.tipo === 'proteina' || p.sku === 'MEAT-CARNITAS') && (recetasProduccion[materia?.sku ?? ''] ?? []).includes(p.sku));
+    const lotesMateria = resumen.lotes.filter((l) => String(l.product_id) === borrador.materia);
+    const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= semana.fin).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
+    const cajasFrescas = lotesFrescos.reduce((a, l) => a + l.cajas, 0);
+    const cajasCongeladas = lotesMateria.filter((l) => l.congelado).reduce((a, l) => a + l.cajas, 0);
+    const entrada = Number(borrador.entrada || 0);
+    const entradaAnterior = borradores.slice(0, indice).filter((b) => b.materia === borrador.materia).reduce((a, b) => a + Number(b.entrada || 0), 0);
+    const entradaTotal = borradores.filter((b) => b.materia === borrador.materia).reduce((a, b) => a + Number(b.entrada || 0), 0);
+    const consumo = estimarConsumoDesde(lotesFrescos, entradaAnterior, entrada);
+    const pesoSalida = terminados.reduce((a, p) => a + Number(borrador.salidas[p.id] || 0) * (p.peso_caja_lb ?? 0), 0);
+    const cajasSalida = terminados.filter((p) => p.tipo === 'proteina').reduce((a, p) => a + Number(borrador.salidas[p.id] || 0), 0);
+    const piezasSubproducto = terminados.filter((p) => p.sku === 'MEAT-CARNITAS').reduce((a, p) => a + Number(borrador.salidas[p.id] || 0), 0);
+    const insuficiente = entradaTotal > cajasFrescas + 0.0001;
+    const pesoExcedido = pesoSalida > consumo.pesoTotal + 0.001;
+    const valida = Boolean(materia && entrada > 0 && cajasSalida > 0 && terminados.length && !insuficiente && !pesoExcedido);
+    return { borrador, materia, terminados, lotesFrescos, cajasFrescas, cajasCongeladas, entrada, consumo, pesoSalida, cajasSalida, piezasSubproducto, insuficiente, pesoExcedido, valida };
+  });
+
+  const capturaValida = calculos.length > 0 && calculos.every((c) => c.valida);
+  const cajasEntradaTotal = calculos.reduce((a, c) => a + c.entrada, 0);
+  const cajasSalidaTotal = calculos.reduce((a, c) => a + c.cajasSalida, 0);
+  const piezasSubproductoTotal = calculos.reduce((a, c) => a + c.piezasSubproducto, 0);
+  const productosTerminadosTotal = calculos.reduce((a, c) => a + c.terminados.filter((p) => Number(c.borrador.salidas[p.id] || 0) > 0).length, 0);
+  const pesoEntradaTotal = calculos.reduce((a, c) => a + c.consumo.pesoTotal, 0);
+  const pesoSalidaTotal = calculos.reduce((a, c) => a + c.pesoSalida, 0);
+
   async function guardar() {
     if (!carniceria) { setError('Falta crear la ubicación Carnicería.'); return; }
+    if (!capturaValida) { setError('Completa cada producto y revisa que la producción no exceda la materia prima disponible.'); return; }
     setBusy(true); setError('');
     try {
-      await api('/operacion/produccion', { method: 'POST', body: { ubicacion_id: carniceria.id, materia_prima_id: Number(materia), fecha, cajas_materia_prima: Number(entrada), salidas: terminados.filter((p) => Number(salidas[p.id] || 0) > 0).map((p) => ({ product_id: p.id, cajas: Number(salidas[p.id]) })) } });
-      setEntrada(''); setSalidas({}); await onDone();
-      toast.ok('Batch calculado y guardado.');
+      await api('/operacion/produccion/lote', {
+        method: 'POST',
+        body: {
+          producciones: calculos.map((c) => ({
+            ubicacion_id: carniceria.id,
+            materia_prima_id: Number(c.borrador.materia),
+            fecha,
+            cajas_materia_prima: c.entrada,
+            salidas: c.terminados.filter((p) => Number(c.borrador.salidas[p.id] || 0) > 0).map((p) => ({ product_id: p.id, cajas: Number(c.borrador.salidas[p.id]) })),
+          })),
+        },
+      });
+      const cantidad = borradores.length;
+      setBorradores([crearBorrador()]);
+      await onDone();
+      toast.ok(`${cantidad} ${cantidad === 1 ? 'producción guardada' : 'producciones guardadas'} correctamente.`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la producción.'); } finally { setBusy(false); }
   }
   async function eliminar(id: number) {
@@ -206,34 +280,35 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la producción.'); }
     finally { setBusy(false); }
   }
-  const yieldActual = pesoEntradaEstimado > 0 ? (pesoSalida / pesoEntradaEstimado) * 100 : 0;
   return <div className="operation-stack">
-    <div className="operation-entry-grid">
-      <section className="workspace-card form-workspace">
-        <div className="workspace-card-head"><h2>Nueva producción</h2></div>
-        <div className="form-grid form-grid--batch">
-          <label className="field"><span>Fecha dentro de semana {semana.numero}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <label className="field field--wide"><span>Materia prima utilizada</span><select value={materia} onChange={(e) => { setMateria(e.target.value); setSalidas({}); }}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= semana.fin).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} cajas frescas de la semana</option>; })}</select></label>
-          <label className="field field--number"><span>Cajas de materia prima</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={entrada} onChange={(e) => setEntrada(e.target.value)} /></label>
-        </div>
-        <div className={`production-stock-link ${insuficiente ? 'is-alert' : ''}`}><span><strong>Disponible para producir</strong>{cajasFrescas.toLocaleString('es-MX')} cajas frescas · {pesoFresco.toLocaleString('es-MX')} lb</span><span>{cajasCongeladas > 0 ? `${cajasCongeladas.toLocaleString('es-MX')} congeladas (descongela antes de usar)` : 'Sin cajas congeladas'}</span></div>
-        {insuficiente && <p className="error-msg">Registra primero las cajas compradas de esta semana para calcular su peso y costo real.</p>}
-        <div className="production-weight-flow"><span><strong>Entrada FIFO</strong>{pesoCajaConsumida ? pesoCajaConsumida.toFixed(2) : '?'} lb promedio de las cajas que se usarán · {usd(consumoEstimado.costoTotal)}</span><b>→</b><span><strong>Salida</strong>{terminados.map((p) => `${p.nombre}: ${p.peso_caja_lb ?? '?'} lb`).join(' · ') || 'Selecciona materia prima'}</span></div>
-        <div className="form-divider"><span>Cajas terminadas producidas</span></div>
-        <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>Caja terminada de {p.peso_caja_lb ?? '?'} lb · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
-        {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima o revisa el catálogo.</span></div>}
-        <div className="form-submit"><button className="btn btn-primary" disabled={bloqueada || busy || !entrada || pesoSalida <= 0 || insuficiente} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : 'Guardar producción'}</button></div>
-      </section>
-      <aside className="calculation-card calculation-card--yield">
-        <span className="eyebrow">Resultado</span><h3>Yield</h3>
-        <div className={`yield-number ${yieldActual > 100 ? 'is-alert' : ''}`}>{yieldActual.toFixed(1)}<small>%</small></div>
-        <div className="yield-bar"><span style={{ width: `${Math.min(100, yieldActual)}%` }} /></div>
-        <dl><div><dt>Materia prima</dt><dd>{pesoEntradaEstimado.toFixed(1)} lb</dd></div><div><dt>Producto terminado</dt><dd>{pesoSalida.toFixed(1)} lb</dd></div><div><dt>Desperdicio</dt><dd>{Math.max(0, pesoEntradaEstimado - pesoSalida).toFixed(1)} lb</dd></div></dl>
-      </aside>
-    </div>
+    <section className="workspace-card production-capture">
+      <div className="workspace-card-head production-capture-head"><div><h2>Nueva producción</h2><p>Agrega todos los productos elaborados el mismo día y guárdalos juntos.</p></div><label className="field"><span>Fecha · semana {semana.numero}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label></div>
+      <div className="production-drafts">
+        {calculos.map((calculo, indice) => {
+          const { borrador, materia, terminados, cajasFrescas, cajasCongeladas, consumo, pesoSalida, insuficiente, pesoExcedido } = calculo;
+          const yieldActual = consumo.pesoTotal > 0 ? (pesoSalida / consumo.pesoTotal) * 100 : 0;
+          return <article className={`production-draft ${insuficiente || pesoExcedido ? 'is-alert' : ''}`} key={borrador.id}>
+            <header><div><span className="step-badge">{indice + 1}</span><div><strong>{materia?.nombre ?? 'Producto'}</strong><small>Batch del {fecha}</small></div></div>{borradores.length > 1 && <button type="button" className="btn btn-danger-ghost btn-sm" disabled={busy} onClick={() => setBorradores((actuales) => actuales.filter((b) => b.id !== borrador.id))}>Quitar</button>}</header>
+            <div className="form-grid production-draft-fields">
+              <label className="field"><span>Materia prima utilizada</span><select value={borrador.materia} onChange={(e) => actualizar(borrador.id, { materia: e.target.value, salidas: {} })}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= semana.fin).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} frescas</option>; })}</select></label>
+              <label className="field field--number"><span>Cajas de materia prima</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={borrador.entrada} onChange={(e) => actualizar(borrador.id, { entrada: e.target.value })} /></label>
+            </div>
+            <div className={`production-stock-link ${insuficiente ? 'is-alert' : ''}`}><span><strong>Disponible</strong>{cajasFrescas.toLocaleString('es-MX')} cajas frescas{cajasCongeladas > 0 ? ` · ${cajasCongeladas.toLocaleString('es-MX')} congeladas` : ''}</span><span>{consumo.pesoTotal.toFixed(1)} lb usadas · {usd(consumo.costoTotal)}</span></div>
+            {insuficiente && <p className="error-msg">La suma de filas con esta materia prima supera las cajas frescas disponibles.</p>}
+            <div className="form-divider"><span>Producción terminada y subproductos</span><small>Entrada estimada: {consumo.pesoTotal.toFixed(1)} lb</small></div>
+            <div className="production-output-list">{terminados.map((p) => { const esCarnitas = p.sku === 'MEAT-CARNITAS'; return <label className={`production-output ${esCarnitas ? 'production-output--byproduct' : ''}`} key={p.id}><span><strong>{p.nombre}</strong><small>{esCarnitas ? `Subproducto del remanente · sin costo · venta ${usd(p.precio ?? 0)}/${p.unidad.toLowerCase()}` : `${p.peso_caja_lb ?? '?'} lb/caja · ${p.produccion_dias.map((d) => dias[d]).join(', ') || 'especial'}`}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step={esCarnitas ? '1' : '0.5'} inputMode="decimal" value={borrador.salidas[p.id] ?? ''} placeholder="0" onChange={(e) => actualizar(borrador.id, { salidas: { ...borrador.salidas, [p.id]: e.target.value } })} /><span>{p.unidad.toLowerCase()}</span></div></label>; })}</div>
+            {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima.</span></div>}
+            <footer><span>Salida {pesoSalida.toFixed(1)} lb</span><span className={yieldActual > 100 ? 'text-danger' : ''}>Yield {yieldActual.toFixed(1)}%</span></footer>
+            {pesoExcedido && <p className="error-msg">El peso terminado supera el peso de materia prima calculado.</p>}
+          </article>;
+        })}
+      </div>
+      <button type="button" className="btn btn-secondary production-add" disabled={busy || bloqueada || borradores.length >= 12 || !materias.length} onClick={agregarProducto}>+ Agregar otro producto</button>
+      <div className="production-capture-summary"><div><span><small>Productos</small><strong>{productosTerminadosTotal}</strong></span><span><small>Materia prima</small><strong>{cajasEntradaTotal.toLocaleString('es-MX')} cajas</strong></span><span><small>Producto terminado</small><strong>{cajasSalidaTotal.toLocaleString('es-MX')} cajas{piezasSubproductoTotal > 0 ? ` · ${piezasSubproductoTotal.toLocaleString('es-MX')} piezas` : ''}</strong></span><span><small>Yield principal</small><strong>{pesoEntradaTotal > 0 ? ((pesoSalidaTotal / pesoEntradaTotal) * 100).toFixed(1) : '0.0'}%</strong></span></div><button className="btn btn-primary" disabled={bloqueada || busy || !capturaValida} onClick={() => void guardar()}>{busy ? 'Guardando todo…' : bloqueada ? 'Semana cerrada' : borradores.length === 1 ? 'Guardar producción' : `Guardar ${borradores.length} producciones`}</button></div>
+    </section>
 
     <section className="workspace-card"><div className="workspace-card-head"><h2>Producción registrada</h2><span>{resumen.producciones.length}</span></div>
-      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Desperdicio</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} cajas terminadas</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
+      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / carnitas</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
     </section>
   </div>;
 }

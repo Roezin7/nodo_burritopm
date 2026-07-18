@@ -6,15 +6,17 @@ import Categorias from './Categorias';
 import Unidades from './Unidades';
 import Productos from './Productos';
 import StockObjetivo from './StockObjetivo';
+import Proveedores from './Proveedores';
 import Spinner from '../../components/Spinner';
 import { useOperacionConfig } from '../../operacion-config';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
-type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos' | 'stock' | 'operacion';
+type Tab = 'ubicaciones' | 'usuarios' | 'proveedores' | 'categorias' | 'unidades' | 'productos' | 'stock' | 'operacion';
 
 const TABS: { clave: Tab; label: string }[] = [
   { clave: 'ubicaciones', label: 'Restaurantes y bodegas' },
   { clave: 'usuarios', label: 'Accesos' },
+  { clave: 'proveedores', label: 'Proveedores' },
   { clave: 'categorias', label: 'Categorías' },
   { clave: 'unidades', label: 'Unidades' },
   { clave: 'productos', label: 'Productos' },
@@ -213,6 +215,7 @@ export default function Configuracion() {
       <div className="tab-body">
         {tab === 'ubicaciones' && <Ubicaciones />}
         {tab === 'usuarios' && <Usuarios />}
+        {tab === 'proveedores' && <Proveedores />}
         {tab === 'categorias' && <Categorias />}
         {tab === 'unidades' && <Unidades />}
         {tab === 'productos' && <Productos />}

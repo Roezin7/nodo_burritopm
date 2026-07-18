@@ -18,7 +18,9 @@ const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BP
 const salidasPorMateria: Record<string, string[]> = {
   'RAW-INSIDE-SKIRT': ['MEAT-STEAK'],
   'RAW-CHICKEN': ['MEAT-CHICKEN'],
-  'RAW-PORK-BUTT': ['MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP'],
+  // Carnitas aprovecha el remanente de Pork Butt. Se registra como subproducto
+  // vendible a precio fijo, pero no absorbe costo ni peso del batch principal.
+  'RAW-PORK-BUTT': ['MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP', 'MEAT-CARNITAS'],
   'RAW-OUTSIDE-SKIRT': ['MEAT-ASADA', 'MEAT-FAJITAS'],
   'RAW-INSIDE-ROUND': ['MEAT-MILANESA'],
   'RAW-TAPATIOS-TACO': ['MEAT-TAPATIOS-TACO'],
@@ -80,6 +82,13 @@ interface ProductoPrecioSemanal {
 
 export function calcularPrecioProteinaSemanal(cajasProducidas: number, costoTotal: number, markup: number) {
   return cajasProducidas > 0 ? r4(costoTotal / cajasProducidas + markup) : null;
+}
+
+/** Prorratea costo solo entre salidas con peso. Un subproducto con peso contable cero
+ * conserva costo cero aunque tenga cantidad y precio de venta. */
+export function calcularCostoSalidaProduccion(costoEntrada: number, pesoSalidaTotal: number, pesoProducto: number, cantidad: number) {
+  const costoTotal = pesoSalidaTotal > 0 && pesoProducto > 0 ? r2(costoEntrada * (pesoProducto / pesoSalidaTotal)) : 0;
+  return { costoTotal, costoUnidad: cantidad > 0 ? r4(costoTotal / cantidad) : 0 };
 }
 
 /** Para proteínas, el precio no existe hasta tener producción en la semana:
@@ -941,96 +950,156 @@ export interface ProduccionInput {
   salidas: { product_id: number; cajas: number }[];
 }
 
-export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, input: ProduccionInput) {
-  await asegurarSemanaEditable(negocioId, input.fecha);
+async function registrarProduccionEnTransaccion(
+  tx: Prisma.TransactionClient,
+  negocioId: bigint,
+  usuarioId: bigint,
+  input: ProduccionInput,
+) {
   if (input.cajas_materia_prima <= 0 || !input.salidas.length || input.salidas.some((s) => s.cajas <= 0)) throw new HttpError(400, 'La producción requiere entrada y salidas válidas');
   const ubicId = BigInt(input.ubicacion_id);
   const materiaId = BigInt(input.materia_prima_id);
   const fechaProduccion = fecha(input.fecha);
-  const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: ubicId, negocio_id: negocioId, codigo: 'CARN', tipo: 'bodega', activo: true } });
+  const ubicacion = await tx.ubicaciones.findFirst({ where: { id: ubicId, negocio_id: negocioId, codigo: 'CARN', tipo: 'bodega', activo: true } });
   if (!ubicacion) throw new HttpError(400, 'La producción solo puede registrarse en Carnicería');
-  const materia = await prisma.products.findFirst({ where: { id: materiaId, negocio_id: negocioId, tipo_operativo: 'materia_prima', activo: true } });
+  const materia = await tx.products.findFirst({ where: { id: materiaId, negocio_id: negocioId, tipo_operativo: 'materia_prima', activo: true } });
   if (!materia) throw new HttpError(400, 'Materia prima no válida');
   const salidaIds = input.salidas.map((s) => BigInt(s.product_id));
-  const productos = await prisma.products.findMany({ where: { id: { in: salidaIds }, negocio_id: negocioId, linea_operacion: 'carne', tipo_operativo: 'proteina', activo: true } });
+  const productos = await tx.products.findMany({ where: { id: { in: salidaIds }, negocio_id: negocioId, linea_operacion: 'carne', tipo_operativo: { in: ['proteina', 'precio_fijo'] }, activo: true } });
   if (productos.length !== new Set(salidaIds.map(String)).size) throw new HttpError(400, 'Hay productos terminados no válidos');
   const permitidas = new Set(salidasPorMateria[materia.sku] ?? []);
   if (productos.some((p) => !permitidas.has(p.sku))) throw new HttpError(400, 'Una salida no corresponde a la materia prima seleccionada');
+  if (!productos.some((p) => p.tipo_operativo === 'proteina')) throw new HttpError(400, 'La producción requiere al menos un producto principal además de los subproductos');
   for (const s of input.salidas) {
     const p = productos.find((x) => x.id === BigInt(s.product_id))!;
-    if (num(p.peso_caja_lb) == null) throw new HttpError(400, `${p.nombre} no tiene peso estándar por caja`);
+    const esCarnitasSinCosto = materia.sku === 'RAW-PORK-BUTT' && p.sku === 'MEAT-CARNITAS';
+    if (p.tipo_operativo !== 'proteina' && !esCarnitasSinCosto) throw new HttpError(400, `${p.nombre} no es una salida de producción válida`);
+    if (p.tipo_operativo === 'proteina' && num(p.peso_caja_lb) == null) throw new HttpError(400, `${p.nombre} no tiene peso estándar por caja`);
+    if (esCarnitasSinCosto && p.precio_venta_fijo == null) throw new HttpError(400, 'Carnitas requiere un precio fijo de venta en Configuración');
   }
-  await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicId);
-  // Disponibilidad, consumo de lotes y movimientos viven dentro de una transacción
-  // serializable: dos capturas simultáneas nunca pueden gastar la misma compra.
   const semanaProduccion = rangoSemana(input.fecha);
-  const resultado = await prisma.$transaction(async (tx) => {
-    const lotes = await tx.lotes_materia_prima.findMany({
-      where: { negocio_id: negocioId, ubicacion_id: ubicId, product_id: materiaId, congelado: false, fecha: { lte: fecha(semanaProduccion.hasta) }, cajas_disponibles: { gt: 0 } },
-      orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
-    });
-    const [todosLosLotes, existenciaMateria] = await Promise.all([
-      tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, ubicacion_id: ubicId, product_id: materiaId, cajas_disponibles: { gt: 0 } }, select: { cajas_disponibles: true } }),
-      tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicId, product_id: materiaId } } }),
-    ]);
-    const cajasLotes = r3(todosLosLotes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0));
-    const cajasExistencia = r3(num0(existenciaMateria?.cantidad_disponible));
-    if (Math.abs(cajasLotes - cajasExistencia) > 0.001) {
-      throw new HttpError(409, `${materia.nombre} no está conciliado: lotes ${cajasLotes}, inventario ${cajasExistencia}. Corrige o elimina el inventario físico antes de producir.`);
-    }
-    const frescas = r3(lotes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0));
-    if (frescas + 0.0001 < input.cajas_materia_prima) {
-      throw new HttpError(409, `No hay suficiente ${materia.nombre} registrada en las compras de la semana. Disponible: ${frescas} cajas; solicitadas: ${input.cajas_materia_prima}. Registra primero la compra para calcular peso y costo reales.`);
-    }
+  const lotes = await tx.lotes_materia_prima.findMany({
+    where: { negocio_id: negocioId, ubicacion_id: ubicId, product_id: materiaId, congelado: false, fecha: { lte: fecha(semanaProduccion.hasta) }, cajas_disponibles: { gt: 0 } },
+    orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
+  });
+  const [todosLosLotes, existenciaMateria] = await Promise.all([
+    tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, ubicacion_id: ubicId, product_id: materiaId, cajas_disponibles: { gt: 0 } }, select: { cajas_disponibles: true } }),
+    tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicId, product_id: materiaId } } }),
+  ]);
+  const cajasLotes = r3(todosLosLotes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0));
+  const cajasExistencia = r3(num0(existenciaMateria?.cantidad_disponible));
+  if (Math.abs(cajasLotes - cajasExistencia) > 0.001) {
+    throw new HttpError(409, `${materia.nombre} no está conciliado: lotes ${cajasLotes}, inventario ${cajasExistencia}. Corrige o elimina el inventario físico antes de producir.`);
+  }
+  const frescas = r3(lotes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0));
+  if (frescas + 0.0001 < input.cajas_materia_prima) {
+    throw new HttpError(409, `No hay suficiente ${materia.nombre} registrada en las compras de la semana. Disponible: ${frescas} cajas; solicitadas: ${input.cajas_materia_prima}. Registra primero la compra para calcular peso y costo reales.`);
+  }
 
-    const calculoFifo = calcularConsumoFifo(
-      lotes.map((lote) => ({ cajas: num0(lote.cajas_disponibles), peso_lb: num0(lote.peso_disponible_lb), costo: num0(lote.costo_disponible) })),
-      input.cajas_materia_prima,
-    );
-    if (calculoFifo.cajas_faltantes > 0.0001) throw new HttpError(409, 'Los lotes cambiaron mientras se registraba la producción; vuelve a intentarlo.');
-    const consumos = calculoFifo.consumos.map((consumo) => ({ ...consumo, lote: lotes[consumo.indice]! }));
-    const pesoEntrada = calculoFifo.peso_total;
-    const costoEntrada = calculoFifo.costo_total;
-    const salidas = input.salidas.map((s) => {
-      const p = productos.find((x) => x.id === BigInt(s.product_id))!;
-      const pesoCaja = num0(p.peso_caja_lb);
-      return { input: s, producto: p, pesoCaja, pesoTotal: r3(s.cajas * pesoCaja) };
-    });
-    const pesoSalida = r3(salidas.reduce((a, s) => a + s.pesoTotal, 0));
-    if (pesoSalida > pesoEntrada + 0.001) throw new HttpError(400, 'El peso producido no puede superar el peso de materia prima usado');
-    const desperdicio = r3(Math.max(0, pesoEntrada - pesoSalida));
-    const yieldPct = pesoEntrada > 0 ? r4((pesoSalida / pesoEntrada) * 100) : 0;
+  const calculoFifo = calcularConsumoFifo(
+    lotes.map((lote) => ({ cajas: num0(lote.cajas_disponibles), peso_lb: num0(lote.peso_disponible_lb), costo: num0(lote.costo_disponible) })),
+    input.cajas_materia_prima,
+  );
+  if (calculoFifo.cajas_faltantes > 0.0001) throw new HttpError(409, 'Los lotes cambiaron mientras se registraba la producción; vuelve a intentarlo.');
+  const consumos = calculoFifo.consumos.map((consumo) => ({ ...consumo, lote: lotes[consumo.indice]! }));
+  const pesoEntrada = calculoFifo.peso_total;
+  const costoEntrada = calculoFifo.costo_total;
+  const salidas = input.salidas.map((s) => {
+    const p = productos.find((x) => x.id === BigInt(s.product_id))!;
+    const esSubproductoSinCosto = materia.sku === 'RAW-PORK-BUTT' && p.sku === 'MEAT-CARNITAS';
+    const pesoCaja = esSubproductoSinCosto ? 0 : num0(p.peso_caja_lb);
+    return { input: s, producto: p, pesoCaja, pesoTotal: r3(s.cajas * pesoCaja) };
+  });
+  const pesoSalida = r3(salidas.reduce((a, s) => a + s.pesoTotal, 0));
+  if (pesoSalida > pesoEntrada + 0.001) throw new HttpError(400, 'El peso producido no puede superar el peso de materia prima usado');
+  const desperdicio = r3(Math.max(0, pesoEntrada - pesoSalida));
+  const yieldPct = pesoEntrada > 0 ? r4((pesoSalida / pesoEntrada) * 100) : 0;
 
-    const p = await tx.producciones.create({
-      data: { negocio_id: negocioId, ubicacion_id: ubicId, materia_prima_id: materiaId, fecha: fechaProduccion, cajas_materia_prima: r3(input.cajas_materia_prima), peso_entrada_lb: pesoEntrada, costo_entrada: costoEntrada, peso_salida_lb: pesoSalida, desperdicio_lb: desperdicio, yield_porcentaje: yieldPct, registrado_por: usuarioId, notas: input.notas },
-    });
-    for (const c of consumos) {
-      await tx.produccion_consumos_lote.create({ data: { produccion_id: p.id, lote_id: c.lote.id, cajas: c.cajas, peso_lb: c.peso, costo: c.costo } });
-      await tx.lotes_materia_prima.update({ where: { id: c.lote.id }, data: { cajas_disponibles: r3(num0(c.lote.cajas_disponibles) - c.cajas), peso_disponible_lb: r3(num0(c.lote.peso_disponible_lb) - c.peso), costo_disponible: r2(num0(c.lote.costo_disponible) - c.costo) } });
-    }
+  const p = await tx.producciones.create({
+    data: { negocio_id: negocioId, ubicacion_id: ubicId, materia_prima_id: materiaId, fecha: fechaProduccion, cajas_materia_prima: r3(input.cajas_materia_prima), peso_entrada_lb: pesoEntrada, costo_entrada: costoEntrada, peso_salida_lb: pesoSalida, desperdicio_lb: desperdicio, yield_porcentaje: yieldPct, registrado_por: usuarioId, notas: input.notas },
+  });
+  for (const c of consumos) {
+    await tx.produccion_consumos_lote.create({ data: { produccion_id: p.id, lote_id: c.lote.id, cajas: c.cajas, peso_lb: c.peso, costo: c.costo } });
+    await tx.lotes_materia_prima.update({ where: { id: c.lote.id }, data: { cajas_disponibles: r3(num0(c.lote.cajas_disponibles) - c.cajas), peso_disponible_lb: r3(num0(c.lote.peso_disponible_lb) - c.peso), costo_disponible: r2(num0(c.lote.costo_disponible) - c.costo) } });
+  }
+  await aplicarMovimiento(tx, {
+    negocioId, productId: materiaId, tipo: 'consumo', cantidad: input.cajas_materia_prima, usuarioId,
+    origenId: ubicId, costoUnitario: costoEntrada / input.cajas_materia_prima, documentoTipo: 'produccion', documentoId: p.id,
+    comentario: `Materia prima · yield ${yieldPct}%`, idempotencyKey: `produccion:${p.id}:entrada`,
+    deltas: [{ ubicacionId: ubicId, productId: materiaId, disponible: -input.cajas_materia_prima }],
+  });
+  for (const [i, s] of salidas.entries()) {
+    const { costoTotal, costoUnidad: costoCaja } = calcularCostoSalidaProduccion(costoEntrada, pesoSalida, s.pesoTotal, s.input.cajas);
+    const precio = s.producto.precio_venta_fijo != null ? num0(s.producto.precio_venta_fijo) : r4(costoCaja + (s.producto.tipo_operativo === 'proteina' ? num0(s.producto.markup_caja) : 0));
+    await tx.produccion_salidas.create({ data: { produccion_id: p.id, product_id: s.producto.id, cajas: r3(s.input.cajas), peso_caja_lb: s.pesoCaja, peso_total_lb: s.pesoTotal, costo_total: costoTotal, costo_caja: costoCaja, precio_venta_caja: precio } });
     await aplicarMovimiento(tx, {
-      negocioId, productId: materiaId, tipo: 'consumo', cantidad: input.cajas_materia_prima, usuarioId,
-      origenId: ubicId, costoUnitario: costoEntrada / input.cajas_materia_prima, documentoTipo: 'produccion', documentoId: p.id,
-      comentario: `Materia prima · yield ${yieldPct}%`, idempotencyKey: `produccion:${p.id}:entrada`,
-      deltas: [{ ubicacionId: ubicId, productId: materiaId, disponible: -input.cajas_materia_prima }],
+      negocioId, productId: s.producto.id, tipo: 'ajuste_positivo', cantidad: s.input.cajas, usuarioId,
+      destinoId: ubicId, costoUnitario: costoCaja, documentoTipo: 'produccion', documentoId: p.id,
+      comentario: `Producción · ${s.pesoTotal} lb`, idempotencyKey: `produccion:${p.id}:salida:${i}`,
+      deltas: [{ ubicacionId: ubicId, productId: s.producto.id, disponible: s.input.cajas, costoUnitario: costoCaja }],
     });
-    for (const [i, s] of salidas.entries()) {
-      const costoTotal = pesoSalida > 0 ? r2(costoEntrada * (s.pesoTotal / pesoSalida)) : 0;
-      const costoCaja = r4(costoTotal / s.input.cajas);
-      const precio = s.producto.precio_venta_fijo != null ? num0(s.producto.precio_venta_fijo) : r4(costoCaja + (s.producto.tipo_operativo === 'proteina' ? num0(s.producto.markup_caja) : 0));
-      await tx.produccion_salidas.create({ data: { produccion_id: p.id, product_id: s.producto.id, cajas: r3(s.input.cajas), peso_caja_lb: s.pesoCaja, peso_total_lb: s.pesoTotal, costo_total: costoTotal, costo_caja: costoCaja, precio_venta_caja: precio } });
-      await aplicarMovimiento(tx, {
-        negocioId, productId: s.producto.id, tipo: 'ajuste_positivo', cantidad: s.input.cajas, usuarioId,
-        destinoId: ubicId, costoUnitario: costoCaja, documentoTipo: 'produccion', documentoId: p.id,
-        comentario: `Producción · ${s.pesoTotal} lb`, idempotencyKey: `produccion:${p.id}:salida:${i}`,
-        deltas: [{ ubicacionId: ubicId, productId: s.producto.id, disponible: s.input.cajas, costoUnitario: costoCaja }],
-      });
+    // El costo de Carnitas es cero por ser aprovechamiento del remanente; su venta
+    // usa precio fijo y no debe reemplazar el costo histórico del catálogo.
+    if (s.producto.tipo_operativo === 'proteina') {
       await tx.products.update({ where: { id: s.producto.id }, data: { ultimo_costo: costoCaja } });
     }
-    return { p, pesoEntrada, pesoSalida, desperdicio, yieldPct, costoEntrada };
-  }, { isolationLevel: 'Serializable' });
-  await sincronizarPreciosPedidosSemana(negocioId, input.salidas.map((s) => BigInt(s.product_id)), semanaProduccion.desde, semanaProduccion.hasta);
-  return { id: Number(resultado.p.id), peso_entrada_lb: resultado.pesoEntrada, peso_salida_lb: resultado.pesoSalida, desperdicio_lb: resultado.desperdicio, yield_porcentaje: resultado.yieldPct, costo_total: resultado.costoEntrada };
+  }
+  return { p, pesoEntrada, pesoSalida, desperdicio, yieldPct, costoEntrada, semanaProduccion, productIds: salidaIds };
+}
+
+/** Guarda todos los batches de una captura como una sola unidad: o entran todos o ninguno. */
+export async function registrarProducciones(negocioId: bigint, usuarioId: bigint, inputs: ProduccionInput[]) {
+  if (!inputs.length || inputs.length > 12) throw new HttpError(400, 'Captura entre 1 y 12 producciones a la vez');
+  for (const input of inputs) {
+    await asegurarSemanaEditable(negocioId, input.fecha);
+    if (input.cajas_materia_prima <= 0 || !input.salidas.length || input.salidas.some((s) => s.cajas <= 0)) throw new HttpError(400, 'Cada producción requiere entrada y al menos una salida válida');
+  }
+  const ubicaciones = [...new Set(inputs.map((input) => input.ubicacion_id))];
+  const carnicerias = await prisma.ubicaciones.findMany({
+    where: { id: { in: ubicaciones.map(BigInt) }, negocio_id: negocioId, codigo: 'CARN', tipo: 'bodega', activo: true },
+    select: { id: true },
+  });
+  if (carnicerias.length !== ubicaciones.length) throw new HttpError(400, 'La producción solo puede registrarse en Carnicería');
+
+  const inicializados = new Set<string>();
+  for (const input of inputs) {
+    const semana = rangoSemana(input.fecha);
+    const clave = `${input.ubicacion_id}:${semana.desde}`;
+    if (inicializados.has(clave)) continue;
+    await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, BigInt(input.ubicacion_id));
+    inicializados.add(clave);
+  }
+
+  // Disponibilidad, consumo FIFO y movimientos viven en una única transacción serializable:
+  // dos filas de la misma captura nunca gastan la misma compra ni quedan guardadas a medias.
+  const resultados = await prisma.$transaction(async (tx) => {
+    const creadas = [];
+    for (const input of inputs) creadas.push(await registrarProduccionEnTransaccion(tx, negocioId, usuarioId, input));
+    return creadas;
+  }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 20_000 });
+
+  const preciosPorSemana = new Map<string, { desde: string; hasta: string; productos: Set<bigint> }>();
+  for (const resultado of resultados) {
+    const clave = `${resultado.semanaProduccion.desde}:${resultado.semanaProduccion.hasta}`;
+    const grupo = preciosPorSemana.get(clave) ?? { ...resultado.semanaProduccion, productos: new Set<bigint>() };
+    for (const productId of resultado.productIds) grupo.productos.add(productId);
+    preciosPorSemana.set(clave, grupo);
+  }
+  for (const grupo of preciosPorSemana.values()) {
+    await sincronizarPreciosPedidosSemana(negocioId, [...grupo.productos], grupo.desde, grupo.hasta);
+  }
+
+  return {
+    producciones: resultados.map((resultado) => ({
+      id: Number(resultado.p.id), peso_entrada_lb: resultado.pesoEntrada, peso_salida_lb: resultado.pesoSalida,
+      desperdicio_lb: resultado.desperdicio, yield_porcentaje: resultado.yieldPct, costo_total: resultado.costoEntrada,
+    })),
+  };
+}
+
+export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, input: ProduccionInput) {
+  const resultado = await registrarProducciones(negocioId, usuarioId, [input]);
+  return resultado.producciones[0]!;
 }
 
 /** Revierte un batch capturado con error. Las salidas pueden dejar saldo provisional negativo
@@ -1038,7 +1107,7 @@ export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, 
 export async function eliminarProduccion(negocioId: bigint, produccionId: bigint, usuarioId: bigint) {
   const produccion = await prisma.producciones.findFirst({
     where: { id: produccionId, negocio_id: negocioId },
-    include: { consumos: { include: { lote: true } }, salidas: true, materia_prima: true },
+    include: { consumos: { include: { lote: true } }, salidas: { include: { producto: { select: { tipo_operativo: true } } } }, materia_prima: true },
   });
   if (!produccion) throw new HttpError(404, 'Producción no encontrada');
   await asegurarSemanaEditable(negocioId, iso(produccion.fecha));
@@ -1053,11 +1122,11 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
   });
   if (inventarioFinal) throw new HttpError(409, 'Elimina primero el inventario final de la semana; después corrige la producción y vuelve a capturarlo.');
 
-  const porProducto = new Map<string, { cajas: number; costo: number }>();
+  const porProducto = new Map<string, { cajas: number; costo: number; actualizarCosto: boolean }>();
   for (const salida of produccion.salidas) {
     const clave = salida.product_id.toString();
-    const actual = porProducto.get(clave) ?? { cajas: 0, costo: 0 };
-    porProducto.set(clave, { cajas: r3(actual.cajas + num0(salida.cajas)), costo: r2(actual.costo + num0(salida.costo_total)) });
+    const actual = porProducto.get(clave) ?? { cajas: 0, costo: 0, actualizarCosto: salida.producto.tipo_operativo === 'proteina' };
+    porProducto.set(clave, { ...actual, cajas: r3(actual.cajas + num0(salida.cajas)), costo: r2(actual.costo + num0(salida.costo_total)) });
   }
   await prisma.$transaction(async (tx) => {
     for (const consumo of produccion.consumos) {
@@ -1083,11 +1152,11 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
       const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: produccion.ubicacion_id, product_id: pid } } });
       const cantidadActual = num0(actual?.cantidad_disponible);
       const cantidadNueva = r3(cantidadActual - salida.cajas);
-      const ultima = await tx.produccion_salidas.findFirst({
-        where: { product_id: pid, produccion_id: { not: produccion.id }, produccion: { negocio_id: negocioId } },
-        orderBy: { id: 'desc' },
-        select: { costo_caja: true },
-      });
+      const ultima = salida.actualizarCosto ? await tx.produccion_salidas.findFirst({
+          where: { product_id: pid, produccion_id: { not: produccion.id }, produccion: { negocio_id: negocioId } },
+          orderBy: { id: 'desc' },
+          select: { costo_caja: true },
+        }) : null;
       const costoActual = num(actual?.costo_promedio);
       const valorRestante = costoActual == null ? null : Math.max(0, cantidadActual) * costoActual - salida.costo;
       const costoRestante = cantidadNueva > 0 && valorRestante != null && valorRestante >= -0.01
@@ -1098,7 +1167,7 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
         create: { negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id, product_id: pid, cantidad_disponible: -salida.cajas, costo_promedio: costoRestante },
         update: { cantidad_disponible: cantidadNueva, costo_promedio: costoRestante },
       });
-      await tx.products.update({ where: { id: pid }, data: { ultimo_costo: ultima?.costo_caja ?? null } });
+      if (salida.actualizarCosto) await tx.products.update({ where: { id: pid }, data: { ultimo_costo: ultima?.costo_caja ?? null } });
     }
     await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'produccion', documento_id: produccion.id } });
     await tx.producciones.delete({ where: { id: produccion.id } });
@@ -1118,16 +1187,19 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
 
 export async function resumenProduccion(negocioId: bigint, desde?: string, hasta?: string) {
   const rango = desde || hasta ? { gte: desde ? fecha(desde) : undefined, lte: hasta ? fecha(hasta) : undefined } : undefined;
-  const [compras, producciones, lotes] = await Promise.all([
+  const [compras, totalCompras, producciones, lotes] = await Promise.all([
     prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
-    prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
+    prisma.compras.aggregate({ where: { negocio_id: negocioId, fecha: rango }, _sum: { total: true }, _count: { id: true } }),
+    prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: { include: { unidad_distribucion: true } } } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
     prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } }, include: { producto: true }, orderBy: [{ congelado: 'asc' }, { fecha: 'asc' }] }),
   ]);
   const productosSalida = [...new Map(producciones.flatMap((p) => p.salidas).map((s) => [s.product_id.toString(), s.producto])).values()];
   const preciosSemanales = desde && hasta ? await preciosVentaSemana(negocioId, productosSalida, desde, hasta) : null;
   return {
+    total_compras: num0(totalCompras._sum.total),
+    cantidad_compras: totalCompras._count.id,
     compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado })) })),
-    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: preciosSemanales?.get(s.product_id.toString()) ?? num0(s.precio_venta_caja) })) })),
+    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: preciosSemanales?.get(s.product_id.toString()) ?? num0(s.precio_venta_caja) })) })),
     lotes: lotes.map((l) => ({ id: Number(l.id), fecha: iso(l.fecha), producto: l.producto.nombre, product_id: Number(l.product_id), cajas: num0(l.cajas_disponibles), peso_lb: num0(l.peso_disponible_lb), costo: num0(l.costo_disponible), congelado: l.congelado })),
   };
 }

@@ -120,12 +120,22 @@ operacionRouter.delete('/inventarios-finales/:token', soloAdmin, asyncHandler(as
   res.json(await svc.eliminarInventarioFinal(req.auth!.negocioId, token, req.auth!.usuarioId));
 }));
 
+const produccionSchema = z.object({
+  ubicacion_id: id, materia_prima_id: id, fecha, cajas_materia_prima: z.coerce.number().positive(), notas: z.string().trim().max(500).nullable().optional(),
+  salidas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive() })).min(1),
+});
+
 operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => {
-  const b = z.object({
-    ubicacion_id: id, materia_prima_id: id, fecha, cajas_materia_prima: z.coerce.number().positive(), notas: z.string().trim().max(500).nullable().optional(),
-    salidas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive() })).min(1),
-  }).parse(req.body);
+  const b = produccionSchema.parse(req.body);
   res.status(201).json(await svc.registrarProduccion(req.auth!.negocioId, req.auth!.usuarioId, b));
+}));
+
+/** Captura varios productos del mismo día sin guardar batches incompletos. */
+operacionRouter.post('/produccion/lote', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ producciones: z.array(produccionSchema).min(1).max(12) })
+    .refine((v) => new Set(v.producciones.map((p) => p.fecha)).size === 1, { message: 'Todas las producciones deben corresponder al mismo día' })
+    .parse(req.body);
+  res.status(201).json(await svc.registrarProducciones(req.auth!.negocioId, req.auth!.usuarioId, b.producciones));
 }));
 
 /** Elimina un batch incorrecto y revierte materia prima, salidas y movimientos. */

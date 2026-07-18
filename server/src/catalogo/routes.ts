@@ -96,6 +96,66 @@ catalogoRouter.patch(
   }),
 );
 
+// ──────────────────────────── Proveedores ─────────────────────────────────
+
+/** Incluye inactivos para que puedan restaurarse sin perder el historial de compras. */
+catalogoRouter.get(
+  '/proveedores',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const proveedores = await prisma.proveedores.findMany({
+      where: { negocio_id: req.auth!.negocioId },
+      orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
+    });
+    res.json(proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre, activo: p.activo })));
+  }),
+);
+
+catalogoRouter.post(
+  '/proveedores',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const { nombre } = z.object({ nombre: z.string().trim().min(1).max(120) }).parse(req.body);
+    const existente = await prisma.proveedores.findFirst({
+      where: { negocio_id: req.auth!.negocioId, nombre: { equals: nombre, mode: 'insensitive' } },
+    });
+    if (existente?.activo) throw new HttpError(409, 'Ya existe un proveedor con ese nombre');
+    if (existente) {
+      await prisma.proveedores.update({ where: { id: existente.id }, data: { activo: true } });
+      res.status(201).json({ id: Number(existente.id), restaurado: true });
+      return;
+    }
+    const proveedor = await prisma.proveedores.create({
+      data: { negocio_id: req.auth!.negocioId, nombre },
+    });
+    res.status(201).json({ id: Number(proveedor.id) });
+  }),
+);
+
+catalogoRouter.patch(
+  '/proveedores/:id',
+  requireAuth,
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const proveedorId = BigInt(idParam.parse(req.params.id));
+    const b = z.object({ nombre: z.string().trim().min(1).max(120).optional(), activo: z.boolean().optional() })
+      .refine((v) => v.nombre !== undefined || v.activo !== undefined, { message: 'No hay cambios para guardar' })
+      .parse(req.body);
+    const proveedor = await prisma.proveedores.findFirst({ where: { id: proveedorId, negocio_id: req.auth!.negocioId } });
+    if (!proveedor) throw new HttpError(404, 'Proveedor no encontrado');
+    if (b.nombre) {
+      const duplicado = await prisma.proveedores.findFirst({
+        where: { negocio_id: req.auth!.negocioId, id: { not: proveedorId }, nombre: { equals: b.nombre, mode: 'insensitive' } },
+      });
+      if (duplicado) throw new HttpError(409, 'Ya existe un proveedor con ese nombre');
+    }
+    await prisma.proveedores.update({ where: { id: proveedorId }, data: { nombre: b.nombre, activo: b.activo } });
+    res.json({ ok: true });
+  }),
+);
+
 // ────────────────────────────── Productos ──────────────────────────────────
 
 type ProductoConRel = NonNullable<Awaited<ReturnType<typeof findProducto>>>;
