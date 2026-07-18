@@ -158,7 +158,7 @@ async function main() {
     const data = { nombre: p.nombre, categoria_id: catCarne.id, unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, linea_operacion: 'carne' as const, tipo_operativo: p.tipo, requiere_refrigeracion: p.tipo !== 'servicio', peso_caja_lb: pesoNormalizado, ultimo_costo: costo, costo_promedio: costo, markup_caja: p.markup, precio_venta_fijo: 'precio' in p ? p.precio : null, produccion_dias: p.dias, orden_operativo: orden };
     const producto = await prisma.products.upsert({
       where: { negocio_id_sku: { negocio_id: org.id, sku: p.sku } },
-      update: { unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, peso_caja_lb: pesoNormalizado, orden_operativo: orden },
+      update: { unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, peso_caja_lb: pesoNormalizado, markup_caja: p.markup, orden_operativo: orden },
       create: { negocio_id: org.id, sku: p.sku, ...data },
     });
     if (costo != null && producto.ultimo_costo == null) await prisma.products.update({ where: { id: producto.id }, data: { ultimo_costo: costo, costo_promedio: producto.costo_promedio ?? costo } });

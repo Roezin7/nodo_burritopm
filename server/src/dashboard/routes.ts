@@ -10,6 +10,7 @@ import { z } from 'zod';
 export const dashboardRouter = Router();
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+const MARKUP_PROTEINA = 15;
 
 // Estados de distribución en los que el pedido ya salió a la calle (recepción tiene sentido).
 const EN_RUTA_O_DESPUES = new Set(['en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias']);
@@ -22,7 +23,7 @@ const precioPedido = (l: { precio_unitario: Prisma.Decimal | null; producto: { p
   const fijo = num(l.producto.precio_venta_fijo);
   if (fijo != null) return fijo;
   const costo = num(l.producto.ultimo_costo) ?? num(l.producto.costo_promedio) ?? 0;
-  return costo + (l.producto.tipo_operativo === 'proteina' ? num0(l.producto.markup_caja) : 0);
+  return costo + (l.producto.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0);
 };
 
 /**
@@ -173,7 +174,7 @@ dashboardRouter.get(
         if (f.linea_operacion === 'carne') ventaCarne += total; else ventaDesechables += total;
         const g = porEmpresa.get(f.empresa_cliente_id.toString());
         if (g) { g[f.linea_operacion] += total; g.total += total; }
-        for (const l of f.lineas) if (l.producto?.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * num0(l.producto.markup_caja);
+        for (const l of f.lineas) if (l.producto?.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * MARKUP_PROTEINA;
       }
     } else {
       for (const p of pedidos.filter((x) => x.estado !== 'borrador')) {
@@ -183,7 +184,7 @@ dashboardRouter.get(
           const linea = l.producto.linea_operacion ?? p.linea_operacion;
           if (linea === 'carne') ventaCarne += total; else ventaDesechables += total;
           if (g) { g[linea] += total; g.total += total; }
-          if (l.producto.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * num0(l.producto.markup_caja);
+          if (l.producto.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * MARKUP_PROTEINA;
         }
       }
     }

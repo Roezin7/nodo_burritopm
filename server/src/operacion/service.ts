@@ -10,6 +10,7 @@ import { asegurarInventarioInicialSemanal, rangoSemana, repararPedidosHuerfanos 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
+export const MARKUP_PROTEINA = 15;
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
@@ -68,7 +69,7 @@ export function precioVentaProducto(p: {
   if (fijo != null) return r4(fijo);
   const costo = num(p.ultimo_costo) ?? num(p.costo_promedio);
   if (costo == null) return null;
-  return r4(costo + (p.tipo_operativo === 'proteina' ? num0(p.markup_caja) : 0));
+  return r4(costo + (p.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0));
 }
 
 interface ProductoPrecioSemanal {
@@ -80,8 +81,22 @@ interface ProductoPrecioSemanal {
   markup_caja: Prisma.Decimal;
 }
 
-export function calcularPrecioProteinaSemanal(cajasProducidas: number, costoTotal: number, markup: number) {
-  return cajasProducidas > 0 ? r4(costoTotal / cajasProducidas + markup) : null;
+export function calcularPrecioProteinaSemanal(cajasProducidas: number, costoTotal: number) {
+  return cajasProducidas > 0 ? r4(costoTotal / cajasProducidas + MARKUP_PROTEINA) : null;
+}
+
+export function calcularResumenProteina(cajasProducidas: number, costoProducido: number) {
+  const cajas = r3(cajasProducidas);
+  const costoTotal = r2(costoProducido);
+  const costoCaja = cajas > 0 ? r4(costoTotal / cajas) : 0;
+  return {
+    cajas,
+    costo_total: costoTotal,
+    costo_caja: costoCaja,
+    markup_caja: MARKUP_PROTEINA,
+    precio_venta_caja: r4(costoCaja + MARKUP_PROTEINA),
+    venta_total: r2(costoTotal + cajas * MARKUP_PROTEINA),
+  };
 }
 
 /** Prorratea costo solo entre salidas con peso. Un subproducto con peso contable cero
@@ -118,7 +133,7 @@ export async function preciosVentaSemana(
   return new Map(productos.map((p) => {
     if (p.tipo_operativo !== 'proteina') return [p.id.toString(), precioVentaProducto(p)] as const;
     const total = producido.get(p.id.toString());
-    const precio = total ? calcularPrecioProteinaSemanal(total.cajas, total.costo, num0(p.markup_caja)) : null;
+    const precio = total ? calcularPrecioProteinaSemanal(total.cajas, total.costo) : null;
     return [p.id.toString(), precio] as const;
   }));
 }
@@ -201,7 +216,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       costo: esAdmin ? num(p.ultimo_costo) ?? num(p.costo_promedio) : undefined,
       precio: preciosSemana?.get(p.id.toString()) ?? (p.tipo_operativo === 'proteina' && rangoPrecio ? null : precioVentaProducto(p)),
       precio_pendiente: Boolean(rangoPrecio && p.tipo_operativo === 'proteina' && preciosSemana?.get(p.id.toString()) == null),
-      precio_fijo: esAdmin ? num(p.precio_venta_fijo) : undefined, markup: esAdmin ? num0(p.markup_caja) : undefined,
+      precio_fijo: esAdmin ? num(p.precio_venta_fijo) : undefined, markup: esAdmin ? (p.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : num0(p.markup_caja)) : undefined,
       peso_caja_lb: num(p.peso_caja_lb), produccion_dias: p.produccion_dias,
     })),
     proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre })) : [],
@@ -1030,7 +1045,7 @@ async function registrarProduccionEnTransaccion(
   });
   for (const [i, s] of salidas.entries()) {
     const { costoTotal, costoUnidad: costoCaja } = calcularCostoSalidaProduccion(costoEntrada, pesoSalida, s.pesoTotal, s.input.cajas);
-    const precio = s.producto.precio_venta_fijo != null ? num0(s.producto.precio_venta_fijo) : r4(costoCaja + (s.producto.tipo_operativo === 'proteina' ? num0(s.producto.markup_caja) : 0));
+    const precio = s.producto.precio_venta_fijo != null ? num0(s.producto.precio_venta_fijo) : r4(costoCaja + (s.producto.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0));
     await tx.produccion_salidas.create({ data: { produccion_id: p.id, product_id: s.producto.id, cajas: r3(s.input.cajas), peso_caja_lb: s.pesoCaja, peso_total_lb: s.pesoTotal, costo_total: costoTotal, costo_caja: costoCaja, precio_venta_caja: precio } });
     await aplicarMovimiento(tx, {
       negocioId, productId: s.producto.id, tipo: 'ajuste_positivo', cantidad: s.input.cajas, usuarioId,
@@ -1190,12 +1205,30 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
   const [compras, totalCompras, producciones, lotes] = await Promise.all([
     prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
     prisma.compras.aggregate({ where: { negocio_id: negocioId, fecha: rango }, _sum: { total: true }, _count: { id: true } }),
-    prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: { include: { unidad_distribucion: true } } } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
+    prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: { include: { unidad_distribucion: true } } } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }] }),
     prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } }, include: { producto: true }, orderBy: [{ congelado: 'asc' }, { fecha: 'asc' }] }),
   ]);
+  const proteinas = new Map<string, { product_id: number; producto: string; orden: number; cajas: number; costo_total: number }>();
+  for (const produccion of producciones) {
+    for (const salida of produccion.salidas) {
+      if (salida.producto.tipo_operativo !== 'proteina') continue;
+      const clave = salida.product_id.toString();
+      const actual = proteinas.get(clave) ?? { product_id: Number(salida.product_id), producto: salida.producto.nombre, orden: salida.producto.orden_operativo, cajas: 0, costo_total: 0 };
+      actual.cajas += num0(salida.cajas);
+      actual.costo_total += num0(salida.costo_total);
+      proteinas.set(clave, actual);
+    }
+  }
+  const resumenProteinas = [...proteinas.values()].sort((a, b) => a.orden - b.orden || a.producto.localeCompare(b.producto)).map((p) => {
+    const calculo = calcularResumenProteina(p.cajas, p.costo_total);
+    return {
+      product_id: p.product_id, producto: p.producto, ...calculo,
+    };
+  });
   return {
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
+    resumen_proteinas: resumenProteinas,
     compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado })) })),
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,

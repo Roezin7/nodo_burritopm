@@ -19,6 +19,7 @@ const ARCHIVOS: Record<TipoExcel, string> = {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+const MARKUP_PROTEINA = 15;
 const normal = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 const excelDate = (d: Date) => new Date(`${iso(d)}T12:00:00.000Z`);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
@@ -326,7 +327,7 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     const productosFila = carne.filter((p) => FILA_BILLING[p.sku] === row);
     const referencia = productosFila[0]!;
     const precioFactura = precioFacturado(d, productosFila.map((p) => p.id));
-    const markup = referencia.tipo_operativo === 'proteina' ? Number(referencia.markup_caja ?? 0) : 0;
+    const markup = referencia.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0;
     const basePrice = precioFactura != null
       ? Math.max(0, precioFactura - markup)
       : (referencia.tipo_operativo === 'precio_fijo' || referencia.tipo_operativo === 'servicio'
@@ -344,7 +345,7 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     const facturasCarne = facturas.filter((f) => f.linea_operacion === 'carne');
     const carne = facturasCarne.reduce((a, f) => a + num0(f.total), 0);
     const base = facturasCarne.flatMap((f) => f.lineas).reduce((a, l) => {
-      const markup = l.producto?.tipo_operativo === 'proteina' ? Number(l.producto.markup_caja ?? 0) : 0;
+      const markup = l.producto?.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0;
       return a + Math.max(0, num0(l.importe) - num0(l.cantidad) * markup);
     }, 0);
     const desechables = facturas.filter((f) => f.linea_operacion === 'desechables').reduce((a, f) => a + num0(f.total), 0);
@@ -423,7 +424,7 @@ function llenarLibroCliente(wb: ExcelJS.Workbook, d: Datos, tipo: 'lbt' | 'auror
                     : nombre.includes('XL NITRILE') ? 33 : 0;
       } else row = tipo === 'lbt' ? filaCarne++ : filaAurora++;
       if (!row || row > (tipo === 'lbt' ? (item.linea === 'desechables' ? 35 : 26) : 24)) continue;
-      const markup = item.producto.tipo_operativo === 'proteina' ? Number(item.producto.markup_caja ?? 0) : 0;
+      const markup = item.producto.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0;
       const precioBase = Math.max(0, item.precio - markup);
       if (item.linea === 'carne' || tipo === 'aurora') ws.getCell(row, base).value = excelDate(item.fecha);
       ws.getCell(row, base + 2).value = item.producto.nombre;

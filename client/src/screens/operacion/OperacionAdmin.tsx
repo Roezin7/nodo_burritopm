@@ -16,6 +16,7 @@ interface Catalogo {
 interface Resumen {
   total_compras: number;
   cantidad_compras: number;
+  resumen_proteinas: { product_id: number; producto: string; cajas: number; costo_total: number; costo_caja: number; markup_caja: number; precio_venta_caja: number; venta_total: number }[];
   compras: { id: number; fecha: string; vence_at: string; proveedor: string; total: number; estado: string; lineas: { producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean }[] }[];
   producciones: { id: number; fecha: string; materia_prima: string; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; salidas: { producto: string; sku: string; unidad: string; cajas: number; costo_caja: number; precio: number }[] }[];
   lotes: { id: number; fecha: string; producto: string; product_id: number; cajas: number; peso_lb: number; costo: number; congelado: boolean }[];
@@ -41,6 +42,7 @@ interface Conciliacion {
 }
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const MARKUP_PROTEINA = 15;
 const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripcion: string }> = {
@@ -307,8 +309,22 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       <div className="production-capture-summary"><div><span><small>Productos</small><strong>{productosTerminadosTotal}</strong></span><span><small>Materia prima</small><strong>{cajasEntradaTotal.toLocaleString('es-MX')} cajas</strong></span><span><small>Producto terminado</small><strong>{cajasSalidaTotal.toLocaleString('es-MX')} cajas{piezasSubproductoTotal > 0 ? ` · ${piezasSubproductoTotal.toLocaleString('es-MX')} piezas` : ''}</strong></span><span><small>Yield principal</small><strong>{pesoEntradaTotal > 0 ? ((pesoSalidaTotal / pesoEntradaTotal) * 100).toFixed(1) : '0.0'}%</strong></span></div><button className="btn btn-primary" disabled={bloqueada || busy || !capturaValida} onClick={() => void guardar()}>{busy ? 'Guardando todo…' : bloqueada ? 'Semana cerrada' : borradores.length === 1 ? 'Guardar producción' : `Guardar ${borradores.length} producciones`}</button></div>
     </section>
 
+    <section className="workspace-card protein-week-summary">
+      <div className="workspace-card-head"><div><h2>Resumen semanal por proteína</h2><p>Costo real producido y precio de venta por caja para la semana {semana.numero}.</p></div><span className="chip chip--info">Costo por caja + $15</span></div>
+      {resumen.resumen_proteinas.length === 0 ? <div className="empty-state"><strong>Sin producción registrada</strong><span>El resumen aparecerá al guardar las proteínas de esta semana.</span></div> : <div className="protein-summary-list">
+        {resumen.resumen_proteinas.map((p) => <article className="protein-summary-row" key={p.product_id}>
+          <div className="protein-summary-name"><strong>{p.producto}</strong><span>{p.cajas.toLocaleString('es-MX')} cajas producidas</span></div>
+          <div><small>Costo total</small><strong>{usd(p.costo_total)}</strong></div>
+          <div><small>Costo por caja</small><strong>{usd(p.costo_caja)}</strong></div>
+          <div className="protein-summary-markup"><small>Markup por caja</small><strong>+{usd(p.markup_caja)}</strong></div>
+          <div className="protein-summary-sale"><small>Venta por caja</small><strong>{usd(p.precio_venta_caja)}</strong></div>
+          <div><small>Venta total</small><strong>{usd(p.venta_total)}</strong></div>
+        </article>)}
+      </div>}
+    </section>
+
     <section className="workspace-card"><div className="workspace-card-head"><h2>Producción registrada</h2><span>{resumen.producciones.length}</span></div>
-      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / carnitas</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span>Costo {usd(s.costo_caja)}<small>Venta {usd(s.precio)}</small></span></div>)}</div></article>)}</div>
+      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / carnitas</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo total del batch</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => { const esProteina = s.sku !== 'MEAT-CARNITAS'; const precioCaja = esProteina ? s.costo_caja + MARKUP_PROTEINA : s.precio; return <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span className="batch-output-prices"><small>Costo por {s.unidad.toLowerCase()}</small><strong>{usd(s.costo_caja)}</strong><small>Venta por {s.unidad.toLowerCase()}</small><strong>{usd(precioCaja)}</strong>{esProteina && <em>+{usd(MARKUP_PROTEINA)} por caja</em>}</span></div>; })}</div></article>)}</div>
     </section>
   </div>;
 }
