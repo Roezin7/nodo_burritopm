@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useToast, mensajeError } from '../../toast';
@@ -31,6 +31,7 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
   const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
   const [fecha, setFecha] = useState(semana.inicio);
   const [calendario, setCalendario] = useState<{ linea: 'carne' | 'desechables'; dia_semana: number }[]>([]);
+  const solicitud = useRef(0);
 
   const fechasEntrega = (() => {
     const dias = new Set(calendario.filter((c) => c.linea === linea).map((c) => c.dia_semana));
@@ -45,17 +46,23 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
   })();
 
   async function cargar() {
+    const turno = ++solicitud.current;
     setCargando(true);
     try {
-      setLista(await api<DistResumen[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`));
+      const filas = await api<DistResumen[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`);
+      if (turno === solicitud.current) setLista(filas);
     } catch {
-      setError('No se pudieron cargar los pedidos');
+      if (turno === solicitud.current) setError('No se pudieron cargar los pedidos');
     } finally {
-      setCargando(false);
+      if (turno === solicitud.current) setCargando(false);
     }
   }
-  useEffect(() => { void cargar(); }, [semana.inicio, semana.fin]);
-  useEffect(() => { api<{ calendario_pedidos: { linea: 'carne' | 'desechables'; dia_semana: number }[] }>('/operacion/catalogo').then((c) => setCalendario(c.calendario_pedidos)).catch(() => {}); }, []);
+  useEffect(() => { setAbierta(null); setLista([]); setError(''); void cargar(); }, [semana.inicio, semana.fin]);
+  useEffect(() => {
+    api<{ calendario_pedidos: { linea: 'carne' | 'desechables'; dia_semana: number }[] }>('/operacion/catalogo')
+      .then((c) => setCalendario(c.calendario_pedidos))
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el calendario de rutas.'));
+  }, []);
   useEffect(() => {
     const sugerida = fechasEntrega.find((f) => f >= hoyChicago()) ?? fechasEntrega[0] ?? '';
     setFecha(sugerida);
@@ -293,7 +300,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   }
 
   async function eliminar() {
-    if (!window.confirm('¿Eliminar este pedido? Se devolverá a la bodega central el inventario que las sucursales aún tengan de él, se borrarán su ruta e incidencias, y también el pedido capturado por cada sucursal (podrán hacer uno nuevo). No se puede deshacer.')) return;
+    if (!window.confirm('¿Eliminar esta preparación? Se devolverá a la bodega central el inventario que las sucursales aún tengan, se borrarán sus rutas e incidencias y las ventas volverán a estado confirmado para poder corregirlas. No se puede deshacer.')) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'DELETE' });
@@ -444,64 +451,6 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
         </div>
       )}
 
-      {estado && <ControlEstado id={id} estado={estado} onCambiado={() => void cargar()} />}
-    </div>
-  );
-}
-
-// ── Control total del admin: forzar el estado de la distribución ─────────────
-const ESTADOS_DIST: { v: string; label: string }[] = [
-  { v: 'calculada', label: 'Calculada' },
-  { v: 'en_revision', label: 'En revisión' },
-  { v: 'aprobada', label: 'Aprobada' },
-  { v: 'verificada', label: 'Verificada' },
-  { v: 'en_transito', label: 'En ruta' },
-  { v: 'parcialmente_entregada', label: 'Entrega parcial' },
-  { v: 'entregada', label: 'Entregada' },
-  { v: 'cerrada', label: 'Cerrada' },
-  { v: 'cerrada_con_incidencias', label: 'Cerrada c/ incidencias' },
-  { v: 'cancelada', label: 'Cancelada' },
-];
-
-function ControlEstado({ id, estado, onCambiado }: { id: number; estado: string; onCambiado: () => void }) {
-  const [abierto, setAbierto] = useState(false);
-  const [sel, setSel] = useState(estado);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  useEffect(() => { setSel(estado); }, [estado]);
-
-  async function aplicar() {
-    if (sel === estado) return;
-    if (!window.confirm(`Forzar el estado a "${ESTADOS_DIST.find((e) => e.v === sel)?.label ?? sel}"? Es un override manual; no recalcula inventario.`)) return;
-    setBusy(true); setError('');
-    try {
-      await api(`/distribuciones/${id}/estado`, { method: 'PATCH', body: { estado: sel } });
-      onCambiado();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudo cambiar el estado');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="card control-admin">
-      <button type="button" className="control-admin-head" onClick={() => setAbierto((v) => !v)}>
-        <span><strong>Control total (admin)</strong> <small className="muted">cambiar estado manualmente</small></span>
-        <span className="muted">{abierto ? '▾' : '▸'}</span>
-      </button>
-      {abierto && (
-        <div className="control-admin-body">
-          <p className="muted">Mueve la distribución a cualquier etapa del flujo. Úsalo para corregir o desbloquear; es un override directo.</p>
-          <div className="control-admin-row">
-            <select value={sel} onChange={(e) => setSel(e.target.value)}>
-              {ESTADOS_DIST.map((e) => <option key={e.v} value={e.v}>{e.label}</option>)}
-            </select>
-            <button className="btn btn-primary" disabled={busy || sel === estado} onClick={() => void aplicar()}>Aplicar</button>
-          </div>
-          {error && <p className="error-msg">{error}</p>}
-        </div>
-      )}
     </div>
   );
 }

@@ -5,11 +5,12 @@ import { useAuth, type Rol } from '../auth';
 import { Icono } from '../icons';
 import ActivarAvisos from '../components/ActivarAvisos';
 import PanelAdmin from './PanelAdmin';
+import { useOperacionConfig } from '../operacion-config';
 
 interface Tarea { titulo: string; sub: string; ruta: string }
 
 /** Banner "tu tarea de hoy" según el rol: lo más importante por hacer, de un toque. */
-function TareaHoy() {
+function TareaHoy({ repartoHabilitado }: { repartoHabilitado: boolean }) {
   const { usuario } = useAuth();
   const [tarea, setTarea] = useState<Tarea | null>(null);
 
@@ -35,15 +36,21 @@ function TareaHoy() {
           const ds = await api<{ estado: string }[]>('/distribuciones');
           const porSurtir = ds.filter((d) => d.estado === 'aprobada' || d.estado === 'verificada').length;
           if (porSurtir > 0) return { titulo: `${porSurtir} pedido${porSurtir > 1 ? 's' : ''} por surtir`, sub: 'Surte y carga el camión', ruta: '/bodega' };
-          const rutas = (await api<(unknown | null)[]>('/rutas/mias')).filter(Boolean);
-          if (rutas.length > 0) return { titulo: 'Tienes una ruta en curso', sub: 'Entrega parada por parada', ruta: '/ruta' };
+          if (repartoHabilitado) {
+            const rutas = (await api<(unknown | null)[]>('/rutas/mias')).filter(Boolean);
+            if (rutas.length > 0) return { titulo: 'Tienes una ruta en curso', sub: 'Entrega parada por parada', ruta: '/ruta' };
+          }
           return null;
         }
         if (usuario.rol === 'admin') {
           const d = await api<{ operacion: { pedidos_borrador: number; distribuciones_abiertas: number; paradas_pendientes: number; productos_bajo_minimo: number }; alertas: { titulo: string; detalle: string; ruta: string }[] }>('/dashboard/general');
           const alerta = d.alertas[0];
           if (alerta) return { titulo: alerta.titulo, sub: alerta.detalle, ruta: alerta.ruta };
-          if (d.operacion.distribuciones_abiertas > 0) return { titulo: 'Distribuciones en proceso', sub: 'Revisa preparación, carga y reparto', ruta: '/bodega' };
+          if (d.operacion.distribuciones_abiertas > 0) return {
+            titulo: 'Distribuciones en proceso',
+            sub: repartoHabilitado ? 'Revisa preparación, despacho y reparto' : 'Revisa preparación, despacho y recepción',
+            ruta: '/semana/preparacion',
+          };
           return null;
         }
         return null;
@@ -53,7 +60,7 @@ function TareaHoy() {
     }
     void calcular().then((t) => { if (vivo) setTarea(t); });
     return () => { vivo = false; };
-  }, [usuario]);
+  }, [usuario, repartoHabilitado]);
 
   if (!tarea) return null;
   return (
@@ -75,6 +82,7 @@ interface Modulo {
   ruta?: string; // si no hay ruta -> aún no disponible
   soloAdmin?: boolean;
   roles?: Rol[];
+  requiereReparto?: boolean;
 }
 
 const MODULOS: Modulo[] = [
@@ -85,7 +93,7 @@ const MODULOS: Modulo[] = [
   { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
   { clave: 'distribucion', titulo: 'Preparación', icono: 'package', desc: 'Consolidar pedidos y preparar entregas', ruta: '/semana/preparacion', soloAdmin: true },
   { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
-  { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'] },
+  { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'], requiereReparto: true },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cierre semanal, cobros y Excel', ruta: '/semana/cierre', soloAdmin: true },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
@@ -101,12 +109,13 @@ function saludo() {
 
 export default function Home() {
   const { usuario } = useAuth();
+  const { repartoHabilitado } = useOperacionConfig();
   const navigate = useNavigate();
 
   // Si "Bodega y reparto" tiene una ruta en curso, lo llevamos directo a entregarla (una vez por
   // sesión, para que pueda volver al inicio si quiere). Cero fricción: abre la app y a repartir.
   useEffect(() => {
-    if (usuario?.rol !== 'encargado_bodega') return;
+    if (usuario?.rol !== 'encargado_bodega' || !repartoHabilitado) return;
     if (sessionStorage.getItem('bpm-ruta-auto')) return;
     let vivo = true;
     api<(unknown | null)[]>('/rutas/mias')
@@ -118,7 +127,7 @@ export default function Home() {
       })
       .catch(() => {});
     return () => { vivo = false; };
-  }, [usuario, navigate]);
+  }, [usuario, navigate, repartoHabilitado]);
 
   if (!usuario) return null;
   const esAdmin = usuario.rol === 'admin';
@@ -126,6 +135,7 @@ export default function Home() {
   const visibles = MODULOS.filter((m) => {
     if (m.soloAdmin && !esAdmin) return false;
     if (m.roles && !m.roles.includes(usuario.rol)) return false;
+    if (m.requiereReparto && !repartoHabilitado) return false;
     return true;
   });
 
@@ -133,7 +143,7 @@ export default function Home() {
     <div className="page admin-home">
       <header className="page-head operation-page-head"><div><span className="eyebrow">Resumen</span><h1>{saludo()}, {usuario.nombre}</h1></div></header>
       <ActivarAvisos />
-      <TareaHoy />
+      <TareaHoy repartoHabilitado={repartoHabilitado} />
       <div className="quick-actions" aria-label="Acciones rápidas">
         <Link to="/semana"><span><Icono name="clipboard" size={20} /></span><strong>Abrir captura</strong><small>Compras, producción y ventas</small></Link>
         <Link to="/incidencias"><span><Icono name="alert" size={20} /></span><strong>Incidencias</strong><small>Diferencias por resolver</small></Link>
@@ -152,7 +162,7 @@ export default function Home() {
       </header>
 
       <ActivarAvisos />
-      <TareaHoy />
+      <TareaHoy repartoHabilitado={repartoHabilitado} />
 
       <div className="module-grid">
           {visibles.map((m) =>

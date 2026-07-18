@@ -5,6 +5,7 @@ import { useTema } from './theme';
 import { Icono } from './icons';
 import { useOffline } from './offline';
 import BurritoLockup from './brand/BurritoLockup';
+import { useOperacionConfig } from './operacion-config';
 
 import type { Rol } from './auth';
 
@@ -12,21 +13,31 @@ interface Item {
   ruta: string;
   label: string;
   icono: Parameters<typeof Icono>[0]['name'];
-  grupo: 'general' | 'operacion' | 'entregas' | 'sistema';
+  grupo: 'general' | 'captura' | 'proceso' | 'sistema';
   soloAdmin?: boolean;
   roles?: Rol[]; // si se define, solo estos roles ven el ítem
+  requiereReparto?: boolean;
 }
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/semana', label: 'Operación', icono: 'clipboard', grupo: 'operacion' },
+  { ruta: '/semana', label: 'Semana', icono: 'clipboard', grupo: 'general' },
+  { ruta: '/semana/compras', label: 'Compras', icono: 'cart', grupo: 'captura', soloAdmin: true },
+  { ruta: '/semana/produccion', label: 'Producción', icono: 'factory', grupo: 'captura', soloAdmin: true },
+  { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'captura', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/semana/preparacion', label: 'Preparación', icono: 'package', grupo: 'proceso', soloAdmin: true },
+  { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'proceso', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
+  { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'proceso', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/semana/inventario', label: 'Inventario', icono: 'boxes', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/semana/cierre', label: 'Cierre', icono: 'checks', grupo: 'proceso', soloAdmin: true },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
 ];
 
 const GRUPOS = [
   { clave: 'general', label: 'General' },
-  { clave: 'operacion', label: 'Operación' },
-  { clave: 'entregas', label: 'Entregas' },
+  { clave: 'captura', label: 'Captura' },
+  { clave: 'proceso', label: 'Proceso' },
   { clave: 'sistema', label: 'Control' },
 ] as const;
 
@@ -37,12 +48,14 @@ export default function Shell({ children }: { children: ReactNode }) {
   const { usuario, logout } = useAuth();
   const { tema, alternar } = useTema();
   const { online, pendientes, sincronizar } = useOffline();
-  const { pathname } = useLocation();
+  const { repartoHabilitado } = useOperacionConfig();
+  const { pathname, search } = useLocation();
   const [masAbierto, setMasAbierto] = useState(false);
 
   const items = ITEMS.filter((i) => {
     if (i.soloAdmin && usuario?.rol !== 'admin') return false;
     if (i.roles && !(usuario && i.roles.includes(usuario.rol))) return false;
+    if (i.requiereReparto && !repartoHabilitado) return false;
     return true;
   });
 
@@ -52,7 +65,11 @@ export default function Shell({ children }: { children: ReactNode }) {
   const extras = items.length > MAX_PRIMARIOS ? items.slice(MAX_PRIMARIOS) : [];
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
-    : i.ruta === '/semana' ? pathname.startsWith('/semana') : pathname.startsWith(i.ruta);
+    : i.ruta === '/semana' ? pathname === '/semana' : pathname.startsWith(i.ruta);
+  const inicioSemana = new URLSearchParams(search).get('semana');
+  const destino = (i: Item) => i.ruta.startsWith('/semana/') && inicioSemana
+    ? `${i.ruta}?semana=${inicioSemana}`
+    : i.ruta;
   const enMas = extras.some(itemActivo);
 
   const syncChip = !online ? (
@@ -85,7 +102,7 @@ export default function Shell({ children }: { children: ReactNode }) {
               {delGrupo.map((i) => (
                 <NavLink
                   key={i.ruta}
-                  to={i.ruta}
+                  to={destino(i)}
                   end={i.ruta === '/'}
                   className={itemActivo(i) ? 'nav-link nav-link--on' : 'nav-link'}
                 >
@@ -114,7 +131,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             <span className="ctx-negocio">Burrito Parrilla</span>
             {usuario && (
               <span className="ctx-user">
-                {usuario.nombre} · {rolLabel(usuario.rol)}
+                {usuario.nombre} · {usuario.rol === 'encargado_bodega' && !repartoHabilitado ? 'Bodega' : rolLabel(usuario.rol)}
               </span>
             )}
           </div>
@@ -135,7 +152,7 @@ export default function Shell({ children }: { children: ReactNode }) {
         {primarios.map((i) => (
           <NavLink
             key={i.ruta}
-            to={i.ruta}
+            to={destino(i)}
             end={i.ruta === '/'}
             className={itemActivo(i) ? 'bottom-link bottom-link--on' : 'bottom-link'}
           >
@@ -165,7 +182,7 @@ export default function Shell({ children }: { children: ReactNode }) {
                 {extras.map((i) => (
                   <NavLink
                     key={i.ruta}
-                    to={i.ruta}
+                    to={destino(i)}
                     end={i.ruta === '/'}
                     onClick={() => setMasAbierto(false)}
                     className={itemActivo(i) ? 'mas-item mas-item--on' : 'mas-item'}

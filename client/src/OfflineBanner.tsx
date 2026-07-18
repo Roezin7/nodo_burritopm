@@ -15,7 +15,7 @@ export default function OfflineBanner() {
     <>
       {(!online || pendientes > 0) && (
         <div className={`offline-banner ${online ? 'offline-banner--sync' : 'offline-banner--off'}`}>
-          {!online && <span>Sin conexión — tus cambios se guardan y se sincronizan al reconectar.</span>}
+          {!online && <span>Sin conexión — ventas y conteos pueden quedar pendientes; las demás acciones requieren reconectar.</span>}
           {online && pendientes > 0 && (
             <span onClick={() => void sincronizar()}>
               🔄 Sincronizando {pendientes} cambio{pendientes !== 1 ? 's' : ''}…

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { EstadoDistChip, FaseChip, FlujoStepper } from '../../flujo';
 import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
+import { useOperacionConfig } from '../../operacion-config';
 
 interface DistResumen { id: number; estado: string; creado_at: string; fecha_entrega: string | null; linea: LineaOperacion | null; total_lineas: number }
 interface OpItem {
@@ -46,22 +47,26 @@ const ESTADOS_BODEGA = ['aprobada', 'verificada', 'en_transito', 'parcialmente_e
 const ESTADOS_HIST = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'];
 
 export default function Bodega({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
+  const { repartoHabilitado } = useOperacionConfig();
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [op, setOp] = useState<Operacion | null>(null);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
   const [tab, setTab] = useState<'activos' | 'historial'>('activos');
   const [error, setError] = useState('');
+  const solicitud = useRef(0);
 
   async function cargar() {
+    const turno = ++solicitud.current;
     try {
-      setLista(await api<DistResumen[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`));
+      const filas = await api<DistResumen[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`);
+      if (turno === solicitud.current) setLista(filas);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al cargar');
+      if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'Error al cargar');
     }
   }
-  useEffect(() => { setOp(null); void cargar(); }, [semana.inicio, semana.fin]);
+  useEffect(() => { setOp(null); setLista([]); setError(''); void cargar(); }, [semana.inicio, semana.fin]);
   useEffect(() => {
-    api<{ verificacion_carga: boolean }>('/negocio').then((n) => setVerificacionCarga(n.verificacion_carga)).catch(() => {});
+    api<{ verificacion_carga: boolean }>('/negocio').then((n) => setVerificacionCarga(n.verificacion_carga)).catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar la configuración de despacho.'));
   }, []);
 
   async function abrir(id: number) {
@@ -70,7 +75,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); }
   }
 
-  if (op) return <OperacionView op={op} verificacionCarga={verificacionCarga} integrado={integrado} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
+  if (op) return <OperacionView op={op} verificacionCarga={verificacionCarga} repartoHabilitado={repartoHabilitado} integrado={integrado} onSalir={() => { setOp(null); void cargar(); }} onRecargar={() => abrir(op.id)} />;
 
   const activos = lista.filter((d) => ESTADOS_BODEGA.includes(d.estado));
   const historial = lista.filter((d) => ESTADOS_HIST.includes(d.estado));
@@ -110,7 +115,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   );
 }
 
-function OperacionView({ op, verificacionCarga, integrado, onSalir, onRecargar }: { op: Operacion; verificacionCarga: boolean; integrado: boolean; onSalir: () => void; onRecargar: () => void }) {
+function OperacionView({ op, verificacionCarga, repartoHabilitado, integrado, onSalir, onRecargar }: { op: Operacion; verificacionCarga: boolean; repartoHabilitado: boolean; integrado: boolean; onSalir: () => void; onRecargar: () => void }) {
   const [edits, setEdits] = useState<Record<number, string>>({});
   const [vista, setVista] = useState<'total' | 'sucursal'>('total');
   const [error, setError] = useState('');
@@ -153,7 +158,7 @@ function OperacionView({ op, verificacionCarga, integrado, onSalir, onRecargar }
     <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← Bodega y reparto</button>
+          <button className="link-btn" onClick={onSalir}>← Despacho</button>
           <h1>Pedido #{op.id} <EstadoDistChip estado={op.estado} /></h1>
           <p className="page-sub">Ajusta cantidades si algo cambió y confirma la carga.</p>
         </div>
@@ -218,10 +223,10 @@ function OperacionView({ op, verificacionCarga, integrado, onSalir, onRecargar }
         )}
         {(op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && (
           <button className="btn btn-primary" disabled={busy} onClick={() => void guardarY(() => api(`/distribuciones/${op.id}/cargar`, { method: 'POST' }))}>
-            Confirmar carga →
+            {repartoHabilitado ? 'Confirmar carga →' : 'Confirmar y enviar a Recepción →'}
           </button>
         )}
-        {enRuta && <span className="muted">En ruta — pendiente de entrega y recepción.</span>}
+        {enRuta && <span className="muted">{repartoHabilitado ? 'En ruta — pendiente de entrega y recepción.' : 'Despachado — pendiente de recepción.'}</span>}
       </div>
     </div>
   );

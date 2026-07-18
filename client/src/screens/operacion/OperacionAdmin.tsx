@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, getToken } from '../../api';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
+import { useOperacionConfig } from '../../operacion-config';
 
 export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
@@ -35,36 +36,43 @@ const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripc
 
 export default function OperacionAdmin({ seccion, integrado = false, semana = crearSemana() }: { seccion: OperacionSeccion; integrado?: boolean; semana?: SemanaSeleccionada }) {
   const toast = useToast();
+  const { repartoHabilitado } = useOperacionConfig();
   const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [cierres, setCierres] = useState<Cierre[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const solicitud = useRef(0);
 
   async function cargar() {
+    const turno = ++solicitud.current;
     setError('');
     try {
       const [c, r, s] = await Promise.all([api<Catalogo>('/operacion/catalogo'), api<Resumen>(`/operacion/produccion?desde=${semana.inicio}&hasta=${semana.fin}`), api<Cierre[]>('/cierre')]);
+      if (turno !== solicitud.current) return;
       setCatalogo(c); setResumen(r); setCierres(s);
-    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo cargar la operación.'); }
+    } catch (e) { if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'No se pudo cargar la operación.'); }
   }
-  useEffect(() => { void cargar(); }, [semana.inicio, semana.fin]);
+  useEffect(() => { setResumen(null); void cargar(); }, [semana.inicio, semana.fin]);
   if (!catalogo || !resumen) return <div className={integrado ? '' : 'page'}><Spinner /><p className="error-msg">{error}</p></div>;
+  const semanaCerrada = cierres.some((s) => s.anio === semana.anio && s.semana === semana.numero && s.estado === 'cerrada');
+  const vista = seccion === 'cierre' && !repartoHabilitado ? { ...meta.cierre, eyebrow: 'Paso 8' } : meta[seccion];
 
   return (
     <div className={integrado ? 'operation-embedded' : 'page operation-page'}>
-      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{meta[seccion].eyebrow}</span><h1>{meta[seccion].titulo}</h1><p className="page-sub">{meta[seccion].descripcion}</p></div></header>}
-      {integrado && <header className="embedded-head"><span className="eyebrow">{meta[seccion].eyebrow}</span><h2>{meta[seccion].titulo}</h2></header>}
+      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{vista.eyebrow}</span><h1>{vista.titulo}</h1><p className="page-sub">{vista.descripcion}</p></div></header>}
+      {integrado && <header className="embedded-head"><span className="eyebrow">{vista.eyebrow}</span><h2>{vista.titulo}</h2></header>}
       {error && <p className="error-msg">{error}</p>}
-      {seccion === 'compras' && <Compras catalogo={catalogo} resumen={resumen} semana={semana} busy={busy} setBusy={setBusy} onDone={async (mensaje = 'Compra registrada e inventario actualizado.') => { await cargar(); toast.ok(mensaje); }} setError={setError} />}
-      {seccion === 'produccion' && <Produccion catalogo={catalogo} resumen={resumen} semana={semana} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Batch calculado y guardado.'); }} setError={setError} />}
+      {semanaCerrada && ['compras', 'produccion'].includes(seccion) && <p className="notice notice--warning">La semana {semana.numero} está cerrada y se muestra en modo consulta. Reábrela desde Cierre para hacer correcciones.</p>}
+      {seccion === 'compras' && <Compras catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={async (mensaje = 'Compra registrada e inventario actualizado.') => { await cargar(); toast.ok(mensaje); }} setError={setError} />}
+      {seccion === 'produccion' && <Produccion catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Batch calculado y guardado.'); }} setError={setError} />}
       {seccion === 'rutas' && <Rutas catalogo={catalogo} busy={busy} setBusy={setBusy} onDone={async () => { await cargar(); toast.ok('Ruta actualizada.'); }} setError={setError} />}
       {seccion === 'cierre' && <Cierres cierres={cierres} semana={semana} busy={busy} setBusy={setBusy} onDone={cargar} setError={setError} />}
     </div>
   );
 }
 
-function Compras({ catalogo, resumen, semana, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; onDone: (mensaje?: string) => Promise<void>; setError: (v: string) => void }) {
+function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; bloqueada: boolean; busy: boolean; setBusy: (v: boolean) => void; onDone: (mensaje?: string) => Promise<void>; setError: (v: string) => void }) {
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const bodega = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && !u.nombre.toLowerCase().includes('carnicer'));
   const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
@@ -97,7 +105,7 @@ function Compras({ catalogo, resumen, semana, busy, setBusy, onDone, setError }:
       setCajas(''); setPeso(''); setCosto(''); setReferencia(''); await onDone();
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar la compra.'); } finally { setBusy(false); }
   }
-  async function cambiarLote(id: number, valor: boolean) { setBusy(true); try { await api(`/operacion/lotes/${id}`, { method: 'PATCH', body: { congelado: valor } }); await onDone('Lote actualizado.'); } finally { setBusy(false); } }
+  async function cambiarLote(id: number, valor: boolean) { setBusy(true); setError(''); try { await api(`/operacion/lotes/${id}`, { method: 'PATCH', body: { congelado: valor } }); await onDone('Lote actualizado.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo actualizar el lote.'); } finally { setBusy(false); } }
   async function pagarCompra(id: number) { setBusy(true); setError(''); try { await api(`/cierre/compras/${id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone('Compra marcada como pagada.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo marcar la compra pagada.'); } finally { setBusy(false); } }
   async function eliminarCompra(id: number) {
     if (!window.confirm('Se eliminará la compra y se restarán sus cajas, peso y costo del inventario. Solo puede hacerse si todavía no fue utilizada. ¿Continuar?')) return;
@@ -120,7 +128,7 @@ function Compras({ catalogo, resumen, semana, busy, setBusy, onDone, setError }:
           <label className="field field--wide"><span>Factura / referencia</span><input value={referencia} onChange={(e) => setReferencia(e.target.value)} /></label>
           {requierePeso && <label className="check-card"><input type="checkbox" checked={congelado} onChange={(e) => setCongelado(e.target.checked)} /><span><strong>Congelado</strong></span></label>}
         </div>
-        <div className="form-submit form-submit--summary"><div className="form-summary">{requierePeso && <span>Peso promedio <strong>{pesoCaja.toFixed(2)} lb/caja</strong></span>}<span>Costo por {seleccionado?.unidad?.toLowerCase() ?? 'unidad'} <strong>{usd(costoCaja)}</strong></span>{requierePeso && <span>Costo por lb <strong>{usd(costoLibra)}</strong></span>}</div><button className="btn btn-primary" disabled={busy || !proveedor || !producto || !cajas || !costo || (requierePeso && !peso)} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar compra'}</button></div>
+        <div className="form-submit form-submit--summary"><div className="form-summary">{requierePeso && <span>Peso promedio <strong>{pesoCaja.toFixed(2)} lb/caja</strong></span>}<span>Costo por {seleccionado?.unidad?.toLowerCase() ?? 'unidad'} <strong>{usd(costoCaja)}</strong></span>{requierePeso && <span>Costo por lb <strong>{usd(costoLibra)}</strong></span>}</div><button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !producto || !cajas || !costo || (requierePeso && !peso)} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : 'Guardar compra'}</button></div>
     </section>
 
     {semana.actual && resumen.lotes.length > 0 && <section className="workspace-section"><div className="section-heading"><h2>Materia prima disponible hoy</h2><span>{resumen.lotes.length} lotes</span></div>
@@ -133,7 +141,7 @@ function Compras({ catalogo, resumen, semana, busy, setBusy, onDone, setError }:
   </div>;
 }
 
-function Produccion({ catalogo, resumen, semana, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
+function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; bloqueada: boolean; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const materias = catalogo.productos.filter((p) => p.tipo === 'materia_prima');
   const [materia, setMateria] = useState(String(materias[0]?.id ?? '')); const [fecha, setFecha] = useState(fechaDentroDeSemana(semana)); const [entrada, setEntrada] = useState(''); const [salidas, setSalidas] = useState<Record<number, string>>({});
@@ -186,7 +194,7 @@ function Produccion({ catalogo, resumen, semana, busy, setBusy, onDone, setError
         <div className="form-divider"><span>Cajas terminadas producidas</span></div>
         <div className="production-output-list">{terminados.map((p) => <label className="production-output" key={p.id}><span><strong>{p.nombre}</strong><small>Caja terminada de {p.peso_caja_lb ?? '?'} lb · {p.produccion_dias.map((d) => dias[d]).join(', ') || 'producción especial'}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step="0.5" inputMode="decimal" value={salidas[p.id] ?? ''} placeholder="0" onChange={(e) => setSalidas({ ...salidas, [p.id]: e.target.value })} /><span>cajas</span></div></label>)}</div>
         {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima o revisa el catálogo.</span></div>}
-        <div className="form-submit"><button className="btn btn-primary" disabled={busy || !entrada || pesoSalida <= 0 || insuficiente} onClick={() => void guardar()}>{busy ? 'Guardando…' : 'Guardar producción'}</button></div>
+        <div className="form-submit"><button className="btn btn-primary" disabled={bloqueada || busy || !entrada || pesoSalida <= 0 || insuficiente} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : 'Guardar producción'}</button></div>
       </section>
       <aside className="calculation-card calculation-card--yield">
         <span className="eyebrow">Resultado</span><h3>Yield</h3>
@@ -220,15 +228,16 @@ function Rutas({ catalogo, busy, setBusy, onDone, setError }: { catalogo: Catalo
 
 function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres: Cierre[]; semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
   const [factura, setFactura] = useState<Factura | null>(null);
+  useEffect(() => setFactura(null), [semana.inicio, semana.fin]);
   async function cerrar() { setBusy(true); setError(''); try { await api('/cierre/cerrar', { method: 'POST', body: { fecha_cierre: semana.fin } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo cerrar la semana.'); } finally { setBusy(false); } }
   const nombresExcel: Record<string, string> = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' };
   async function descargar(id: number, tipo: string) { const res = await fetch(`/api/cierre/${id}/excel/${tipo}`, { headers: { Authorization: `Bearer ${getToken()}` } }); if (!res.ok) { setError('No se pudo generar el Excel.'); return; } const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nombresExcel[tipo] ?? `${tipo}.xlsx`; a.click(); URL.revokeObjectURL(url); }
-  async function pagar(f: Factura) { setBusy(true); try { await api(`/cierre/facturas/${f.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone(); } finally { setBusy(false); } }
+  async function pagar(f: Factura) { setBusy(true); setError(''); try { await api(`/cierre/facturas/${f.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); } finally { setBusy(false); } }
   async function reabrir(id: number) { if (!window.confirm('Se anularán las facturas emitidas de esta semana para poder corregir y volver a cerrar. ¿Continuar?')) return; setBusy(true); setError(''); try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); } finally { setBusy(false); } }
   const libros = [['weekly-order', 'Weekly Order'], ['disposables', 'Disposables'], ['production', 'Production'], ['billing', 'Billing'], ['lbt', 'LBT'], ['aurora', 'Aurora']] as const;
   const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   return <div className="operation-stack">
-    <section className="close-week-card"><div><span className="eyebrow">Semana {semana.numero}</span><h2>Cerrar y facturar</h2><p>{semana.inicio} al {semana.fin}</p></div><div className="close-week-action"><button className="btn btn-primary" disabled={busy || cierreSeleccionado?.estado === 'cerrada'} onClick={() => void cerrar()}>{busy ? 'Procesando…' : cierreSeleccionado?.estado === 'cerrada' ? 'Semana cerrada' : 'Cerrar semana'}</button></div></section>
+    <section className="close-week-card"><div><span className="eyebrow">Semana {semana.numero}</span><h2>Cerrar y facturar</h2><p>{semana.inicio} al {semana.fin}</p></div><div className="close-week-action"><button className="btn btn-primary" disabled={busy || semana.fin > hoy() || cierreSeleccionado?.estado === 'cerrada'} onClick={() => void cerrar()}>{busy ? 'Procesando…' : cierreSeleccionado?.estado === 'cerrada' ? 'Semana cerrada' : semana.fin > hoy() ? 'Semana en curso' : 'Cerrar semana'}</button></div></section>
 
     <div className="week-list">{cierreSeleccionado ? [cierreSeleccionado].map((s) => <section className="week-card" key={s.id}><header><div><span className={`status-dot status-dot--${s.estado}`} /> <strong>Semana {s.semana} · {s.anio}</strong><p>{s.inicia_at} al {s.termina_at}</p></div><div className="week-balance"><span>Balance</span><strong>{usd(s.balance_neto)}</strong></div></header>
       <div className="metric-strip metric-strip--five"><div><span>Carne</span><strong>{usd(s.valor_carne)}</strong></div><div><span>Congelado</span><strong>{usd(s.valor_congelado)}</strong></div><div><span>Desechables</span><strong>{usd(s.valor_desechables)}</strong></div><div><span>Por cobrar</span><strong>{usd(s.cuentas_por_cobrar)}</strong></div><div><span>Por pagar</span><strong>{usd(s.cuentas_por_pagar)}</strong></div></div>

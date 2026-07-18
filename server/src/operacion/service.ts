@@ -4,6 +4,7 @@ import { aplicarMovimiento } from '../ledger/service.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { eliminarConteo } from '../conteos/service.js';
+import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -74,7 +75,7 @@ export function skuPastorParaEmpresa(empresaCodigo: string) {
 export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubicacionesPermitidas?: bigint[]) {
   const [empresas, ubicaciones, productos, proveedores, plantillas, semanas] = await Promise.all([
     prisma.empresas_clientes.findMany({
-      where: { negocio_id: negocioId, activo: true, id: esAdmin ? undefined : { in: ubicacionesPermitidas ?? [] } },
+      where: { negocio_id: negocioId, activo: true },
       orderBy: { nombre: 'asc' },
     }),
     prisma.ubicaciones.findMany({
@@ -100,7 +101,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
     }),
   ]);
   const calendarioPedidos = ubicaciones
-    .filter((u) => u.tipo === 'sucursal' && u.empresa_cliente_id)
+    .filter((u) => u.tipo === 'sucursal' && u.empresa_cliente_id && (esAdmin || (ubicacionesPermitidas ?? []).some((id) => id === u.id)))
     .flatMap((u) => {
       const destinoFisico = u.entrega_en_ubicacion_id ?? u.id;
       const porDia = new Map<string, { ubicacion_id: number; linea: LineaOperacion; dia_semana: number; rutas: { id: number; nombre: string; codigo: string; conductor: string }[] }>();
@@ -114,7 +115,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
     });
   return {
     empresas: empresas.map((e) => ({ ...e, id: Number(e.id) })),
-    ubicaciones: ubicaciones.map((u) => ({
+    ubicaciones: ubicaciones.filter((u) => esAdmin || (ubicacionesPermitidas ?? []).some((id) => id === u.id)).map((u) => ({
       id: Number(u.id), nombre: u.nombre, codigo: u.codigo, direccion: u.direccion, tipo: u.tipo,
       empresa: u.empresa_cliente ? { ...u.empresa_cliente, id: Number(u.empresa_cliente.id) } : null,
       entrega_en: u.entrega_en ? { id: Number(u.entrega_en.id), nombre: u.entrega_en.nombre } : null,
@@ -181,6 +182,7 @@ export async function guardarPedido(
   input: GuardarPedidoInput,
   esAdmin: boolean,
 ) {
+  await asegurarSemanaEditable(negocioId, input.fecha_entrega);
   const ubicacion = await prisma.ubicaciones.findFirst({
     where: { id: BigInt(input.ubicacion_id), negocio_id: negocioId, tipo: 'sucursal', activo: true },
     include: { empresa_cliente: true },
@@ -224,8 +226,10 @@ export async function guardarPedido(
     let pedido = await tx.pedidos_operativos.findUnique({
       where: { ubicacion_id_linea_operacion_fecha_entrega: { ubicacion_id: ubicacion.id, linea_operacion: input.linea, fecha_entrega: fecha(input.fecha_entrega) } },
     });
-    if (pedido && !esAdmin && !['borrador', 'confirmado'].includes(pedido.estado)) {
-      throw new HttpError(409, 'El pedido ya entró a preparación; solo el administrador puede modificarlo');
+    if (pedido && !['borrador', 'confirmado'].includes(pedido.estado)) {
+      throw new HttpError(409, pedido.estado === 'cerrado'
+        ? 'El pedido pertenece a un cierre. Reabre la semana antes de corregirlo.'
+        : 'El pedido ya entró a preparación. Elimina esa preparación para corregir la venta y volver a generarla.');
     }
     pedido = pedido
       ? await tx.pedidos_operativos.update({
@@ -265,6 +269,7 @@ export async function confirmarPedidosEnRango(
   desde: string,
   hasta: string,
 ) {
+  await asegurarRangoEditable(negocioId, desde, hasta);
   const rango = { gte: fecha(desde), lte: fecha(hasta) };
   const borradores = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: rango, estado: 'borrador' },
@@ -351,6 +356,7 @@ export async function crearDistribucionOperativa(
   linea: LineaOperacion,
   fechaEntrega: string,
 ) {
+  await asegurarSemanaEditable(negocioId, fechaEntrega);
   const entrega = fecha(fechaEntrega);
   const pedidos = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: 'confirmado' },
@@ -412,6 +418,7 @@ export async function crearPreparacionesEnRango(
   hasta: string,
   linea?: LineaOperacion,
 ) {
+  await asegurarRangoEditable(negocioId, desde, hasta);
   const grupos = await prisma.pedidos_operativos.findMany({
     where: {
       negocio_id: negocioId,
@@ -458,6 +465,7 @@ export interface CompraInput {
 }
 
 export async function registrarCompra(negocioId: bigint, usuarioId: bigint, input: CompraInput) {
+  await asegurarSemanaEditable(negocioId, input.fecha);
   const proveedor = await prisma.proveedores.findFirst({ where: { id: BigInt(input.proveedor_id), negocio_id: negocioId, activo: true } });
   if (!proveedor) throw new HttpError(400, 'Proveedor no válido');
   const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: BigInt(input.ubicacion_id), negocio_id: negocioId, activo: true } });
@@ -632,6 +640,7 @@ export async function guardarInventarioFinal(
   usuarioId: bigint,
   input: { ubicacion_id: number; fecha: string; lineas: { product_id: number; cantidad: number }[] },
 ) {
+  await asegurarSemanaEditable(negocioId, input.fecha);
   const ubicacionId = BigInt(input.ubicacion_id);
   const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: negocioId, tipo: 'bodega', activo: true } });
   if (!ubicacion) throw new HttpError(400, 'Almacén no válido');
@@ -756,6 +765,7 @@ export async function eliminarInventarioFinal(negocioId: bigint, token: string) 
     const id = BigInt(token.slice('conteo-'.length));
     const conteo = await prisma.conteos.findFirst({ where: { id, negocio_id: negocioId, notas: 'inventario_final_operativo' } });
     if (!conteo) throw new HttpError(404, 'Inventario no encontrado');
+    await asegurarSemanaEditable(negocioId, iso(conteo.fecha ?? conteo.creado_at));
     return eliminarConteo(negocioId, id);
   }
   if (!token.startsWith('legacy-')) throw new HttpError(400, 'Identificador de inventario no válido');
@@ -763,6 +773,8 @@ export async function eliminarInventarioFinal(negocioId: bigint, token: string) 
   const muestra = await prisma.movimientos_inventario.findFirst({ where: { id: movimientoId, negocio_id: negocioId, documento_tipo: 'inventario_final', documento_id: null } });
   const clave = muestra ? claveInventarioLegacy(muestra.idempotency_key) : null;
   if (!muestra || !clave) throw new HttpError(404, 'Inventario anterior no encontrado');
+  const fechaInventario = clave.split(':')[2];
+  if (fechaInventario) await asegurarSemanaEditable(negocioId, fechaInventario);
   const movimientos = await prisma.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, documento_tipo: 'inventario_final', documento_id: null, idempotency_key: { startsWith: `${clave}:` } },
   });
@@ -799,6 +811,7 @@ export interface ProduccionInput {
 }
 
 export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, input: ProduccionInput) {
+  await asegurarSemanaEditable(negocioId, input.fecha);
   if (input.cajas_materia_prima <= 0 || !input.salidas.length || input.salidas.some((s) => s.cajas <= 0)) throw new HttpError(400, 'La producción requiere entrada y salidas válidas');
   const ubicId = BigInt(input.ubicacion_id);
   const materiaId = BigInt(input.materia_prima_id);

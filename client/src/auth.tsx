@@ -60,6 +60,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [cargando, setCargando] = useState(true);
   const [recienEntro, setRecienEntro] = useState(false);
 
+  useEffect(() => {
+    const expirada = () => {
+      setUsuario(null);
+      setRecienEntro(false);
+    };
+    window.addEventListener('bpm-auth-expired', expirada);
+    return () => window.removeEventListener('bpm-auth-expired', expirada);
+  }, []);
+
   // Al montar: si hay token, validar con /me.
   useEffect(() => {
     if (!getToken()) {

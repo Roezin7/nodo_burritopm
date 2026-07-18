@@ -76,6 +76,8 @@ model negocios {
   zona_horaria        String    @default("America/Chicago")
   // Operación: si está activo, la carga exige una verificación de 1 toque antes de salir a ruta.
   verificacion_carga  Boolean   @default(false)
+  // Reparto es opcional: apagado, Despacho pasa directo a la validación de Recepción.
+  reparto_habilitado  Boolean   @default(false)
   // Días de la semana (0=Dom … 6=Sáb) en que se habilita el inventario para todas las ubicaciones.
   inventario_dias     Int[]     @default([])
   // Fecha en que se envió el aviso push "hoy toca inventario" (evita duplicados al reiniciar).

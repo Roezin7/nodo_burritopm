@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { openDB, type IDBPDatabase } from 'idb';
 
-// Cola de escrituras offline. Cuando no hay red, las mutaciones (POST/PATCH/PUT/DELETE)
-// se encolan en IndexedDB y se reenvían al recuperar conexión (FIFO). Las lecturas (GET)
-// no se encolan: requieren red (el app shell sí está cacheado por el service worker).
+// Cola limitada a capturas idempotentes. Movimientos financieros, carga, recepción, cierres y
+// eliminaciones requieren confirmación inmediata del servidor y nunca deben reproducirse tarde.
 
 export interface PendingReq {
   id?: number;
@@ -37,6 +36,11 @@ let online = navigator.onLine;
 // Mutaciones que el servidor rechazó (4xx) al sincronizar: se descartan de la cola
 // pero se conservan aquí para avisarle al usuario que NO se guardaron.
 let fallidos: FalloSync[] = [];
+
+function esPeticionOfflineSegura(method: string, path: string) {
+  return (method === 'PUT' && path === '/operacion/pedidos')
+    || (method === 'PATCH' && /^\/conteos\/\d+\/lineas$/.test(path));
+}
 
 async function contarPendientes(): Promise<number> {
   return (await db()).count(STORE);
@@ -76,6 +80,13 @@ export async function sincronizar(): Promise<void> {
     for (const key of keys) {
       const req = (await d.get(STORE, key)) as PendingReq | undefined;
       if (!req) continue;
+      // Versiones anteriores encolaban cualquier mutación. No reproducimos pagos, compras,
+      // cargas o eliminaciones antiguas porque podrían duplicar o desordenar la contabilidad.
+      if (!esPeticionOfflineSegura(req.method, req.path)) {
+        fallidos.push({ method: req.method, path: req.path, error: 'Acción pendiente descartada por seguridad; vuelve a capturarla con conexión', ts: Date.now() });
+        await d.delete(STORE, key);
+        continue;
+      }
       try {
         const res = await fetch(`/api${req.path}`, {
           method: req.method,

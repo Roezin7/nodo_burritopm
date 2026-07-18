@@ -4,6 +4,7 @@ import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { estadoRutaDesdeParadas, estadoTrasEntrega, normalizarOrden, type EstadoParada } from './rutas.logic.js';
 import { avisarConfirmarRecepcion } from '../push/service.js';
+import { asegurarSemanaEditable } from '../lib/semana-operativa.js';
 
 type Tx = Prisma.TransactionClient;
 type LineaRuta = 'carne' | 'desechables';
@@ -131,6 +132,7 @@ async function detalleRuta(negocioId: bigint, ruta: NonNullable<Awaited<ReturnTy
 
   const itemsPorUbic = new Map<string, RutaItemDto[]>();
   for (const l of lineas) {
+    if (cantidadACargar(l) <= 0) continue;
     const k = (l.ubicaciones.entrega_en_ubicacion_id ?? l.ubicacion_destino_id).toString();
     if (!itemsPorUbic.has(k)) itemsPorUbic.set(k, []);
     itemsPorUbic.get(k)!.push({
@@ -198,7 +200,7 @@ export async function rutasActivas(negocioId: bigint, desde?: string, hasta?: st
   });
   const out = [];
   for (const d of dists) {
-    const rutas = await prisma.rutas.findMany({ where: { negocio_id: negocioId, distribucion_id: d.id }, orderBy: { id: 'asc' } });
+    const rutas = await prisma.rutas.findMany({ where: { negocio_id: negocioId, distribucion_id: d.id, estado: 'en_curso' }, orderBy: { id: 'asc' } });
     if (rutas.length) for (const ruta of rutas) out.push(await detalleRuta(negocioId, ruta));
     else out.push(await rutaSintetica(negocioId, d.id));
   }
@@ -212,16 +214,18 @@ async function rutaSintetica(negocioId: bigint, distId: bigint) {
     where: { distribucion_id: distId },
     include: {
       products: { include: { unidad_distribucion: true } },
-      ubicaciones: { select: { id: true, nombre: true, direccion: true } },
+      ubicaciones: { select: { id: true, nombre: true, direccion: true, entrega_en: { select: { id: true, nombre: true, direccion: true } } } },
     },
   });
 
   const porUbic = new Map<string, { ubic: { id: number; nombre: string; direccion: string | null }; items: RutaItemDto[]; lineas: typeof lineas }>();
   for (const l of lineas) {
-    const k = l.ubicacion_destino_id.toString();
+    if (cantidadACargar(l) <= 0) continue;
+    const punto = l.ubicaciones.entrega_en ?? l.ubicaciones;
+    const k = punto.id.toString();
     if (!porUbic.has(k)) {
       porUbic.set(k, {
-        ubic: { id: Number(l.ubicaciones.id), nombre: l.ubicaciones.nombre, direccion: l.ubicaciones.direccion },
+        ubic: { id: Number(punto.id), nombre: punto.nombre, direccion: punto.direccion },
         items: [],
         lineas: [] as typeof lineas,
       });
@@ -327,9 +331,12 @@ export async function entregarParada(
   paradaId: bigint,
   usuarioId: bigint,
   datos: { items?: { linea_id: number; cantidad: number }[]; omitir?: boolean; notas?: string },
+  esAdmin = false,
 ) {
   const ruta = await prisma.rutas.findFirst({ where: { id: rutaId, negocio_id: negocioId } });
   if (!ruta) throw new HttpError(404, 'Ruta no encontrada');
+  if (ruta.fecha_entrega) await asegurarSemanaEditable(negocioId, ruta.fecha_entrega.toISOString().slice(0, 10));
+  if (!esAdmin && ruta.repartidor_id != null && ruta.repartidor_id !== usuarioId) throw new HttpError(403, 'Esta ruta está asignada a otro repartidor');
   if (ruta.estado !== 'en_curso') throw new HttpError(409, 'La ruta no está en curso');
   const parada = await prisma.ruta_paradas.findFirst({ where: { id: paradaId, ruta_id: rutaId } });
   if (!parada) throw new HttpError(404, 'Parada no encontrada');
@@ -343,6 +350,15 @@ export async function entregarParada(
     include: { ubicaciones: { select: { entrega_en_ubicacion_id: true } } },
   });
   const lineas = candidatas.filter((l) => (l.ubicaciones.entrega_en_ubicacion_id ?? l.ubicacion_destino_id) === parada.ubicacion_id);
+  if (datos.items) {
+    const ids = datos.items.map((i) => i.linea_id);
+    const unicos = new Set(ids);
+    const validas = new Set(lineas.map((l) => Number(l.id)));
+    if (unicos.size !== ids.length) throw new HttpError(400, 'La misma línea aparece más de una vez');
+    if (ids.length !== lineas.length || ids.some((lineaId) => !validas.has(lineaId))) {
+      throw new HttpError(400, 'La entrega con diferencias debe incluir todas las líneas de esta parada');
+    }
+  }
 
   let hayFaltante = false;
   const faltantes: { linea: (typeof lineas)[number]; esperado: number; entregada: number }[] = [];
@@ -408,22 +424,42 @@ export async function asegurarRutaEnCurso(
     orderBy: { id: 'asc' },
   });
   if (existentes.length) {
-    await tx.rutas.updateMany({
-      where: { id: { in: existentes.filter((r) => r.estado === 'planificada').map((r) => r.id) } },
-      data: { estado: 'en_curso', despachada_at: new Date() },
-    });
+    const destinosCargados = sucursalesConCarga?.size
+      ? await tx.ubicaciones.findMany({
+          where: { negocio_id: negocioId, id: { in: [...sucursalesConCarga].map(BigInt) } },
+          select: { id: true, entrega_en_ubicacion_id: true },
+        })
+      : [];
+    const puntosConCarga = new Set(destinosCargados.map((u) => (u.entrega_en_ubicacion_id ?? u.id).toString()));
+    for (const ruta of existentes.filter((r) => r.estado === 'planificada')) {
+      // La ruta se planea desde los pedidos; al despachar se eliminan las paradas que quedaron
+      // completamente en cero por falta de stock. Una ruta sin carga queda cancelada, no en curso.
+      if (sucursalesConCarga) {
+        const paradas = await tx.ruta_paradas.findMany({ where: { ruta_id: ruta.id }, select: { id: true, ubicacion_id: true } });
+        const quitar = paradas.filter((p) => !puntosConCarga.has(p.ubicacion_id.toString())).map((p) => p.id);
+        if (quitar.length) await tx.ruta_paradas.deleteMany({ where: { id: { in: quitar } } });
+      }
+      const restantes = await tx.ruta_paradas.count({ where: { ruta_id: ruta.id } });
+      await tx.rutas.update({
+        where: { id: ruta.id },
+        data: restantes > 0
+          ? { estado: 'en_curso', despachada_at: new Date() }
+          : { estado: 'cancelada', notas: 'Sin carga disponible para esta ruta' },
+      });
+    }
     return;
   }
   const lineas = await tx.distribucion_lineas.findMany({
     where: { distribucion_id: distId },
-    select: { ubicacion_destino_id: true, ubicaciones: { select: { nombre: true } } },
+    select: { ubicacion_destino_id: true, ubicaciones: { select: { id: true, nombre: true, entrega_en: { select: { id: true, nombre: true } } } } },
   });
   const sucursales = new Map<string, { id: bigint; nombre: string }>();
   for (const l of lineas) {
-    const k = l.ubicacion_destino_id.toString();
+    const punto = l.ubicaciones.entrega_en ?? l.ubicaciones;
+    const k = punto.id.toString();
     // Solo paradas con carga real: una sucursal cuyas líneas quedaron en 0 (sin stock) no se visita.
     if (sucursalesConCarga && !sucursalesConCarga.has(k)) continue;
-    sucursales.set(k, { id: l.ubicacion_destino_id, nombre: l.ubicaciones.nombre });
+    sucursales.set(k, { id: punto.id, nombre: punto.nombre });
   }
   const ordenadas = [...sucursales.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   if (ordenadas.length === 0) return;
@@ -457,7 +493,7 @@ export async function sellarParadaPorRecepcion(
   const destino = await tx.ubicaciones.findUnique({ where: { id: ubicacionId }, select: { entrega_en_ubicacion_id: true } });
   const puntoFisico = destino?.entrega_en_ubicacion_id ?? ubicacionId;
   const parada = await tx.ruta_paradas.findFirst({
-    where: { ubicacion_id: puntoFisico, rutas: { negocio_id: negocioId, distribucion_id: distId } },
+    where: { ubicacion_id: puntoFisico, rutas: { negocio_id: negocioId, distribucion_id: distId, estado: { not: 'cancelada' } } },
     include: { rutas: true },
   });
   if (!parada) return;

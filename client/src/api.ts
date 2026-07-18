@@ -1,4 +1,5 @@
 // Cliente HTTP mínimo para la API. Guarda el JWT en localStorage.
+import { encolar } from './offline';
 
 const TOKEN_KEY = 'bpm_token';
 
@@ -24,6 +25,15 @@ export interface Encolado { queued: true }
 export const fueEncolado = (r: unknown): r is Encolado =>
   typeof r === 'object' && r !== null && (r as Encolado).queued === true;
 
+// Solo acciones de campo idempotentes pueden esperar sin conexión. Compras, producción,
+// cierres, pagos, altas y eliminaciones deben confirmar con el servidor en ese momento: si se
+// encolaran, la pantalla podría anunciar éxito aunque el movimiento financiero nunca ocurriera.
+function admiteColaOffline(method: string, path: string) {
+  if (method === 'PUT' && path === '/operacion/pedidos') return true;
+  if (method === 'PATCH' && /^\/conteos\/\d+\/lineas$/.test(path)) return true;
+  return false;
+}
+
 export async function api<T = unknown>(
   path: string,
   opts: { method?: string; body?: unknown; auth?: boolean } = {},
@@ -45,9 +55,8 @@ export async function api<T = unknown>(
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    // Fallo de red. Si es una mutación, la encolamos para sincronizar luego.
-    if (esMutacion) {
-      const { encolar } = await import('./offline');
+    // Solo las capturas idempotentes de campo pueden continuar sin red.
+    if (esMutacion && admiteColaOffline(method, path)) {
       await encolar({ method, path, body, token: auth ? getToken() : null });
       return { queued: true } as T;
     }
@@ -57,7 +66,10 @@ export async function api<T = unknown>(
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401) setToken(null); // token inválido -> forzar re-login
+    if (res.status === 401) {
+      setToken(null);
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('bpm-auth-expired'));
+    }
     throw new ApiError(res.status, (data as { error?: string }).error ?? 'Error de red');
   }
   return data as T;

@@ -111,7 +111,7 @@ dashboardRouter.get(
   soloAdmin,
   asyncHandler(async (req, res) => {
     const negocioId = req.auth!.negocioId;
-    const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true } });
+    const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true, reparto_habilitado: true } });
     const tz = negocio?.zona_horaria ?? 'America/Chicago';
     const hoyISO = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const hoy = new Date(`${hoyISO}T00:00:00.000Z`);
@@ -202,7 +202,11 @@ dashboardRouter.get(
     const cajasProduccion = producciones.reduce((a, p) => a + p.salidas.reduce((x, s) => x + num0(s.cajas), 0), 0);
     const costoProduccion = producciones.reduce((a, p) => a + num0(p.costo_entrada), 0);
     const comprasTotal = comprasSemana.reduce((a, c) => a + num0(c.total), 0);
-    const paradasPendientes = distribuciones.reduce((a, d) => a + d.rutas.reduce((x, r) => x + r.paradas.filter((p) => !['confirmada', 'con_incidencia', 'omitida'].includes(p.estado)).length, 0), 0);
+    const paradasPendientes = negocio?.reparto_habilitado
+      ? distribuciones.reduce((a, d) => a + d.rutas
+        .filter((r) => r.estado === 'en_curso')
+        .reduce((x, r) => x + r.paradas.filter((p) => !['confirmada', 'con_incidencia', 'omitida'].includes(p.estado)).length, 0), 0)
+      : 0;
     const existenciaDe = new Map(existencias.map((e) => [`${e.ubicacion_id}:${e.product_id}`, num0(e.cantidad_disponible)]));
     const bajoMinimo = parametros.filter((p) => (existenciaDe.get(`${p.ubicacion_id}:${p.product_id}`) ?? 0) < num0(p.stock_min)).length;
 

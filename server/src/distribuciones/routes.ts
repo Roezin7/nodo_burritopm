@@ -136,19 +136,13 @@ distribucionesRouter.patch(
   }),
 );
 
-/** PATCH /distribuciones/:id/estado { estado } — control total del admin (override). */
-const ESTADOS_DIST = [
-  'borrador', 'esperando_conteos', 'calculada', 'en_revision', 'aprobada',
-  'en_preparacion', 'preparada', 'verificada', 'en_carga', 'cargada',
-  'en_transito', 'parcialmente_entregada', 'entregada', 'cerrada',
-  'cerrada_con_incidencias', 'cancelada',
-] as const;
+/** PATCH /distribuciones/:id/estado — reversa segura antes de mover inventario. */
 distribucionesRouter.patch(
   '/:id/estado',
   soloAdmin,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
-    const { estado } = z.object({ estado: z.enum(ESTADOS_DIST) }).parse(req.body);
+    const { estado } = z.object({ estado: z.literal('en_revision') }).parse(req.body);
     res.json(await svc.cambiarEstadoAdmin(req.auth!.negocioId, id, estado));
   }),
 );

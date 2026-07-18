@@ -1,9 +1,11 @@
 import { useNavigate } from 'react-router-dom';
+import { useOperacionConfig } from '../operacion-config';
 
 /** Conmutador de la sección "Bodega y reparto": surtir/cargar (/bodega) y repartir (/ruta).
  *  La misma persona hace ambas cosas, así que viven como una sola sección con dos vistas. */
 export default function BodegaRutaTabs({ activo }: { activo: 'bodega' | 'reparto' }) {
   const navigate = useNavigate();
+  const { repartoHabilitado } = useOperacionConfig();
   return (
     <div className="tabs">
       <button
@@ -12,12 +14,14 @@ export default function BodegaRutaTabs({ activo }: { activo: 'bodega' | 'reparto
       >
         Surtir y cargar
       </button>
-      <button
-        className={activo === 'reparto' ? 'tab tab--on' : 'tab'}
-        onClick={() => { if (activo !== 'reparto') navigate('/ruta'); }}
-      >
-        Reparto
-      </button>
+      {repartoHabilitado && (
+        <button
+          className={activo === 'reparto' ? 'tab tab--on' : 'tab'}
+          onClick={() => { if (activo !== 'reparto') navigate('/ruta'); }}
+        >
+          Reparto
+        </button>
+      )}
     </div>
   );
 }

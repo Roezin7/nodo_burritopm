@@ -58,6 +58,6 @@ rutasRouter.post(
         notas: z.string().trim().max(500).optional(),
       })
       .parse(req.body ?? {});
-    res.json(await rutas.entregarParada(req.auth!.negocioId, rid, pid, req.auth!.usuarioId, b));
+    res.json(await rutas.entregarParada(req.auth!.negocioId, rid, pid, req.auth!.usuarioId, b, req.auth!.rol === 'admin'));
   }),
 );

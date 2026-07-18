@@ -2,6 +2,7 @@
 // y el stepper de 5 pasos (Inventario → Plan → Bodega → Ruta → Recepción), interactivo.
 import { NavLink } from 'react-router-dom';
 import { useAuth, type Rol } from './auth';
+import { useOperacionConfig } from './operacion-config';
 
 // ── Estado de la distribución ──────────────────────────────────────────────
 const DIST: Record<string, { label: string; cls: string }> = {
@@ -22,7 +23,12 @@ const DIST: Record<string, { label: string; cls: string }> = {
 };
 
 export function EstadoDistChip({ estado }: { estado: string }) {
-  const e = DIST[estado];
+  const { repartoHabilitado } = useOperacionConfig();
+  const e = !repartoHabilitado && estado === 'en_transito'
+    ? { label: 'Pendiente de recepción', cls: 'chip--accent' }
+    : !repartoHabilitado && estado === 'parcialmente_entregada'
+      ? { label: 'Recepción parcial', cls: 'chip--warn' }
+      : DIST[estado];
   return <span className={`chip chip-estado ${e?.cls ?? 'chip--muted'}`}>{e?.label ?? estado}</span>;
 }
 
@@ -50,6 +56,10 @@ export function faseDistribucion(estado: string): { clave: FaseDist; label: stri
 
 /** Chip de FASE (4 fases) — vista simple del admin. El detalle granular usa EstadoDistChip. */
 export function FaseChip({ estado }: { estado: string }) {
+  const { repartoHabilitado } = useOperacionConfig();
+  if (!repartoHabilitado && ['en_transito', 'parcialmente_entregada'].includes(estado)) {
+    return <span className="chip chip-estado chip--warn">Pendiente de recepción</span>;
+  }
   const f = faseDistribucion(estado);
   return <span className={`chip chip-estado ${f.cls}`}>{f.label}</span>;
 }
@@ -87,10 +97,12 @@ const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] =
  */
 export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
   const { usuario } = useAuth();
-  const idxActivo = PASOS.findIndex((p) => p.clave === activo);
+  const { repartoHabilitado } = useOperacionConfig();
+  const pasos = PASOS.filter((p) => p.clave !== 'ruta' || repartoHabilitado);
+  const idxActivo = pasos.findIndex((p) => p.clave === activo);
   return (
     <nav className="flujo-stepper" aria-label="Etapas del abastecimiento">
-      {PASOS.map((p, i) => {
+      {pasos.map((p, i) => {
         const estado = i < idxActivo ? 'done' : i === idxActivo ? 'on' : 'todo';
         const accesible = !!usuario && p.roles.includes(usuario.rol);
         const cls = `flujo-paso ${estado === 'on' ? 'flujo-paso--on' : ''} ${estado === 'done' ? 'flujo-paso--done' : ''} ${accesible ? 'flujo-paso--link' : 'flujo-paso--off'}`;
@@ -109,7 +121,7 @@ export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
             ) : (
               <span className={cls} aria-disabled="true" title="No disponible para tu rol">{contenido}</span>
             )}
-            {i < PASOS.length - 1 && <span className="flujo-sep">›</span>}
+            {i < pasos.length - 1 && <span className="flujo-sep">›</span>}
           </div>
         );
       })}

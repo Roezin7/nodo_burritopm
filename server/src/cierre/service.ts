@@ -9,6 +9,9 @@ const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
+const hoyChicago = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
 
 /** Semana ISO, con lunes como inicio y sábado como cierre operativo. */
 export function semanaDeFecha(d: Date) {
@@ -103,8 +106,36 @@ async function actualizarUltimoBalance(negocioId: bigint) {
 }
 
 export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCierre: string) {
+  const periodoSolicitado = semanaDeFecha(fecha(fechaCierre));
+  if (iso(periodoSolicitado.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
+
+  // El cierre factura lo que realmente salió. No debe convertir silenciosamente una venta
+  // confirmada pero nunca preparada/entregada en una factura ni congelar una ruta activa.
+  const [pedidosSinPreparar, distribucionesActivas] = await Promise.all([
+    prisma.pedidos_operativos.count({
+      where: {
+        negocio_id: negocioId,
+        fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at },
+        estado: 'confirmado',
+        lineas: { some: {} },
+      },
+    }),
+    prisma.distribuciones.count({
+      where: {
+        negocio_id: negocioId,
+        fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at },
+        estado: { notIn: ['cerrada', 'cerrada_con_incidencias', 'cancelada'] },
+      },
+    }),
+  ]);
+  if (pedidosSinPreparar) {
+    throw new HttpError(409, `Faltan ${pedidosSinPreparar} venta(s) por preparar y entregar antes del cierre.`);
+  }
+  if (distribucionesActivas) {
+    throw new HttpError(409, `Faltan ${distribucionesActivas} preparación(es) por despachar o recibir antes del cierre.`);
+  }
   const pedidos = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['borrador', 'cancelado'] } },
     include: {
@@ -170,10 +201,22 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint) {
   if (s.estado !== 'cerrada') throw new HttpError(409, 'La semana no está cerrada');
   const pagadas = await prisma.facturas.count({ where: { semana_id: s.id, estado: 'pagada' } });
   if (pagadas) throw new HttpError(409, 'No se puede reabrir una semana con facturas pagadas');
+  const pedidos = await prisma.pedidos_operativos.findMany({
+    where: { negocio_id: negocioId, fecha_entrega: { gte: s.inicia_at, lte: s.termina_at }, estado: 'cerrado' },
+    select: { id: true },
+  });
+  const vinculados = pedidos.length ? await prisma.pedido_operativo_lineas.findMany({
+    where: { pedido_id: { in: pedidos.map((p) => p.id) }, distribucion_lineas: { some: {} } },
+    select: { pedido_id: true },
+    distinct: ['pedido_id'],
+  }) : [];
+  const conPreparacion = vinculados.map((p) => p.pedido_id);
+  const sinPreparacion = pedidos.filter((p) => !conPreparacion.some((id) => id === p.id)).map((p) => p.id);
   await prisma.$transaction([
     prisma.facturas.updateMany({ where: { semana_id: s.id, estado: 'emitida' }, data: { estado: 'anulada' } }),
     prisma.semanas_operativas.update({ where: { id: s.id }, data: { estado: 'reabierta', cerrado_at: null, cerrado_por: null } }),
-    prisma.pedidos_operativos.updateMany({ where: { negocio_id: negocioId, fecha_entrega: { gte: s.inicia_at, lte: s.termina_at }, estado: 'cerrado' }, data: { estado: 'en_preparacion' } }),
+    prisma.pedidos_operativos.updateMany({ where: { id: { in: conPreparacion } }, data: { estado: 'en_preparacion' } }),
+    prisma.pedidos_operativos.updateMany({ where: { id: { in: sinPreparacion } }, data: { estado: 'confirmado' } }),
   ]);
   return { ok: true };
 }

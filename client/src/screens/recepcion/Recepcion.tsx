@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { EstadoDistChip, FlujoStepper } from '../../flujo';
 import UbicacionPicker from '../../components/UbicacionPicker';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
+import { useOperacionConfig } from '../../operacion-config';
 
 interface LineaRec {
   linea_id: number;
@@ -19,6 +20,7 @@ interface DistHist { id: number; estado: string; fecha_entrega: string | null; r
 
 export default function Recepcion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
+  const { repartoHabilitado } = useOperacionConfig();
   const esAdmin = usuario?.rol === 'admin';
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
   const [ubicId, setUbicId] = useState('');
@@ -30,6 +32,8 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [busy, setBusy] = useState(false);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+  const solicitud = useRef(0);
 
   useEffect(() => {
     async function cargarUbic() {
@@ -49,14 +53,19 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
 
   async function cargar() {
     if (!ubicId) return;
+    const turno = ++solicitud.current;
     setError('');
-    try { setDists(await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`)); }
-    catch (e) { setError(e instanceof ApiError ? e.message : 'Error al cargar'); }
+    try { const filas = await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`); if (turno === solicitud.current) setDists(filas); }
+    catch (e) { if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'Error al cargar'); }
   }
-  useEffect(() => { setHistorial([]); setTab(semana.actual ? 'pendientes' : 'historial'); void cargar(); }, [ubicId, semana.inicio, semana.fin]);
+  useEffect(() => { setDists([]); setHistorial([]); setTab(semana.actual ? 'pendientes' : 'historial'); void cargar(); }, [ubicId, semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || !ubicId || historial.length) return;
-    api<DistHist[]>(`/distribuciones/recepciones/historial?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`).then(setHistorial).catch(() => {});
+    setCargandoHistorial(true); setError('');
+    api<DistHist[]>(`/distribuciones/recepciones/historial?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`)
+      .then(setHistorial)
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el historial de recepción.'))
+      .finally(() => setCargandoHistorial(false));
   }, [tab, ubicId, historial.length, semana.inicio, semana.fin]);
 
   // modoProblema=false → confirma todo tal cual lo esperado (un toque). true → usa lo ajustado.
@@ -82,10 +91,10 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
   return (
     <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
       {!integrado && <header className="page-head">
-        <div><h1>Recepción</h1><p className="page-sub">Confirma lo que llega del camión.</p></div>
+        <div><h1>Recepción</h1><p className="page-sub">{repartoHabilitado ? 'Confirma lo que llega del camión.' : 'Valida lo despachado o reporta faltantes.'}</p></div>
       </header>}
       {!integrado && <FlujoStepper activo="recepcion" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 7</span><h2>Recepción</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Recepción</h2></div></header>}
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes una sucursal asignada.</p>
@@ -102,7 +111,9 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
           {ok && <p className="ok-msg">{ok}</p>}
 
           {tab === 'historial' ? (
-            historial.length === 0 ? (
+            cargandoHistorial ? (
+              <p className="muted">Cargando recepciones…</p>
+            ) : historial.length === 0 ? (
               <p className="muted">Aún no hay recepciones registradas.</p>
             ) : (
               historial.map((d) => (

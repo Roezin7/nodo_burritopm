@@ -5,6 +5,7 @@ import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
+import { useOperacionConfig } from '../../operacion-config';
 
 type Linea = 'todas' | 'carne' | 'desechables';
 
@@ -46,6 +47,7 @@ const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 
 export default function InventarioOperacion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
+  const { repartoHabilitado } = useOperacionConfig();
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
@@ -154,7 +156,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
       {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
-    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 8</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 8 : 7}</span><h2>Inventario final</h2></div>{admin && semana.actual && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">

@@ -56,6 +56,7 @@ function RutaRepartidor({ integrado, semana }: { integrado: boolean; semana: Sem
   const [exito, setExito] = useState<string | null>(null); // overlay de "entregado"
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
   async function cargar() {
     setCargando(true);
@@ -68,10 +69,14 @@ function RutaRepartidor({ integrado, semana }: { integrado: boolean; semana: Sem
       setCargando(false);
     }
   }
-  useEffect(() => { setHistorial([]); setTab(semana.actual ? 'activas' : 'historial'); void cargar(); }, [semana.inicio, semana.fin]);
+  useEffect(() => { setParada(null); setHistorial([]); setTab(semana.actual ? 'activas' : 'historial'); void cargar(); }, [semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || historial.length) return;
-    api<(RutaDetalle | null)[]>(`/rutas/historial?desde=${semana.inicio}&hasta=${semana.fin}`).then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
+    setCargandoHistorial(true); setError('');
+    api<(RutaDetalle | null)[]>(`/rutas/historial?desde=${semana.inicio}&hasta=${semana.fin}`)
+      .then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null)))
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el historial de rutas'))
+      .finally(() => setCargandoHistorial(false));
   }, [tab, historial.length, semana.inicio, semana.fin]);
 
   // Celebración breve tras entregar, luego de vuelta a la lista.
@@ -121,6 +126,8 @@ function RutaRepartidor({ integrado, semana }: { integrado: boolean; semana: Sem
         ) : (
           rutas.map((r) => <RutaCard key={r.ruta_id} ruta={r} onAbrir={(p) => setParada({ ruta: r, parada: p })} />)
         )
+      ) : cargandoHistorial ? (
+        <Spinner />
       ) : historial.length === 0 ? (
         <div className="card"><p className="muted">Aún no hay rutas completadas.</p></div>
       ) : (
@@ -306,22 +313,27 @@ function MonitorRutas({ integrado, semana }: { integrado: boolean; semana: Seman
   const [tab, setTab] = useState<'activas' | 'historial'>('activas');
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [actualizado, setActualizado] = useState<Date | null>(null);
-  const primera = useRef(true);
+  const solicitud = useRef(0);
 
   async function cargar() {
+    const turno = ++solicitud.current;
     try {
       const r = (await api<(RutaDetalle | null)[]>(`/rutas/activas?desde=${semana.inicio}&hasta=${semana.fin}`)).filter((x): x is RutaDetalle => x != null);
+      if (turno !== solicitud.current) return;
       setRutas(r);
       setActualizado(new Date());
       setError('');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudieron cargar las rutas');
+      if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'No se pudieron cargar las rutas');
     } finally {
-      if (primera.current) { setCargando(false); primera.current = false; }
+      if (turno === solicitud.current) setCargando(false);
     }
   }
   useEffect(() => {
+    setCargando(true);
+    setRutas([]);
     setHistorial([]);
     setTab(semana.actual ? 'activas' : 'historial');
     void cargar();
@@ -330,7 +342,11 @@ function MonitorRutas({ integrado, semana }: { integrado: boolean; semana: Seman
   }, [semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || historial.length) return;
-    api<(RutaDetalle | null)[]>(`/rutas/historial?desde=${semana.inicio}&hasta=${semana.fin}`).then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null))).catch(() => {});
+    setCargandoHistorial(true); setError('');
+    api<(RutaDetalle | null)[]>(`/rutas/historial?desde=${semana.inicio}&hasta=${semana.fin}`)
+      .then((r) => setHistorial(r.filter((x): x is RutaDetalle => x != null)))
+      .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el historial de rutas'))
+      .finally(() => setCargandoHistorial(false));
   }, [tab, historial.length, semana.inicio, semana.fin]);
 
   return (
@@ -355,7 +371,9 @@ function MonitorRutas({ integrado, semana }: { integrado: boolean; semana: Seman
       {error && <p className="error-msg">{error}</p>}
 
       {tab === 'historial' ? (
-        historial.length === 0 ? (
+        cargandoHistorial ? (
+          <Spinner />
+        ) : historial.length === 0 ? (
           <div className="card"><p className="muted">Aún no hay rutas completadas.</p></div>
         ) : (
           historial.map((r) => <MonitorRutaCard key={r.ruta_id} ruta={r} historico />)

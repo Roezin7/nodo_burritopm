@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
+import { HttpError } from '../middleware/error.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -41,6 +42,14 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia) 
   const dispAnt = num0(actual?.cantidad_disponible);
   const dDisp = d.disponible ?? 0;
   const dispNue = r3(dispAnt + dDisp);
+  const reservadaNueva = r3(num0(actual?.cantidad_reservada) + (d.reservada ?? 0));
+  const transitoNuevo = r3(num0(actual?.cantidad_transito) + (d.transito ?? 0));
+  if (![dispNue, reservadaNueva, transitoNuevo].every(Number.isFinite)) {
+    throw new HttpError(400, 'El movimiento contiene una cantidad de inventario no válida');
+  }
+  if (dispNue < -0.0001 || reservadaNueva < -0.0001 || transitoNuevo < -0.0001) {
+    throw new HttpError(409, 'Inventario insuficiente para completar el movimiento');
+  }
 
   // Costo promedio ponderado solo cuando ENTRA disponible con costo conocido.
   let costo = num(actual?.costo_promedio);
@@ -56,14 +65,14 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia) 
       ubicacion_id: d.ubicacionId,
       product_id: d.productId,
       cantidad_disponible: dispNue,
-      cantidad_reservada: r3(d.reservada ?? 0),
-      cantidad_transito: r3(d.transito ?? 0),
+      cantidad_reservada: reservadaNueva,
+      cantidad_transito: transitoNuevo,
       costo_promedio: costo ?? null,
     },
     update: {
       cantidad_disponible: dispNue,
-      cantidad_reservada: r3(num0(actual?.cantidad_reservada) + (d.reservada ?? 0)),
-      cantidad_transito: r3(num0(actual?.cantidad_transito) + (d.transito ?? 0)),
+      cantidad_reservada: reservadaNueva,
+      cantidad_transito: transitoNuevo,
       costo_promedio: costo ?? actual?.costo_promedio ?? null,
     },
   });

@@ -23,8 +23,8 @@ incidenciasRouter.get(
     const prodIds = [...new Set(incidencias.map((i) => i.product_id).filter(Boolean))] as bigint[];
     const ubicIds = [...new Set(incidencias.map((i) => i.ubicacion_id).filter(Boolean))] as bigint[];
     const [prods, ubics] = await Promise.all([
-      prisma.products.findMany({ where: { id: { in: prodIds } }, select: { id: true, nombre: true } }),
-      prisma.ubicaciones.findMany({ where: { id: { in: ubicIds } }, select: { id: true, nombre: true } }),
+      prisma.products.findMany({ where: { negocio_id: req.auth!.negocioId, id: { in: prodIds } }, select: { id: true, nombre: true } }),
+      prisma.ubicaciones.findMany({ where: { negocio_id: req.auth!.negocioId, id: { in: ubicIds } }, select: { id: true, nombre: true } }),
     ]);
     const pName = new Map(prods.map((p) => [p.id.toString(), p.nombre]));
     const uName = new Map(ubics.map((u) => [u.id.toString(), u.nombre]));

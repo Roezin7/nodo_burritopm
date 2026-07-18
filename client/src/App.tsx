@@ -12,7 +12,23 @@ import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
 import OperacionAdmin from './screens/operacion/OperacionAdmin';
 import SemanaOperacion from './screens/operacion/SemanaOperacion';
-import { useState, useEffect, type JSX } from 'react';
+import { Component, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
+import { OperacionConfigProvider } from './operacion-config';
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean }> {
+  state = { fallo: false };
+
+  static getDerivedStateFromError() { return { fallo: true }; }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Error no controlado en la aplicación', error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.fallo) return this.props.children;
+    return <div className="app-error-fallback" role="alert"><div><span className="eyebrow">Burrito Parrilla</span><h1>No se pudo mostrar esta pantalla</h1><p>Tus datos no se modificaron. Recarga la aplicación para continuar.</p><button className="btn btn-primary" onClick={() => window.location.reload()}>Recargar aplicación</button></div></div>;
+  }
+}
 
 function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
   const { usuario } = useAuth();
@@ -83,7 +99,9 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <BrowserRouter>
-            <AppBody />
+            <OperacionConfigProvider>
+              <AppErrorBoundary><AppBody /></AppErrorBoundary>
+            </OperacionConfigProvider>
           </BrowserRouter>
         </AuthProvider>
       </ToastProvider>

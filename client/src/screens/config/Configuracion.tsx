@@ -7,6 +7,7 @@ import Unidades from './Unidades';
 import Productos from './Productos';
 import StockObjetivo from './StockObjetivo';
 import Spinner from '../../components/Spinner';
+import { useOperacionConfig } from '../../operacion-config';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
 type Tab = 'ubicaciones' | 'usuarios' | 'categorias' | 'unidades' | 'productos' | 'stock' | 'operacion';
@@ -18,7 +19,7 @@ const TABS: { clave: Tab; label: string }[] = [
   { clave: 'unidades', label: 'Unidades' },
   { clave: 'productos', label: 'Productos' },
   { clave: 'stock', label: 'Mínimos por almacén' },
-  { clave: 'operacion', label: 'Despacho' },
+  { clave: 'operacion', label: 'Operación' },
 ];
 
 const DIAS = [
@@ -40,6 +41,7 @@ const AUTO_CIERRE_OPCIONES = [
 ];
 
 function Operacion() {
+  const { repartoHabilitado, cargando: cargandoConfig, establecerRepartoHabilitado } = useOperacionConfig();
   const [verif, setVerif] = useState<boolean | null>(null);
   const [dias, setDias] = useState<number[]>([]);
   const [autoCierre, setAutoCierre] = useState(0);
@@ -52,36 +54,69 @@ function Operacion() {
       .catch(() => setError('No se pudo cargar la configuración'));
   }, []);
 
-  async function guardar(body: Record<string, unknown>) {
+  async function guardar(body: Record<string, unknown>): Promise<boolean> {
     setBusy(true); setError('');
     try {
       await api('/negocio', { method: 'PATCH', body });
+      return true;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo guardar');
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
   async function alternarVerif(valor: boolean) {
+    const anterior = verif ?? false;
     setVerif(valor);
-    await guardar({ verificacion_carga: valor });
+    if (!await guardar({ verificacion_carga: valor })) setVerif(anterior);
   }
 
   async function alternarDia(n: number) {
     const next = dias.includes(n) ? dias.filter((d) => d !== n) : [...dias, n];
+    const anterior = dias;
     setDias(next);
-    await guardar({ inventario_dias: next });
+    if (!await guardar({ inventario_dias: next })) setDias(anterior);
   }
 
   async function elegirAutoCierre(h: number) {
+    const anterior = autoCierre;
     setAutoCierre(h);
-    await guardar({ auto_cierre_horas: h });
+    if (!await guardar({ auto_cierre_horas: h })) setAutoCierre(anterior);
   }
 
-  if (verif === null) return <Spinner />;
+  async function alternarReparto(valor: boolean) {
+    establecerRepartoHabilitado(valor);
+    if (!await guardar({ reparto_habilitado: valor })) establecerRepartoHabilitado(!valor);
+  }
+
+  if (verif === null || cargandoConfig) return <Spinner />;
   return (
     <>
+      <div className="card">
+        <div className="cfg-switch">
+          <div>
+            <strong>Seguimiento de reparto</strong>
+            <p className="muted" style={{ margin: '0.2rem 0 0' }}>
+              {repartoHabilitado
+                ? 'Muestra Reparto entre Despacho y Recepción para registrar el recorrido y sus paradas.'
+                : 'Desactivado: al confirmar el despacho, el pedido pasa directamente a Recepción.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            className={`switch ${repartoHabilitado ? 'switch--on' : ''}`}
+            disabled={busy}
+            aria-label="Activar seguimiento de reparto"
+            aria-pressed={repartoHabilitado}
+            onClick={() => void alternarReparto(!repartoHabilitado)}
+          >
+            <span className="switch-knob" />
+          </button>
+        </div>
+      </div>
+
       <div className="card">
         <strong>Días de conteo físico</strong>
         <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
@@ -109,7 +144,7 @@ function Operacion() {
           <div>
             <strong>Verificación de carga</strong>
             <p className="muted" style={{ margin: '0.2rem 0 0' }}>
-              Si está activa, Bodega y reparto confirma una revisión de 1 toque antes de que el camión salga a ruta.
+              Si está activa, Bodega confirma una revisión de 1 toque antes de enviar el pedido a Reparto o Recepción.
             </p>
           </div>
           <button
@@ -159,7 +194,7 @@ export default function Configuracion() {
         <div>
             <span className="eyebrow">Administración del sistema</span>
             <h1>Configuración</h1>
-            <p className="page-sub">Empresas, restaurantes, accesos, productos y reglas de despacho.</p>
+            <p className="page-sub">Empresas, restaurantes, accesos, productos y reglas de operación.</p>
         </div>
       </header>
 

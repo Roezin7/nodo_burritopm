@@ -4,7 +4,8 @@ import { HttpError } from '../middleware/error.js';
 import { valor } from './logic.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.js';
-import { avisarPedidoEnCamino } from '../push/service.js';
+import { avisarConfirmarRecepcion, avisarPedidoEnCamino } from '../push/service.js';
+import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 
 /** Último pedido CERRADO de la sucursal: mapa product_id(string) → cantidad pedida, y su id. */
 async function pedidoCerradoSucursal(ubicacionId: bigint) {
@@ -123,20 +124,26 @@ const ESTADOS_EDITABLES = ['calculada', 'en_revision'];
 export async function sucursalesAgregables(negocioId: bigint, id: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
   if (!ESTADOS_EDITABLES.includes(dist.estado)) return [];
+  if (!dist.fecha_entrega || !dist.linea_operacion) return [];
   const enPedido = await prisma.distribucion_lineas.findMany({
     where: { distribucion_id: id },
     select: { ubicacion_destino_id: true },
     distinct: ['ubicacion_destino_id'],
   });
   const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
-  const sucursales = await prisma.ubicaciones.findMany({ where: { negocio_id: negocioId, tipo: 'sucursal', activo: true } });
-  const candidatas = [];
-  for (const s of sucursales) {
-    if (yaIds.has(s.id.toString())) continue;
-    const cerrado = await prisma.conteos.findFirst({ where: { ubicacion_id: s.id, estado: 'cerrado' }, select: { id: true } });
-    if (cerrado) candidatas.push({ id: Number(s.id), nombre: s.nombre });
-  }
-  return candidatas;
+  const pedidos = await prisma.pedidos_operativos.findMany({
+    where: {
+      negocio_id: negocioId,
+      linea_operacion: dist.linea_operacion,
+      fecha_entrega: dist.fecha_entrega,
+      estado: 'confirmado',
+      ubicacion_id: { notIn: [...yaIds].map(BigInt) },
+      lineas: { some: {} },
+    },
+    include: { ubicacion: { select: { id: true, nombre: true } } },
+    orderBy: { ubicacion: { orden_operativo: 'asc' } },
+  });
+  return pedidos.map((p) => ({ id: Number(p.ubicacion.id), nombre: p.ubicacion.nombre }));
 }
 
 /**
@@ -145,6 +152,7 @@ export async function sucursalesAgregables(negocioId: bigint, id: bigint) {
  */
 export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacionIds: number[]) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (!ESTADOS_EDITABLES.includes(dist.estado)) {
     throw new HttpError(409, 'Solo se pueden agregar sucursales a un pedido en cálculo o revisión (aún sin aprobar).');
   }
@@ -155,29 +163,72 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
   });
   const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
 
-  const sucursales = (await prisma.ubicaciones.findMany({
-    where: { negocio_id: negocioId, tipo: 'sucursal', activo: true, id: { in: ubicacionIds.map((n) => BigInt(n)) } },
-  })).filter((s) => !yaIds.has(s.id.toString()));
-  if (sucursales.length === 0) throw new HttpError(400, 'Esas sucursales ya están en el pedido o no existen.');
+  if (!dist.fecha_entrega || !dist.linea_operacion) throw new HttpError(409, 'Esta preparación anterior no admite ventas operativas nuevas');
+  const pedidos = await prisma.pedidos_operativos.findMany({
+    where: {
+      negocio_id: negocioId,
+      ubicacion_id: { in: ubicacionIds.map(BigInt), notIn: [...yaIds].map(BigInt) },
+      linea_operacion: dist.linea_operacion,
+      fecha_entrega: dist.fecha_entrega,
+      estado: 'confirmado',
+      lineas: { some: {} },
+    },
+    include: { lineas: { include: { producto: true } }, ubicacion: true },
+  });
+  if (!pedidos.length) throw new HttpError(400, 'Esas sucursales no tienen una venta confirmada pendiente para esta preparación');
 
-  const { lineasData, sinPedido } = await calcularLineasSucursales(sucursales);
-
-  if (lineasData.length === 0) {
-    const partes: string[] = [];
-    if (sinPedido.length) partes.push(`Sin pedido cerrado: ${sinPedido.join(', ')}.`);
-    throw new HttpError(400, partes.length ? `No hay nada que agregar. ${partes.join(' ')}` : 'No hay nada que agregar para esas sucursales.');
-  }
-
-  await prisma.distribucion_lineas.createMany({ data: lineasData.map((l) => ({ distribucion_id: id, ...l })) });
-  const agregadas = [...new Set(lineasData.map((l) => l.ubicacion_destino_id.toString()))]
-    .map((uid) => sucursales.find((s) => s.id.toString() === uid)?.nombre)
-    .filter((n): n is string => Boolean(n));
-  return { agregadas, lineas: lineasData.length, sin_conteo: sinPedido };
+  const lineasData = pedidos.flatMap((pedido) => pedido.lineas.map((linea) => ({
+    distribucion_id: id,
+    ubicacion_destino_id: pedido.ubicacion_id,
+    product_id: linea.product_id,
+    pedido_linea_id: linea.id,
+    cantidad_sugerida: linea.cantidad,
+    cantidad_aprobada: linea.cantidad,
+    costo_unitario: linea.producto.ultimo_costo ?? linea.producto.costo_promedio,
+    costo_total: redondear2(num0(linea.cantidad) * (num(linea.producto.ultimo_costo) ?? num(linea.producto.costo_promedio) ?? 0)),
+  })));
+  await prisma.$transaction(async (tx) => {
+    await tx.distribucion_lineas.createMany({ data: lineasData });
+    const rutas = await tx.rutas.findMany({
+      where: { distribucion_id: id },
+      include: { plantilla: { include: { paradas: true } }, paradas: true },
+      orderBy: { id: 'asc' },
+    });
+    for (const pedido of pedidos) {
+      const punto = pedido.ubicacion.entrega_en_ubicacion_id ?? pedido.ubicacion_id;
+      if (rutas.some((ruta) => ruta.paradas.some((parada) => parada.ubicacion_id === punto))) continue;
+      let ruta = rutas.find((r) => r.plantilla?.paradas.some((parada) => parada.ubicacion_id === punto));
+      if (!ruta) ruta = rutas.find((r) => r.plantilla_id == null);
+      if (!ruta) {
+        ruta = await tx.rutas.create({
+          data: { negocio_id: negocioId, distribucion_id: id, fecha_entrega: dist.fecha_entrega, nombre: 'Ruta por asignar', creado_por: dist.creado_por },
+          include: { plantilla: { include: { paradas: true } }, paradas: true },
+        });
+        rutas.push(ruta);
+      }
+      const orden = ruta.paradas.reduce((max, parada) => Math.max(max, parada.orden), 0) + 1;
+      const nueva = await tx.ruta_paradas.create({ data: { ruta_id: ruta.id, ubicacion_id: punto, orden } });
+      ruta.paradas.push(nueva);
+    }
+    await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'en_preparacion' } });
+  });
+  return { agregadas: pedidos.map((p) => p.ubicacion.nombre), lineas: lineasData.length, sin_conteo: [] };
 }
 
-/** Control total del admin: fija el estado de la distribución a cualquier valor (override). */
+/**
+ * Única reversa manual segura: devolver una preparación todavía inmóvil a revisión.
+ * Los estados posteriores a carga/recepción siempre se derivan de movimientos físicos.
+ */
 export async function cambiarEstadoAdmin(negocioId: bigint, id: bigint, estado: EstadoDistribucionValor) {
-  await cargarDistribucion(negocioId, id);
+  const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
+  if (estado !== 'en_revision' || !['calculada', 'en_revision', 'aprobada', 'verificada'].includes(dist.estado)) {
+    throw new HttpError(409, 'Ese estado no puede forzarse. Usa las acciones del flujo o elimina la preparación para reconstruirla.');
+  }
+  const movidas = await prisma.distribucion_lineas.count({
+    where: { distribucion_id: id, OR: [{ cantidad_cargada: { gt: 0 } }, { cantidad_recibida: { not: null } }] },
+  });
+  if (movidas) throw new HttpError(409, 'La preparación ya movió inventario y no puede volver manualmente a revisión');
   await prisma.distribuciones.update({ where: { id }, data: { estado } });
   return { ok: true, estado };
 }
@@ -228,12 +279,21 @@ export async function renombrarDistribucion(negocioId: bigint, id: bigint, nombr
  * Todo en una sola transacción e idempotente por movimiento.
  */
 export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuarioId: bigint) {
-  await cargarDistribucion(negocioId, id);
+  const distribucion = await cargarDistribucion(negocioId, id);
+  if (distribucion.fecha_entrega) await asegurarSemanaEditable(negocioId, distribucion.fecha_entrega.toISOString().slice(0, 10));
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
   const sello = Date.now(); // permite distinguir reversas si se reintenta
   // Pedidos de sucursal que originaron las líneas (únicos, sin nulos).
   const conteoIds = [...new Map(lineas.filter((l) => l.conteo_id != null).map((l) => [l.conteo_id!.toString(), l.conteo_id!])).values()];
+  const pedidoLineaIds = lineas.filter((l) => l.pedido_linea_id != null).map((l) => l.pedido_linea_id!);
+  const pedidosOperativos = pedidoLineaIds.length
+    ? await prisma.pedido_operativo_lineas.findMany({
+        where: { id: { in: pedidoLineaIds } },
+        select: { pedido_id: true },
+        distinct: ['pedido_id'],
+      })
+    : [];
 
   await prisma.$transaction(async (tx) => {
     for (const l of lineas) {
@@ -300,6 +360,15 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
     await tx.incidencias.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'distribucion', documento_id: id } });
     // La distribución arrastra por cascada: líneas, rutas y paradas.
     await tx.distribuciones.delete({ where: { id } });
+    // La preparación operativa no es el pedido: al eliminarla se conserva la venta y vuelve a
+    // "confirmado", permitiendo corregirla y generar de nuevo preparación/rutas sin quedar
+    // atorada para siempre en "en_preparacion".
+    if (pedidosOperativos.length) {
+      await tx.pedidos_operativos.updateMany({
+        where: { id: { in: pedidosOperativos.map((p) => p.pedido_id) }, estado: 'en_preparacion' },
+        data: { estado: 'confirmado' },
+      });
+    }
     // Se borran los pedidos de sucursal que alimentaron esta distribución (la sucursal puede
     // capturar uno nuevo ese mismo día). Si otro pedido maestro aún referencia el mismo conteo,
     // se conserva. Los pedidos de sucursal no mueven stock, así que no hay nada que revertir.
@@ -489,17 +558,25 @@ export async function consolidado(negocioId: bigint, id: bigint, vista: 'product
 /** Ajusta cantidades aprobadas (admin). Pasa la distribución a "en_revision". */
 export async function ajustarLineas(negocioId: bigint, id: bigint, ajustes: { linea_id: number; cantidad_aprobada: number }[]) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (!['calculada', 'en_revision'].includes(dist.estado)) {
     throw new HttpError(409, 'Solo se pueden ajustar distribuciones en cálculo o revisión');
   }
+  if (!ajustes.length) throw new HttpError(400, 'Incluye al menos una línea para ajustar');
+  const ids = [...new Set(ajustes.map((a) => a.linea_id))];
+  if (ids.length !== ajustes.length) throw new HttpError(400, 'La misma línea aparece más de una vez');
+  if (ajustes.some((a) => !Number.isFinite(a.cantidad_aprobada) || a.cantidad_aprobada < 0)) {
+    throw new HttpError(400, 'Las cantidades aprobadas deben ser números positivos o cero');
+  }
   const lineas = await prisma.distribucion_lineas.findMany({
-    where: { id: { in: ajustes.map((a) => BigInt(a.linea_id)) }, distribucion_id: id },
+    where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id },
   });
+  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a esta preparación');
   const porId = new Map(lineas.map((l) => [l.id.toString(), l]));
   await prisma.$transaction(
     ajustes.map((a) => {
       const l = porId.get(a.linea_id.toString());
-      const costoUnit = l ? num(l.costo_unitario) : null;
+      const costoUnit = num(l!.costo_unitario);
       return prisma.distribucion_lineas.update({
         where: { id: BigInt(a.linea_id) },
         data: { cantidad_aprobada: a.cantidad_aprobada, costo_total: valor(a.cantidad_aprobada, costoUnit) },
@@ -515,6 +592,7 @@ export async function ajustarLineas(negocioId: bigint, id: bigint, ajustes: { li
 /** Aprueba la distribución: fija cantidad_aprobada (= sugerida si no se tocó) y la congela. */
 export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuarioId: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (!['calculada', 'en_revision'].includes(dist.estado)) {
     throw new HttpError(409, 'Esta distribución ya no puede aprobarse en su estado actual');
   }
@@ -543,6 +621,7 @@ export async function aprobarDistribucionesEnRango(
   desde: string,
   hasta: string,
 ) {
+  await asegurarRangoEditable(negocioId, desde, hasta);
   const inicio = new Date(`${desde}T00:00:00.000Z`);
   const fin = new Date(`${hasta}T00:00:00.000Z`);
   const preparaciones = await prisma.distribuciones.findMany({
@@ -566,13 +645,17 @@ export async function aprobarDistribucionesEnRango(
  */
 export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   // Flujo v2: se carga directo desde "aprobada" (o desde "verificada" si el admin activó
   // la verificación opcional de 1 toque). Sin reservas ni etapas intermedias.
   if (!['aprobada', 'verificada'].includes(dist.estado)) {
     throw new HttpError(409, 'Solo se carga una distribución aprobada o verificada');
   }
   // Si la verificación está activa, no se carga sin haber verificado primero.
-  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { verificacion_carga: true } });
+  const negocio = await prisma.negocios.findUnique({
+    where: { id: negocioId },
+    select: { verificacion_carga: true, reparto_habilitado: true },
+  });
   if (negocio?.verificacion_carga && dist.estado !== 'verificada') {
     throw new HttpError(409, 'La verificación de carga está activa: verifica antes de cargar');
   }
@@ -590,7 +673,9 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
     for (const l of [...lineas].sort((a, b) => Number(a.id - b.id))) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
-      const pedida = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+      const aprobada = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
+      const solicitada = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? aprobada;
+      const pedida = Math.max(0, Math.min(solicitada, aprobada));
       const pk = l.product_id.toString();
       const disp = redondear3(restante.get(pk) ?? 0);
       const cargada = Math.max(0, Math.min(pedida, disp)); // nunca más de lo disponible
@@ -617,19 +702,54 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }],
         });
       }
-      // Persistimos lo realmente cargado (clamp): es lo que viaja y lo que la sucursal recibirá.
-      await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_cargada: cargada } });
+      if (cargada + 0.0001 < aprobada) {
+        await tx.incidencias.create({
+          data: {
+            negocio_id: negocioId,
+            tipo: 'faltante_surtido',
+            prioridad: 'media',
+            ubicacion_id: l.ubicacion_destino_id,
+            documento_tipo: 'distribucion',
+            documento_id: id,
+            distribucion_linea_id: l.id,
+            product_id: l.product_id,
+            responsable_id: usuarioId,
+            comentarios: `Aprobado ${aprobada}, cargado ${cargada} (faltante ${redondear3(aprobada - cargada)}).`,
+          },
+        });
+      }
+      // Una línea en cero no viaja ni debe obligar a la sucursal a "recibir cero" para poder
+      // cerrar la semana. Las líneas positivas quedan pendientes de recepción normal.
+      await tx.distribucion_lineas.update({
+        where: { id: l.id },
+        data: { cantidad_cargada: cargada, cantidad_recibida: cargada <= 0 ? 0 : null, estado_linea: cargada <= 0 ? 'no_surtido' : null },
+      });
     }
     // Sin existencias en bodega no hay nada que salga: no se genera tránsito ni ruta (rollback).
     if (totalCargado <= 0) {
       throw new HttpError(409, 'No hay existencias en la bodega central para surtir esta distribución. Registra un ingreso antes de cargar.');
     }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
-    // El camión cargado pone la ruta en curso (la crea si no se planeó una). Solo las sucursales
-    // que de verdad recibieron carga se convierten en paradas.
-    await asegurarRutaEnCurso(tx, negocioId, id, usuarioId, sucursalesConCarga);
-  });
-  void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
+    if (negocio?.reparto_habilitado) {
+      // Con seguimiento de reparto, el camión cargado pone las rutas planeadas en curso.
+      await asegurarRutaEnCurso(tx, negocioId, id, usuarioId, sucursalesConCarga);
+    } else {
+      // Sin seguimiento, Despacho enlaza directamente con Recepción. Conservamos la planeación
+      // como historial, pero ninguna ruta queda pendiente ni bloquea el cierre de la entrega.
+      await tx.rutas.updateMany({
+        where: { negocio_id: negocioId, distribucion_id: id, estado: 'planificada' },
+        data: { estado: 'cancelada', notas: 'Reparto desactivado: pase directo a recepción' },
+      });
+    }
+  }, { isolationLevel: 'Serializable' });
+  if (negocio?.reparto_habilitado) {
+    void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
+  } else {
+    // Sin repartidor que marque las paradas, el despacho es el evento que solicita la recepción.
+    for (const ubicacionId of sucursalesConCarga) {
+      void avisarConfirmarRecepcion(BigInt(ubicacionId)).catch(() => {});
+    }
+  }
   return { ok: true };
 }
 
@@ -721,14 +841,21 @@ export async function recibirDistribucion(
   items: { linea_id: number; cantidad: number }[],
 ) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (!['en_transito', 'parcialmente_entregada'].includes(dist.estado)) {
     throw new HttpError(409, 'Esta distribución no está en tránsito');
   }
+  if (!items.length) throw new HttpError(400, 'Incluye al menos una línea recibida');
+  const ids = [...new Set(items.map((i) => i.linea_id))];
+  if (ids.length !== items.length) throw new HttpError(400, 'La misma línea aparece más de una vez');
+  if (items.some((i) => !Number.isFinite(i.cantidad) || i.cantidad < 0)) throw new HttpError(400, 'Las cantidades recibidas no pueden ser negativas');
   const recibidaDe = new Map(items.map((i) => [i.linea_id, i.cantidad]));
 
   const lineas = await prisma.distribucion_lineas.findMany({
     where: { distribucion_id: id, ubicacion_destino_id: ubicacionId },
   });
+  const validas = new Set(lineas.map((l) => Number(l.id)));
+  if (ids.some((lineaId) => !validas.has(lineaId))) throw new HttpError(400, 'Una o más líneas no pertenecen a esta recepción');
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
 
   let incidenciaEnSucursal = false;
@@ -798,7 +925,7 @@ export async function recibirDistribucion(
     await tx.distribuciones.update({ where: { id }, data: { estado: nuevoEstado } });
     // Sella la parada de esta sucursal en la ruta (si existe).
     await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal);
-  });
+  }, { isolationLevel: 'Serializable' });
   return { ok: true };
 }
 
@@ -936,19 +1063,27 @@ async function bodegaDe(negocioId: bigint, linea?: 'carne' | 'desechables' | nul
  */
 export async function guardarCarga(negocioId: bigint, id: bigint, items: { linea_id: number; cantidad: number }[]) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (!['aprobada', 'verificada'].includes(dist.estado)) {
     throw new HttpError(409, 'Solo se puede ajustar el surtido antes de salir a ruta');
   }
-  const validas = new Set(
-    (await prisma.distribucion_lineas.findMany({
-      where: { id: { in: items.map((a) => BigInt(a.linea_id)) }, distribucion_id: id },
-      select: { id: true },
-    })).map((l) => l.id.toString()),
-  );
+  if (!items.length) throw new HttpError(400, 'Incluye al menos una línea para surtir');
+  const ids = [...new Set(items.map((i) => i.linea_id))];
+  if (ids.length !== items.length) throw new HttpError(400, 'La misma línea aparece más de una vez');
+  if (items.some((i) => !Number.isFinite(i.cantidad) || i.cantidad < 0)) throw new HttpError(400, 'Las cantidades a cargar no pueden ser negativas');
+  const lineas = await prisma.distribucion_lineas.findMany({
+      where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id },
+      select: { id: true, cantidad_aprobada: true, cantidad_sugerida: true },
+    });
+  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a esta preparación');
+  const porId = new Map(lineas.map((l) => [Number(l.id), l]));
+  for (const item of items) {
+    const linea = porId.get(item.linea_id)!;
+    const maxima = num(linea.cantidad_aprobada) ?? num0(linea.cantidad_sugerida);
+    if (item.cantidad > maxima + 0.0001) throw new HttpError(400, `La carga de la línea ${item.linea_id} no puede superar las ${maxima} unidades aprobadas`);
+  }
   await prisma.$transaction(
-    items
-      .filter((i) => validas.has(i.linea_id.toString()))
-      .map((i) => prisma.distribucion_lineas.update({ where: { id: BigInt(i.linea_id) }, data: { cantidad_cargada: i.cantidad } })),
+    items.map((i) => prisma.distribucion_lineas.update({ where: { id: BigInt(i.linea_id) }, data: { cantidad_cargada: i.cantidad } })),
   );
   return { ok: true, guardadas: items.length };
 }
@@ -959,6 +1094,7 @@ export async function guardarCarga(negocioId: bigint, id: bigint, items: { linea
  */
 export async function marcarVerificada(negocioId: bigint, id: bigint, usuarioId: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (dist.estado !== 'aprobada') throw new HttpError(409, 'Solo se verifica una distribución aprobada');
   await prisma.distribuciones.update({
     where: { id },
