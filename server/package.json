@@ -16,6 +16,7 @@
     "seed:operacion": "tsx prisma/seed-operacion.ts",
     "import:excel:3q": "tsx prisma/import-excel-3q.ts",
     "backfill:meat-supplies": "tsx prisma/backfill-meat-order-supplies.ts",
+    "backfill:weekly-snapshots": "tsx prisma/backfill-weekly-snapshots.ts",
     "reset:week29:meat": "tsx prisma/reset-week29-meat.ts",
     "test": "vitest run src"
   },

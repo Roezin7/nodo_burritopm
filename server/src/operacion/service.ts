@@ -229,6 +229,7 @@ export async function listarPedidos(
   });
   return rows.map((p) => ({
     id: Number(p.id), linea: p.linea_operacion, fecha_entrega: iso(p.fecha_entrega), estado: p.estado,
+    actualizado_at: p.actualizado_at.toISOString(),
     empresa: { ...p.empresa, id: Number(p.empresa.id) },
     ubicacion: { id: Number(p.ubicacion.id), nombre: p.ubicacion.nombre, entrega_en: p.ubicacion.entrega_en ? { id: Number(p.ubicacion.entrega_en.id), nombre: p.ubicacion.entrega_en.nombre } : null },
     notas: p.notas,
@@ -240,6 +241,7 @@ export interface GuardarPedidoInput {
   ubicacion_id: number;
   linea: LineaOperacion;
   fecha_entrega: string;
+  actualizado_at?: string | null;
   confirmar?: boolean;
   notas?: string | null;
   lineas: { product_id: number; cantidad: number; notas?: string | null }[];
@@ -297,6 +299,10 @@ export async function guardarPedido(
     let pedido = await tx.pedidos_operativos.findUnique({
       where: { ubicacion_id_linea_operacion_fecha_entrega: { ubicacion_id: ubicacion.id, linea_operacion: input.linea, fecha_entrega: fecha(input.fecha_entrega) } },
     });
+    if (pedido && input.actualizado_at !== undefined
+      && (input.actualizado_at === null || pedido.actualizado_at.toISOString() !== input.actualizado_at)) {
+      throw new HttpError(409, 'Este pedido cambió en otro dispositivo. Recarga la venta antes de volver a guardar.');
+    }
     if (pedido && !['borrador', 'confirmado'].includes(pedido.estado)) {
       throw new HttpError(409, pedido.estado === 'cerrado'
         ? 'El pedido pertenece a un cierre. Reabre la semana antes de corregirlo.'
@@ -327,7 +333,7 @@ export async function guardarPedido(
     }
     return pedido;
   });
-  return { id: Number(result.id), estado: result.estado };
+  return { id: Number(result.id), estado: result.estado, actualizado_at: result.actualizado_at.toISOString() };
 }
 
 /**
@@ -549,8 +555,8 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
   for (const l of input.lineas) {
     const p = productos.find((x) => x.id === BigInt(l.product_id))!;
     if (p.tipo_operativo === 'materia_prima' && (l.peso_total_lb ?? 0) <= 0) throw new HttpError(400, `${p.nombre} requiere peso total`);
-    if (p.tipo_operativo === 'materia_prima' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${p.nombre} debe recibirse en Carnicería`);
-    if (p.linea_operacion === 'desechables' && ubicacion.codigo === 'CARN') throw new HttpError(400, `${p.nombre} debe recibirse en Bodega Adison`);
+    if (p.linea_operacion === 'carne' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${p.nombre} debe recibirse en Carnicería`);
+    if (p.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${p.nombre} debe recibirse en Bodega Adison`);
   }
   if (ubicacion.codigo === 'CARN') await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
   const total = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
@@ -608,7 +614,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
  * o ajustada por inventario conserva su trazabilidad y debe corregirse desde la
  * operación posterior correspondiente.
  */
-export async function eliminarCompra(negocioId: bigint, compraId: bigint) {
+export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint) {
   return prisma.$transaction(async (tx) => {
     const compra = await tx.compras.findFirst({
       where: { id: compraId, negocio_id: negocioId },
@@ -622,6 +628,10 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint) {
       },
     });
     if (!compra) throw new HttpError(404, 'Compra no encontrada');
+    const datosAuditoria = {
+      fecha: iso(compra.fecha), referencia: compra.referencia, total: num0(compra.total),
+      lineas: compra.lineas.map((l) => ({ product_id: Number(l.product_id), cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total) })),
+    };
 
     const semanaCerrada = await tx.semanas_operativas.findFirst({
       where: { negocio_id: negocioId, estado: 'cerrada', inicia_at: { lte: compra.fecha }, termina_at: { gte: compra.fecha } },
@@ -665,6 +675,9 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint) {
     if (lotesIds.length) await tx.lotes_materia_prima.deleteMany({ where: { id: { in: lotesIds } } });
     await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'compra', documento_id: compra.id } });
     await tx.compras.delete({ where: { id: compra.id } });
+    await tx.auditoria_operativa.create({
+      data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar', entidad: 'compra', entidad_id: compra.id, datos: datosAuditoria },
+    });
 
     for (const [clave, grupo] of grupos) {
       const anterior = existenciasAntes.get(clave)!;
@@ -721,9 +734,26 @@ export async function guardarInventarioFinal(
     const semana = rangoSemana(input.fecha);
     if (input.fecha !== semana.hasta) throw new HttpError(400, `El inventario final de Carnicería debe capturarse el sábado ${semana.hasta}.`);
   }
+  if (new Set(input.lineas.map((l) => l.product_id)).size !== input.lineas.length) {
+    throw new HttpError(400, 'El inventario contiene productos repetidos');
+  }
   const ids = [...new Set(input.lineas.map((l) => BigInt(l.product_id)))];
-  const productos = await prisma.products.findMany({ where: { id: { in: ids }, negocio_id: negocioId, activo: true } });
+  const lineaEsperada = ubicacion.codigo === 'CARN' ? 'carne' : ubicacion.codigo === 'BOD' ? 'desechables' : undefined;
+  const productos = await prisma.products.findMany({
+    where: { id: { in: ids }, negocio_id: negocioId, activo: true, linea_operacion: lineaEsperada },
+  });
   if (productos.length !== ids.length) throw new HttpError(400, 'El inventario contiene productos no válidos');
+  if (lineaEsperada) {
+    const esperados = await prisma.products.findMany({
+      where: { negocio_id: negocioId, activo: true, linea_operacion: lineaEsperada },
+      select: { id: true, nombre: true },
+    });
+    const capturados = new Set(ids.map(String));
+    const faltantes = esperados.filter((p) => !capturados.has(p.id.toString()));
+    if (faltantes.length) {
+      throw new HttpError(400, `El inventario debe incluir todos los productos. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
+    }
+  }
   if (ubicacion.codigo === 'CARN') await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
   const existenciasPrevias = await prisma.existencias.findMany({
     where: { ubicacion_id: ubicacionId, product_id: { in: ids } },
@@ -855,13 +885,13 @@ export async function listarInventariosFinales(negocioId: bigint, ubicacionId?: 
 }
 
 /** Elimina/revierte una captura completa, incluida la versión antigua sin documento_id. */
-export async function eliminarInventarioFinal(negocioId: bigint, token: string) {
+export async function eliminarInventarioFinal(negocioId: bigint, token: string, usuarioId: bigint) {
   if (token.startsWith('conteo-')) {
     const id = BigInt(token.slice('conteo-'.length));
     const conteo = await prisma.conteos.findFirst({ where: { id, negocio_id: negocioId, notas: { startsWith: 'inventario_final_operativo' } } });
     if (!conteo) throw new HttpError(404, 'Inventario no encontrado');
     await asegurarSemanaEditable(negocioId, iso(conteo.fecha ?? conteo.creado_at));
-    return eliminarConteo(negocioId, id);
+    return eliminarConteo(negocioId, id, usuarioId);
   }
   if (!token.startsWith('legacy-')) throw new HttpError(400, 'Identificador de inventario no válido');
   const movimientoId = BigInt(token.slice('legacy-'.length));
@@ -885,6 +915,12 @@ export async function eliminarInventarioFinal(negocioId: bigint, token: string) 
       await tx.existencias.updateMany({ where: { ubicacion_id: ubicacion, product_id: movimiento.product_id }, data: { cantidad_disponible: Math.max(0, siguiente) } });
     }
     await tx.movimientos_inventario.deleteMany({ where: { id: { in: movimientos.map((m) => m.id) } } });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar', entidad: 'inventario_final_legacy', entidad_id: movimientoId,
+        datos: { clave, fecha: fechaInventario ?? null, movimientos: movimientos.length },
+      },
+    });
   }, { isolationLevel: 'Serializable' });
   return { ok: true, ajustes_revertidos: movimientos.length };
 }
@@ -999,7 +1035,7 @@ export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, 
 
 /** Revierte un batch capturado con error. Las salidas pueden dejar saldo provisional negativo
  * si ya fueron despachadas; la conciliación semanal muestra ese faltante hasta recapturarlo. */
-export async function eliminarProduccion(negocioId: bigint, produccionId: bigint) {
+export async function eliminarProduccion(negocioId: bigint, produccionId: bigint, usuarioId: bigint) {
   const produccion = await prisma.producciones.findFirst({
     where: { id: produccionId, negocio_id: negocioId },
     include: { consumos: { include: { lote: true } }, salidas: true, materia_prima: true },
@@ -1017,8 +1053,12 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
   });
   if (inventarioFinal) throw new HttpError(409, 'Elimina primero el inventario final de la semana; después corrige la producción y vuelve a capturarlo.');
 
-  const porProducto = new Map<string, number>();
-  for (const salida of produccion.salidas) porProducto.set(salida.product_id.toString(), r3((porProducto.get(salida.product_id.toString()) ?? 0) + num0(salida.cajas)));
+  const porProducto = new Map<string, { cajas: number; costo: number }>();
+  for (const salida of produccion.salidas) {
+    const clave = salida.product_id.toString();
+    const actual = porProducto.get(clave) ?? { cajas: 0, costo: 0 };
+    porProducto.set(clave, { cajas: r3(actual.cajas + num0(salida.cajas)), costo: r2(actual.costo + num0(salida.costo_total)) });
+  }
   await prisma.$transaction(async (tx) => {
     for (const consumo of produccion.consumos) {
       await tx.lotes_materia_prima.update({
@@ -1038,21 +1078,39 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
       create: { negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id, product_id: produccion.materia_prima_id, cantidad_disponible: produccion.cajas_materia_prima },
       update: { cantidad_disponible: r3(num0(materiaActual?.cantidad_disponible) + num0(produccion.cajas_materia_prima)) },
     });
-    for (const [productId, cajas] of porProducto) {
+    for (const [productId, salida] of porProducto) {
       const pid = BigInt(productId);
       const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: produccion.ubicacion_id, product_id: pid } } });
+      const cantidadActual = num0(actual?.cantidad_disponible);
+      const cantidadNueva = r3(cantidadActual - salida.cajas);
+      const ultima = await tx.produccion_salidas.findFirst({
+        where: { product_id: pid, produccion_id: { not: produccion.id }, produccion: { negocio_id: negocioId } },
+        orderBy: { id: 'desc' },
+        select: { costo_caja: true },
+      });
+      const costoActual = num(actual?.costo_promedio);
+      const valorRestante = costoActual == null ? null : Math.max(0, cantidadActual) * costoActual - salida.costo;
+      const costoRestante = cantidadNueva > 0 && valorRestante != null && valorRestante >= -0.01
+        ? r4(Math.max(0, valorRestante) / cantidadNueva)
+        : num(ultima?.costo_caja);
       await tx.existencias.upsert({
         where: { ubicacion_id_product_id: { ubicacion_id: produccion.ubicacion_id, product_id: pid } },
-        create: { negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id, product_id: pid, cantidad_disponible: -cajas },
-        update: { cantidad_disponible: r3(num0(actual?.cantidad_disponible) - cajas) },
+        create: { negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id, product_id: pid, cantidad_disponible: -salida.cajas, costo_promedio: costoRestante },
+        update: { cantidad_disponible: cantidadNueva, costo_promedio: costoRestante },
       });
+      await tx.products.update({ where: { id: pid }, data: { ultimo_costo: ultima?.costo_caja ?? null } });
     }
     await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'produccion', documento_id: produccion.id } });
     await tx.producciones.delete({ where: { id: produccion.id } });
-    for (const productId of porProducto.keys()) {
-      const ultima = await tx.produccion_salidas.findFirst({ where: { product_id: BigInt(productId), produccion: { negocio_id: negocioId } }, orderBy: { id: 'desc' }, select: { costo_caja: true } });
-      await tx.products.update({ where: { id: BigInt(productId) }, data: { ultimo_costo: ultima?.costo_caja ?? null } });
-    }
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar', entidad: 'produccion', entidad_id: produccion.id,
+        datos: {
+          fecha: iso(produccion.fecha), materia_prima_id: Number(produccion.materia_prima_id), cajas_entrada: num0(produccion.cajas_materia_prima),
+          salidas: produccion.salidas.map((s) => ({ product_id: Number(s.product_id), cajas: num0(s.cajas), costo: num0(s.costo_total) })),
+        },
+      },
+    });
   }, { isolationLevel: 'Serializable' });
   await sincronizarPreciosPedidosSemana(negocioId, [...porProducto.keys()].map(BigInt), semana.desde, semana.hasta);
   return { ok: true, produccion_id: Number(produccion.id), salidas_revertidas: produccion.salidas.length };

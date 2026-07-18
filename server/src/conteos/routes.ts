@@ -131,6 +131,6 @@ conteosRouter.delete(
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     await conteoConAcceso(req, id);
-    res.json(await svc.eliminarConteo(req.auth!.negocioId, id));
+    res.json(await svc.eliminarConteo(req.auth!.negocioId, id, req.auth!.usuarioId));
   }),
 );

@@ -44,7 +44,7 @@ authRouter.get(
 
 const loginSchema = z.object({
   usuario_id: z.coerce.number().int().positive(),
-  pin: z.string().min(3).max(12),
+  pin: z.string().regex(/^\d{4,6}$/),
 });
 
 /** POST /auth/login { usuario_id, pin } -> { token, usuario } */
@@ -64,6 +64,7 @@ authRouter.post(
       negocio_id: usuario.negocio_id.toString(),
       rol: usuario.rol,
       nombre: usuario.nombre,
+      auth_version: usuario.auth_version,
     });
     res.json({
       token,
@@ -71,6 +72,7 @@ authRouter.post(
         id: Number(usuario.id),
         nombre: usuario.nombre,
         rol: usuario.rol,
+        requiere_cambio_pin: usuario.requiere_cambio_pin,
         ubicaciones: await ubicacionesDe(usuario.id),
       },
     });
@@ -84,13 +86,14 @@ authRouter.get(
   asyncHandler(async (req, res) => {
     const usuario = await prisma.usuarios.findUnique({
       where: { id: req.auth!.usuarioId },
-      select: { id: true, nombre: true, rol: true, negocio_id: true },
+      select: { id: true, nombre: true, rol: true, negocio_id: true, requiere_cambio_pin: true },
     });
     if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
     res.json({
       id: Number(usuario.id),
       nombre: usuario.nombre,
       rol: usuario.rol,
+      requiere_cambio_pin: usuario.requiere_cambio_pin,
       negocio_id: Number(usuario.negocio_id),
       ubicaciones: await ubicacionesDe(usuario.id),
     });
@@ -98,8 +101,8 @@ authRouter.get(
 );
 
 const cambiarPinSchema = z.object({
-  pin_actual: z.string().min(3).max(12),
-  pin_nuevo: z.string().min(4).max(12),
+  pin_actual: z.string().regex(/^\d{4,6}$/),
+  pin_nuevo: z.string().regex(/^\d{4,6}$/).refine((pin) => !['1234', '4321'].includes(pin), { message: 'Elige un PIN distinto al temporal' }),
 });
 
 /** POST /auth/cambiar-pin { pin_actual, pin_nuevo } */
@@ -114,7 +117,7 @@ authRouter.post(
     }
     await prisma.usuarios.update({
       where: { id: usuario.id },
-      data: { pin_hash: await bcrypt.hash(pin_nuevo, 10) },
+      data: { pin_hash: await bcrypt.hash(pin_nuevo, 10), auth_version: { increment: 1 }, requiere_cambio_pin: false },
     });
     res.json({ ok: true });
   }),
@@ -191,7 +194,7 @@ authRouter.post(
       .object({
         nombre: z.string().min(1),
         rol,
-        pin: z.string().min(4).max(12),
+        pin: z.string().regex(/^\d{4,6}$/),
         ubicacion_ids: z.array(z.coerce.number().int().positive()).optional().default([]),
       })
       .parse(req.body);
@@ -236,7 +239,12 @@ authRouter.patch(
       const ubic = await validarUbicaciones(req.auth!.negocioId, b.ubicacion_ids);
       await setUbicaciones(id, ubic);
     }
-    await prisma.usuarios.update({ where: { id }, data: { nombre: b.nombre, rol: b.rol, activo: b.activo } });
+    const revocarSesiones = (b.rol !== undefined && b.rol !== usuario.rol)
+      || (b.activo !== undefined && b.activo !== usuario.activo);
+    await prisma.usuarios.update({
+      where: { id },
+      data: { nombre: b.nombre, rol: b.rol, activo: b.activo, auth_version: revocarSesiones ? { increment: 1 } : undefined },
+    });
     res.json({ ok: true });
   }),
 );
@@ -267,10 +275,13 @@ authRouter.post(
   soloAdmin,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
-    const { pin_nuevo } = z.object({ pin_nuevo: z.string().min(4).max(12) }).parse(req.body);
+    const { pin_nuevo } = z.object({ pin_nuevo: z.string().regex(/^\d{4,6}$/) }).parse(req.body);
     const usuario = await prisma.usuarios.findFirst({ where: { id, negocio_id: req.auth!.negocioId } });
     if (!usuario) throw new HttpError(404, 'Usuario no encontrado');
-    await prisma.usuarios.update({ where: { id }, data: { pin_hash: await bcrypt.hash(pin_nuevo, 10) } });
+    await prisma.usuarios.update({
+      where: { id },
+      data: { pin_hash: await bcrypt.hash(pin_nuevo, 10), auth_version: { increment: 1 }, requiere_cambio_pin: ['1234', '4321'].includes(pin_nuevo) },
+    });
     res.json({ ok: true });
   }),
 );

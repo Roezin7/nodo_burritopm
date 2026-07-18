@@ -175,7 +175,13 @@ async function main() {
   }
 
   let reparto = await prisma.usuarios.findFirst({ where: { negocio_id: org.id, rol: 'encargado_bodega', activo: true }, orderBy: { id: 'asc' } });
-  if (!reparto) reparto = await prisma.usuarios.create({ data: { negocio_id: org.id, nombre: 'Bodega y reparto', rol: 'encargado_bodega', pin_hash: await bcrypt.hash(process.env.SEED_REPARTO_PIN ?? '4321', 10) } });
+  if (!reparto) {
+    if (process.env.NODE_ENV === 'production' && !process.env.SEED_REPARTO_PIN) {
+      throw new Error('SEED_REPARTO_PIN es obligatorio para crear el usuario de bodega en producción');
+    }
+    reparto = await prisma.usuarios.create({ data: { negocio_id: org.id, nombre: 'Bodega y reparto', rol: 'encargado_bodega', pin_hash: await bcrypt.hash(process.env.SEED_REPARTO_PIN ?? '4321', 10), requiere_cambio_pin: true } });
+  }
+  if (await bcrypt.compare('4321', reparto.pin_hash)) await prisma.usuarios.update({ where: { id: reparto.id }, data: { requiere_cambio_pin: true } });
   const adison = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: org.id, codigo: 'BOD' } });
   for (const ubicacion_id of [adison.id, carniceria.id]) await prisma.usuario_ubicaciones.upsert({ where: { usuario_id_ubicacion_id: { usuario_id: reparto.id, ubicacion_id } }, update: {}, create: { usuario_id: reparto.id, ubicacion_id } });
   console.log('✅ Operación 3Q preparada: empresas, ubicaciones, productos, proveedores y 8 rutas.');

@@ -204,16 +204,38 @@ export async function fijarInventarioInicialSemanal(negocioId: bigint, usuarioId
 }
 
 export async function validarConciliacionParaCierre(negocioId: bigint, desde: string, hasta: string) {
-  const [pedidosCarne, producciones] = await Promise.all([
+  const [pedidosCarne, producciones, negativos] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) }, estado: { notIn: ['borrador', 'cancelado'] } },
     }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
+    prisma.existencias.findMany({
+      where: { negocio_id: negocioId, ubicaciones: { tipo: 'bodega' }, cantidad_disponible: { lt: 0 } },
+      include: { products: { select: { nombre: true } }, ubicaciones: { select: { nombre: true } } },
+    }),
   ]);
+  if (negativos.length) {
+    throw new HttpError(409, `Hay saldos provisionales sin conciliar: ${negativos.map((e) => `${e.products.nombre} (${e.ubicaciones.nombre})`).join(', ')}.`);
+  }
   if (!pedidosCarne && !producciones) return;
   const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
   if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
   if (!reporte.final_capturado) throw new HttpError(409, 'Falta capturar el inventario físico final de Carnicería antes de cerrar.');
+  const [productos, lineasFinales] = await Promise.all([
+    prisma.products.findMany({
+      where: { negocio_id: negocioId, activo: true, linea_operacion: 'carne' },
+      select: { id: true, nombre: true },
+    }),
+    prisma.conteo_lineas.findMany({
+      where: { conteo_id: BigInt(reporte.inventario_final_id!) },
+      select: { product_id: true },
+    }),
+  ]);
+  const contados = new Set(lineasFinales.map((l) => l.product_id.toString()));
+  const faltantes = productos.filter((p) => !contados.has(p.id.toString()));
+  if (faltantes.length) {
+    throw new HttpError(409, `El inventario final está incompleto. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
+  }
 }
 
 /** Repara pedidos que dicen estar preparados pero ya no tienen ninguna línea vinculada. */

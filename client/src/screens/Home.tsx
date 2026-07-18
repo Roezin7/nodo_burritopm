@@ -26,10 +26,6 @@ function TareaHoy({ repartoHabilitado }: { repartoHabilitado: boolean }) {
           if (recep.some((d) => d.lineas.some((l) => l.recibida == null))) {
             return { titulo: 'Confirma tu recepción', sub: 'Llegó un pedido a tu sucursal', ruta: '/recepcion' };
           }
-          const ses = await api<{ programado: boolean; conteo: { estado: string } | null }>(`/conteos/sesion?ubicacion=${suc.id}`);
-          if (ses.programado && ses.conteo?.estado !== 'cerrado') {
-            return { titulo: 'Hoy toca pedido', sub: 'Captura carne o desechables para tu próxima entrega', ruta: '/pedidos' };
-          }
           return { titulo: 'Captura tu pedido', sub: 'Carne y desechables por fecha de entrega', ruta: '/pedidos' };
         }
         if (usuario.rol === 'encargado_bodega') {

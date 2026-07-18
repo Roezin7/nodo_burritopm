@@ -46,7 +46,7 @@ const csp = {
 };
 // HSTS solo tiene sentido bajo HTTPS; en HTTP el navegador lo ignora. Lo dejamos
 // apagado para no forzar HTTPS mientras el dominio sea HTTP (sslip.io sin TLS).
-app.use(helmet({ contentSecurityPolicy: isProd ? csp : false, hsts: false }));
+app.use(helmet({ contentSecurityPolicy: isProd ? csp : false, hsts: isProd }));
 
 // CORS: por defecto solo mismo origen (el despliegue es un solo servicio). Si se
 // define ALLOWED_ORIGINS, se habilitan esos orígenes; si no, no se emiten cabeceras
@@ -69,7 +69,8 @@ const limiteGeneral = rateLimit({
 // Límite estricto al login (anti fuerza bruta del PIN).
 const limiteLogin = rateLimit({
   windowMs: 15 * 60_000,
-  max: 30,
+  max: 10,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados intentos de inicio de sesión. Espera unos minutos e intenta de nuevo.' },

@@ -11,9 +11,11 @@ export const existenciasRouter = Router();
 // Retiros directos de bodega: admin + Bodega y reparto.
 const bodegaCrew = requireRole('admin', 'encargado_bodega');
 
-async function bodegaCentral(negocioId: bigint) {
-  const b = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, tipo: 'bodega', activo: true }, orderBy: { id: 'asc' } });
-  if (!b) throw new HttpError(400, 'No hay una bodega central activa');
+async function bodegaDeProducto(negocioId: bigint, linea: 'carne' | 'desechables' | null) {
+  const codigo = linea === 'carne' ? 'CARN' : linea === 'desechables' ? 'BOD' : null;
+  if (!codigo) throw new HttpError(400, 'El producto no tiene una línea operativa configurada');
+  const b = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, codigo, tipo: 'bodega', activo: true } });
+  if (!b) throw new HttpError(400, `No hay un almacén ${codigo} activo`);
   return b;
 }
 
@@ -38,12 +40,14 @@ existenciasRouter.post(
       .parse(req.body);
 
     const negocioId = req.auth!.negocioId;
-    const bodega = await bodegaCentral(negocioId);
     const producto = await prisma.products.findFirst({
       where: { id: BigInt(b.product_id), negocio_id: negocioId },
-      include: { existencias: { where: { ubicacion_id: bodega.id } } },
     });
     if (!producto) throw new HttpError(404, 'Producto no encontrado');
+    if (producto.tipo_operativo === 'materia_prima') throw new HttpError(409, 'La materia prima solo se corrige desde Compras, Producción o Inventario final para conservar sus lotes.');
+    const bodega = await bodegaDeProducto(negocioId, producto.linea_operacion);
+    if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, 'No tienes acceso a este almacén');
+    const existencia = await prisma.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: producto.id } } });
 
     let destino: { id: bigint; nombre: string } | null = null;
     if (b.destino_ubicacion_id != null) {
@@ -55,7 +59,7 @@ existenciasRouter.post(
       destino = d;
     }
 
-    const costo = num(producto.existencias[0]?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+    const costo = num(existencia?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
     const key = `retiro:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
     await prisma.$transaction((tx) =>
@@ -104,14 +108,16 @@ existenciasRouter.post(
       .parse(req.body);
 
     const negocioId = req.auth!.negocioId;
-    const bodega = await bodegaCentral(negocioId);
     const producto = await prisma.products.findFirst({
       where: { id: BigInt(b.product_id), negocio_id: negocioId },
-      include: { existencias: { where: { ubicacion_id: bodega.id } } },
     });
     if (!producto) throw new HttpError(404, 'Producto no encontrado');
+    if (producto.tipo_operativo === 'materia_prima') throw new HttpError(409, 'Registra la materia prima en Compras para crear el lote con cajas, peso y costo.');
+    const bodega = await bodegaDeProducto(negocioId, producto.linea_operacion);
+    if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, 'No tienes acceso a este almacén');
+    const existencia = await prisma.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: producto.id } } });
 
-    const costo = b.costo_unitario ?? num(producto.existencias[0]?.costo_promedio) ?? num(producto.ultimo_costo);
+    const costo = b.costo_unitario ?? num(existencia?.costo_promedio) ?? num(producto.ultimo_costo);
     const key = `ingreso:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
     await prisma.$transaction(async (tx) => {

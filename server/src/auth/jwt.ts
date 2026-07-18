@@ -8,6 +8,7 @@ export interface JwtPayload {
   negocio_id: string;
   rol: Rol;
   nombre: string;
+  auth_version: number;
 }
 
 const EXPIRA_EN = '30d'; // sesión larga: es una tablet/dispositivo dedicado

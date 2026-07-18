@@ -703,7 +703,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           comentario: 'Carga al camión (salida de bodega)',
           idempotencyKey: `carga:${l.id}`,
           deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }],
-          permitirDisponibleNegativo: true,
+          permitirDisponibleNegativo: bodega.codigo === 'CARN',
         });
       }
       if (cargada + 0.0001 < aprobada) {

@@ -14,21 +14,32 @@ declare global {
 }
 
 /** Exige un JWT válido; adjunta req.auth con IDs ya convertidos a BigInt. */
-export const requireAuth: RequestHandler = (req, _res, next) => {
+export const requireAuth: RequestHandler = async (req, _res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    throw new HttpError(401, 'Falta el token de autenticación');
+    next(new HttpError(401, 'Falta el token de autenticación'));
+    return;
   }
   try {
     const payload = verificarToken(header.slice(7));
+    const usuarioId = BigInt(payload.sub);
+    const usuario = await prisma.usuarios.findFirst({
+      where: { id: usuarioId, activo: true },
+      select: { negocio_id: true, nombre: true, rol: true, auth_version: true },
+    });
+    if (!usuario
+      || usuario.negocio_id.toString() !== payload.negocio_id
+      || usuario.auth_version !== payload.auth_version) {
+      throw new HttpError(401, 'La sesión ya no es válida');
+    }
     req.auth = {
-      ...payload,
-      negocioId: BigInt(payload.negocio_id),
-      usuarioId: BigInt(payload.sub),
+      ...payload, nombre: usuario.nombre, rol: usuario.rol,
+      negocioId: usuario.negocio_id,
+      usuarioId,
     };
     next();
-  } catch {
-    throw new HttpError(401, 'Token inválido o expirado');
+  } catch (error) {
+    next(error instanceof HttpError ? error : new HttpError(401, 'Token inválido o expirado'));
   }
 };
 

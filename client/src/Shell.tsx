@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth, rolLabel } from './auth';
 import { useTema } from './theme';
@@ -6,6 +6,7 @@ import { Icono } from './icons';
 import { useOffline } from './offline';
 import BurritoLockup from './brand/BurritoLockup';
 import { useOperacionConfig } from './operacion-config';
+import { api, ApiError } from './api';
 
 import type { Rol } from './auth';
 
@@ -43,6 +44,37 @@ const GRUPOS = [
 
 // En móvil mostramos pocas pestañas y el resto en una hoja "Más" (accesible al pulgar).
 const MAX_PRIMARIOS = 4;
+
+function AvisoPinTemporal() {
+  const { usuario, logout } = useAuth();
+  const [abierto, setAbierto] = useState(false);
+  const [actual, setActual] = useState('');
+  const [nuevo, setNuevo] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!usuario?.requiere_cambio_pin) return null;
+
+  async function guardar(e: FormEvent) {
+    e.preventDefault(); setError('');
+    if (!/^\d{4,6}$/.test(actual) || !/^\d{4,6}$/.test(nuevo)) { setError('Usa de 4 a 6 dígitos.'); return; }
+    setBusy(true);
+    try {
+      await api('/auth/cambiar-pin', { method: 'POST', body: { pin_actual: actual, pin_nuevo: nuevo } });
+      logout();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo cambiar el PIN.'); }
+    finally { setBusy(false); }
+  }
+
+  return <form className="notice notice--warning temporary-pin" onSubmit={(e) => void guardar(e)}>
+    <div><strong>Protege este acceso</strong><span> Estás usando un PIN temporal. Cámbialo antes de continuar usando producción.</span></div>
+    {abierto ? <>
+      <input aria-label="PIN actual" inputMode="numeric" type="password" maxLength={6} placeholder="PIN actual" value={actual} onChange={(e) => setActual(e.target.value.replace(/\D/g, ''))} />
+      <input aria-label="PIN nuevo" inputMode="numeric" type="password" maxLength={6} placeholder="PIN nuevo" value={nuevo} onChange={(e) => setNuevo(e.target.value.replace(/\D/g, ''))} />
+      <button className="btn btn-primary btn-sm" disabled={busy} type="submit">{busy ? 'Guardando…' : 'Cambiar PIN'}</button>
+      {error && <small className="error-msg">{error}</small>}
+    </> : <button className="btn btn-secondary btn-sm" type="button" onClick={() => setAbierto(true)}>Cambiar PIN</button>}
+  </form>;
+}
 
 export default function Shell({ children }: { children: ReactNode }) {
   const { usuario, logout } = useAuth();
@@ -144,7 +176,7 @@ export default function Shell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="content">{children}</main>
+        <main className="content"><AvisoPinTemporal />{children}</main>
       </div>
 
       {/* Nav inferior — móvil/tablet: pocas pestañas + "Más" para el resto */}

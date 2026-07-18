@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import Spinner from '../components/Spinner';
+import { crearSemana, etiquetaRango, moverSemana, semanasAlrededor } from '../semana';
 
 interface Panorama {
   periodo: { anio: number; semana: number; inicia_at: string; termina_at: string; estado: string };
@@ -24,12 +25,23 @@ function Desglose({ filas }: { filas: { label: string; valor: number; tono?: str
 export default function PanelAdmin() {
   const [p, setP] = useState<Panorama | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { api<Panorama>('/dashboard/general').then(setP).catch(() => setError('No se pudo cargar el panorama general.')); }, []);
+  const [semana, setSemana] = useState(crearSemana());
+  const opciones = semanasAlrededor(crearSemana());
+  useEffect(() => {
+    setP(null); setError('');
+    api<Panorama>(`/dashboard/general?semana=${semana.inicio}`).then(setP).catch(() => setError('No se pudo cargar el panorama general.'));
+  }, [semana.inicio]);
   if (error) return <p className="error-msg">{error}</p>;
   if (!p) return <Spinner label="Calculando panorama…" />;
 
   const maxEmpresa = Math.max(1, ...p.ventas.por_empresa.map((e) => e.total));
   return <div className="panel-admin overview">
+    <section className="global-week-picker overview-week-picker" aria-label="Semana del panorama">
+      <button className="icon-btn" aria-label="Semana anterior" onClick={() => setSemana(moverSemana(semana, -1))}>←</button>
+      <label><span>Panorama general</span><select value={semana.inicio} onChange={(e) => setSemana(crearSemana(e.target.value))}>{opciones.map((s) => <option key={s.inicio} value={s.inicio}>Semana {s.numero} · {s.anio} · {etiquetaRango(s)}</option>)}</select></label>
+      <button className="icon-btn" aria-label="Semana siguiente" onClick={() => setSemana(moverSemana(semana, 1))}>→</button>
+      {!semana.actual && <button className="btn btn-ghost btn-sm" onClick={() => setSemana(crearSemana())}>Semana actual</button>}
+    </section>
     <div className="overview-head">
       <div><h2>Panorama semanal</h2><p className="muted">Semana {p.periodo.semana} · {fecha(p.periodo.inicia_at)}–{fecha(p.periodo.termina_at)} · {p.periodo.estado}</p></div>
       <span className={`chip ${p.ventas.fuente === 'facturado' ? 'chip--ok' : 'chip--info'}`}>{p.ventas.fuente === 'facturado' ? 'Facturado' : 'Proyección en curso'}</span>

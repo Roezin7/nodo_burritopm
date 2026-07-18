@@ -21,12 +21,18 @@ async function main() {
 
   // 2) Admin de arranque: solo si NO existe ningún admin (seguro de correr en cada deploy;
   //    no duplica si ya creaste el tuyo, p. ej. "Martin").
-  const admin = await prisma.usuarios.findFirst({ where: { negocio_id: org.id, rol: 'admin' } });
+  let admin = await prisma.usuarios.findFirst({ where: { negocio_id: org.id, rol: 'admin', activo: true } });
   if (!admin) {
-    await prisma.usuarios.create({
-      data: { negocio_id: org.id, nombre: 'Admin', rol: 'admin', pin_hash: await bcrypt.hash(PIN_INICIAL, 10) },
+    if (process.env.NODE_ENV === 'production' && !process.env.SEED_ADMIN_PIN) {
+      throw new Error('SEED_ADMIN_PIN es obligatorio para crear el primer administrador en producción');
+    }
+    admin = await prisma.usuarios.create({
+      data: { negocio_id: org.id, nombre: 'Admin', rol: 'admin', pin_hash: await bcrypt.hash(PIN_INICIAL, 10), requiere_cambio_pin: true },
     });
     console.log(`  + usuario admin "Admin" (PIN inicial: ${PIN_INICIAL})`);
+  }
+  if (admin && (await bcrypt.compare('1234', admin.pin_hash))) {
+    await prisma.usuarios.update({ where: { id: admin.id }, data: { requiere_cambio_pin: true } });
   }
 
   if (DEMO) await sembrarDemo(org.id);

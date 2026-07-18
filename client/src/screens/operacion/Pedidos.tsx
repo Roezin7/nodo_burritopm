@@ -15,7 +15,7 @@ interface Catalogo {
   semanas: { id: number; anio: number; semana: number; inicia_at: string; termina_at: string; estado: string }[];
 }
 interface Pedido {
-  id: number; linea: Linea; fecha_entrega: string; estado: string; notas?: string | null;
+  id: number; linea: Linea; fecha_entrega: string; estado: string; actualizado_at: string; notas?: string | null;
   empresa: { id: number; nombre: string; codigo: string };
   ubicacion: { id: number; nombre: string; entrega_en: { id: number; nombre: string } | null };
   lineas: { id: number; product_id: number; nombre: string; sku: string; cantidad: number; precio: number | null }[];
@@ -71,6 +71,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [impresion, setImpresion] = useState<{ linea: Linea; inicio: string; fin: string; pedidos: Pedido[] } | null>(null);
   const [cargandoImpresion, setCargandoImpresion] = useState(false);
   const [estado, setEstado] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [refrescoHistorial, setRefrescoHistorial] = useState(0);
@@ -111,18 +112,19 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
 
   useEffect(() => {
     if (vista !== 'captura' || !ubicacionId || !fecha) {
-      setEstado(null); setNotas(''); setCantidades({}); setCargandoPedido(false);
+      setEstado(null); setVersion(null); setNotas(''); setCantidades({}); setCargandoPedido(false);
       return;
     }
     let vigente = true;
     setCargandoPedido(true);
-    setEstado(null); setNotas(''); setCantidades({});
+    setEstado(null); setVersion(null); setNotas(''); setCantidades({});
     setError('');
     api<Pedido[]>(`/operacion/pedidos?ubicacion_id=${ubicacionId}&linea=${linea}&desde=${fecha}&hasta=${fecha}`)
       .then((rows) => {
         if (!vigente) return;
         const p = rows[0];
         setEstado(p?.estado ?? null);
+        setVersion(p?.actualizado_at ?? null);
         setNotas(p?.notas ?? '');
         const cargadas = Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, String(l.cantidad)]));
         const pastorBpm = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-BPM');
@@ -156,15 +158,16 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
     if (!ubicacionId) return;
     setBusy(true); setError('');
     try {
-      const r = await api<{ estado: string } | Encolado>('/operacion/pedidos', {
+      const r = await api<{ estado: string; actualizado_at: string } | Encolado>('/operacion/pedidos', {
         method: 'PUT',
-        body: { ubicacion_id: Number(ubicacionId), linea, fecha_entrega: fecha, confirmar, notas: notas.trim() || null, lineas: productos.map((p) => ({ product_id: p.id, cantidad: Number(cantidades[p.id] || 0) })) },
+        body: { ubicacion_id: Number(ubicacionId), linea, fecha_entrega: fecha, actualizado_at: version, confirmar, notas: notas.trim() || null, lineas: productos.map((p) => ({ product_id: p.id, cantidad: Number(cantidades[p.id] || 0) })) },
       });
       if (fueEncolado(r)) {
         toast.ok('Venta guardada sin conexión; se enviará automáticamente al recuperar la red.');
         return;
       }
       setEstado(r.estado);
+      setVersion(r.actualizado_at);
       toast.ok(confirmar ? 'Pedido confirmado.' : 'Avance guardado.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar.'); }
     finally { setBusy(false); }

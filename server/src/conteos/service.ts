@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
@@ -255,15 +256,15 @@ export async function reabrirConteo(negocioId: bigint, conteoId: bigint) {
  * las existencias para dejar el stock como estaba antes, y borra sus movimientos de ajuste.
  * Si nunca se cerró, solo borra la sesión. Las líneas caen por cascada. Todo atómico.
  */
-export async function eliminarConteo(negocioId: bigint, conteoId: bigint) {
-  const conteo = await prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
+export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId: bigint, conteoId: bigint, usuarioId: bigint, accion = 'eliminar') {
+  const conteo = await tx.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
 
-  const movs = await prisma.movimientos_inventario.findMany({
+  const movs = await tx.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId },
     select: { product_id: true, tipo: true, cantidad: true },
   });
-  const ajustesLote = await prisma.conteo_ajustes_lote.findMany({ where: { conteo_id: conteoId } });
+  const ajustesLote = await tx.conteo_ajustes_lote.findMany({ where: { conteo_id: conteoId } });
   // Neto firmado que el conteo aplicó a existencias por producto (+ sumó, − restó).
   const neto = new Map<string, number>();
   for (const m of movs) {
@@ -272,32 +273,43 @@ export async function eliminarConteo(negocioId: bigint, conteoId: bigint) {
     neto.set(k, (neto.get(k) ?? 0) + signo * num0(m.cantidad));
   }
 
-  await prisma.$transaction(async (tx) => {
-    for (const [pid, d] of neto) {
-      if (d === 0) continue;
-      const existencia = await tx.existencias.findUnique({
-        where: { ubicacion_id_product_id: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) } },
-      });
-      const siguiente = num0(existencia?.cantidad_disponible) - d;
-      await tx.existencias.updateMany({
-        where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) },
-        // Al reabrir una semana puede quedar un déficit provisional hasta recapturar la
-        // producción. Es preferible mostrarlo en auditoría a inventar existencias.
-        data: { cantidad_disponible: siguiente },
-      });
-    }
-    for (const ajuste of ajustesLote) {
-      await tx.lotes_materia_prima.update({
-        where: { id: ajuste.lote_id },
-        data: {
-          cajas_disponibles: { increment: ajuste.cajas },
-          peso_disponible_lb: { increment: ajuste.peso_lb },
-          costo_disponible: { increment: ajuste.costo },
-        },
-      });
-    }
-    await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId } });
-    await tx.conteos.delete({ where: { id: conteoId } });
-  }, { isolationLevel: 'Serializable' });
+  for (const [pid, d] of neto) {
+    if (d === 0) continue;
+    const existencia = await tx.existencias.findUnique({
+      where: { ubicacion_id_product_id: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) } },
+    });
+    const siguiente = num0(existencia?.cantidad_disponible) - d;
+    await tx.existencias.updateMany({
+      where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(pid) },
+      // Al reabrir una semana puede quedar un déficit provisional hasta recapturar la
+      // producción. Es preferible mostrarlo en auditoría a inventar existencias.
+      data: { cantidad_disponible: siguiente },
+    });
+  }
+  for (const ajuste of ajustesLote) {
+    await tx.lotes_materia_prima.update({
+      where: { id: ajuste.lote_id },
+      data: {
+        cajas_disponibles: { increment: ajuste.cajas },
+        peso_disponible_lb: { increment: ajuste.peso_lb },
+        costo_disponible: { increment: ajuste.costo },
+      },
+    });
+  }
+  await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId } });
+  await tx.conteos.delete({ where: { id: conteoId } });
+  await tx.auditoria_operativa.create({
+    data: {
+      negocio_id: negocioId, usuario_id: usuarioId, accion, entidad: 'conteo', entidad_id: conteoId,
+      datos: { ubicacion_id: Number(conteo.ubicacion_id), fecha: conteo.fecha?.toISOString().slice(0, 10) ?? null, notas: conteo.notas },
+    },
+  });
   return { ok: true };
+}
+
+export async function eliminarConteo(negocioId: bigint, conteoId: bigint, usuarioId: bigint) {
+  return prisma.$transaction(
+    (tx) => eliminarConteoEnTx(tx, negocioId, conteoId, usuarioId),
+    { isolationLevel: 'Serializable' },
+  );
 }

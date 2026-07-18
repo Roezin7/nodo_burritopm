@@ -2146,6 +2146,10 @@ form > .form-actions,
   padding: 0.8rem 1rem;
 }
 .notice--warning { border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); background: color-mix(in srgb, var(--warning) 9%, var(--surface)); }
+.temporary-pin { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; margin: 0 0 1rem; }
+.temporary-pin > div { flex: 1 1 22rem; }
+.temporary-pin input { width: 9rem; min-height: 2.5rem; }
+.temporary-pin .error-msg { flex-basis: 100%; margin: 0; }
 
 .app-error-fallback { min-height: 100dvh; display: grid; place-items: center; padding: 2rem; background: var(--bg); color: var(--ink); }
 .app-error-fallback > div { width: min(100%, 34rem); padding: 2rem; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); box-shadow: 0 18px 60px rgb(0 0 0 / 16%); }

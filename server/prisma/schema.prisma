@@ -100,6 +100,8 @@ model negocios {
   compras            compras[]
   producciones       producciones[]
   semanas_operativas semanas_operativas[]
+  inventario_semanal inventario_semanal[]
+  auditoria_operativa auditoria_operativa[]
   facturas           facturas[]
 }
 
@@ -110,6 +112,9 @@ model usuarios {
   rol        RolUsuario @default(encargado_sucursal)
   pin_hash   String
   activo     Boolean    @default(true)
+  // Se incrementa al cambiar PIN, rol o estado para revocar sesiones anteriores.
+  auth_version Int      @default(1)
+  requiere_cambio_pin Boolean @default(false)
   creado_at  DateTime   @default(now()) @db.Timestamptz(6)
   negocios   negocios   @relation(fields: [negocio_id], references: [id])
 
@@ -161,6 +166,7 @@ model ubicaciones {
   producciones        producciones[]
   facturas            facturas[]
   lotes_materia_prima lotes_materia_prima[]
+  inventario_semanal  inventario_semanal[]
 
   @@unique([negocio_id, codigo])
   @@index([negocio_id])
@@ -293,6 +299,7 @@ model products {
   produccion_salidas  produccion_salidas[]
   factura_lineas      factura_lineas[]
   lotes_materia_prima lotes_materia_prima[]
+  inventario_semanal  inventario_semanal[]
 
   @@unique([negocio_id, sku])
   @@unique([negocio_id, nombre])
@@ -887,9 +894,51 @@ model semanas_operativas {
   negocios       negocios         @relation(fields: [negocio_id], references: [id])
   distribuciones distribuciones[]
   facturas       facturas[]
+  inventario_semanal inventario_semanal[]
 
   @@unique([negocio_id, anio, semana])
   @@index([negocio_id, termina_at])
+}
+
+// Fotografía contable del inventario al cerrar cada semana. Los libros históricos
+// nunca deben depender del saldo vivo ni de costos editados después del cierre.
+model inventario_semanal {
+  semana_id           BigInt
+  negocio_id          BigInt
+  ubicacion_id        BigInt
+  product_id          BigInt
+  cantidad_disponible Decimal  @db.Decimal(12, 3)
+  cantidad_reservada  Decimal  @db.Decimal(12, 3)
+  cantidad_transito   Decimal  @db.Decimal(12, 3)
+  costo_promedio      Decimal? @db.Decimal(12, 4)
+  creado_at           DateTime @default(now()) @db.Timestamptz(6)
+
+  semana   semanas_operativas @relation(fields: [semana_id], references: [id], onDelete: Cascade)
+  negocio  negocios            @relation(fields: [negocio_id], references: [id])
+  ubicacion ubicaciones         @relation(fields: [ubicacion_id], references: [id])
+  producto products             @relation(fields: [product_id], references: [id])
+
+  @@id([semana_id, ubicacion_id, product_id])
+  @@index([negocio_id, semana_id])
+  @@index([product_id])
+}
+
+// Bitácora append-only de eliminaciones/correcciones materiales. No tiene relación
+// al usuario para conservar el evento incluso si esa cuenta se elimina después.
+model auditoria_operativa {
+  id          BigInt   @id @default(autoincrement())
+  negocio_id  BigInt
+  usuario_id  BigInt
+  accion      String
+  entidad     String
+  entidad_id  BigInt?
+  datos       Json
+  creado_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  negocio negocios @relation(fields: [negocio_id], references: [id])
+
+  @@index([negocio_id, creado_at])
+  @@index([entidad, entidad_id])
 }
 
 model facturas {

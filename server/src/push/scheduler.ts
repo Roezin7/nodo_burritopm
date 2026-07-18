@@ -15,16 +15,37 @@ const diaSemanaEnTz = (d: Date, tz: string) =>
 const horaEnTz = (d: Date, tz: string) =>
   Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hour12: false }).format(d));
 
-/** Sucursales activas de un negocio sin pedido cerrado en la fecha dada (ISO yyyy-mm-dd). */
-async function sucursalesSinCerrar(negocioId: bigint, hoyISO: string) {
-  const sucursales = await prisma.ubicaciones.findMany({ where: { negocio_id: negocioId, tipo: 'sucursal', activo: true } });
-  const pendientes = [];
-  for (const s of sucursales) {
-    const cerrado = await prisma.conteos.findFirst({
-      where: { ubicacion_id: s.id, fecha: new Date(`${hoyISO}T00:00:00.000Z`), estado: 'cerrado' },
-      select: { id: true },
-    });
-    if (!cerrado) pendientes.push(s);
+/** Sucursales/líneas programadas hoy que todavía no tienen una venta confirmada. */
+async function pedidosPendientes(negocioId: bigint, hoyISO: string, dia: number) {
+  const plantillas = await prisma.plantillas_ruta.findMany({
+    where: { negocio_id: negocioId, dia_semana: dia, activo: true },
+    include: { paradas: { where: { opcional: false }, select: { ubicacion_id: true } } },
+  });
+  if (!plantillas.length) return [];
+  const sucursales = await prisma.ubicaciones.findMany({
+    where: { negocio_id: negocioId, tipo: 'sucursal', activo: true, empresa_cliente_id: { not: null } },
+  });
+  const pedidos = await prisma.pedidos_operativos.findMany({
+    where: {
+      negocio_id: negocioId,
+      fecha_entrega: new Date(`${hoyISO}T00:00:00.000Z`),
+      estado: { notIn: ['borrador', 'cancelado'] },
+    },
+    select: { ubicacion_id: true, linea_operacion: true },
+  });
+  const capturados = new Set(pedidos.map((p) => `${p.ubicacion_id}:${p.linea_operacion}`));
+  const pendientes: { sucursal: (typeof sucursales)[number]; linea: 'carne' | 'desechables' }[] = [];
+  const agregados = new Set<string>();
+  for (const plantilla of plantillas) {
+    const destinos = new Set(plantilla.paradas.map((p) => p.ubicacion_id.toString()));
+    for (const sucursal of sucursales) {
+      const destino = sucursal.entrega_en_ubicacion_id ?? sucursal.id;
+      const clave = `${sucursal.id}:${plantilla.linea_operacion}`;
+      if (destinos.has(destino.toString()) && !capturados.has(clave) && !agregados.has(clave)) {
+        pendientes.push({ sucursal, linea: plantilla.linea_operacion });
+        agregados.add(clave);
+      }
+    }
   }
   return pendientes;
 }
@@ -41,7 +62,7 @@ export async function tickAvisos() {
 
   for (const n of negocios) {
     const tz = n.zona_horaria;
-    if (!n.inventario_dias.includes(diaSemanaEnTz(ahora, tz))) continue;
+    const dia = diaSemanaEnTz(ahora, tz);
     const hora = horaEnTz(ahora, tz);
     if (hora < HORA_AVISO) continue;
     const hoy = fechaISOEnTz(ahora, tz);
@@ -50,17 +71,24 @@ export async function tickAvisos() {
     if (!n.aviso_inventario_at || n.aviso_inventario_at.toISOString().slice(0, 10) !== hoy) {
       // Marca primero para evitar doble envío si hay solapamiento.
       await prisma.negocios.update({ where: { id: n.id }, data: { aviso_inventario_at: new Date(`${hoy}T00:00:00.000Z`) } });
-      for (const s of await sucursalesSinCerrar(n.id, hoy)) {
-        const usuarios = await usuariosDeUbicacion(s.id);
-        await enviarAUsuarios(usuarios, { titulo: 'Hoy toca pedido 📋', cuerpo: `Elige cuánto producto quieres recibir en ${s.nombre}.`, url: '/inventario' });
+      const pendientes = await pedidosPendientes(n.id, hoy, dia);
+      const porSucursal = new Map<string, { sucursal: (typeof pendientes)[number]['sucursal']; lineas: string[] }>();
+      for (const p of pendientes) {
+        const actual = porSucursal.get(p.sucursal.id.toString()) ?? { sucursal: p.sucursal, lineas: [] };
+        actual.lineas.push(p.linea);
+        porSucursal.set(p.sucursal.id.toString(), actual);
+      }
+      for (const { sucursal, lineas } of porSucursal.values()) {
+        const usuarios = await usuariosDeUbicacion(sucursal.id);
+        await enviarAUsuarios(usuarios, { titulo: 'Hoy toca pedido 📋', cuerpo: `Captura ${lineas.join(' y ')} para ${sucursal.nombre}.`, url: '/pedidos' });
       }
     }
 
     // 2) Aviso al admin de rezagados, más tarde y una sola vez al día.
     if (hora >= HORA_REZAGADOS && (!n.aviso_rezagados_at || n.aviso_rezagados_at.toISOString().slice(0, 10) !== hoy)) {
       await prisma.negocios.update({ where: { id: n.id }, data: { aviso_rezagados_at: new Date(`${hoy}T00:00:00.000Z`) } });
-      const pendientes = await sucursalesSinCerrar(n.id, hoy);
-      await avisarAdminRezagados(n.id, pendientes.length);
+      const pendientes = await pedidosPendientes(n.id, hoy, dia);
+      await avisarAdminRezagados(n.id, new Set(pendientes.map((p) => p.sucursal.id.toString())).size);
     }
   }
 }
@@ -69,13 +97,13 @@ export async function tickAvisos() {
 export async function tickAutoCierre() {
   const negocios = await prisma.negocios.findMany({ where: { auto_cierre_horas: { gt: 0 } }, select: { id: true, auto_cierre_horas: true } });
   for (const n of negocios) {
-    await autoCerrarTransitoVencido(n.id, n.auto_cierre_horas).catch(() => {});
+    await autoCerrarTransitoVencido(n.id, n.auto_cierre_horas).catch((error) => console.error('Error en auto-cierre de tránsito', error));
   }
 }
 
 async function tick() {
-  await tickAvisos().catch(() => {});
-  await tickAutoCierre().catch(() => {});
+  await tickAvisos().catch((error) => console.error('Error enviando avisos de pedidos', error));
+  await tickAutoCierre().catch((error) => console.error('Error ejecutando auto-cierre', error));
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;

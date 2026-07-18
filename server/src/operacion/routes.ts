@@ -34,7 +34,7 @@ operacionRouter.get('/pedidos', requireRole('admin', 'encargado_sucursal'), asyn
 
 const lineaPedido = z.object({ product_id: id, cantidad: z.coerce.number().nonnegative(), notas: z.string().trim().max(300).nullable().optional() });
 operacionRouter.put('/pedidos', requireRole('admin', 'encargado_sucursal'), asyncHandler(async (req, res) => {
-  const b = z.object({ ubicacion_id: id, linea, fecha_entrega: fecha, confirmar: z.boolean().optional(), notas: z.string().trim().max(500).nullable().optional(), lineas: z.array(lineaPedido) }).parse(req.body);
+  const b = z.object({ ubicacion_id: id, linea, fecha_entrega: fecha, actualizado_at: z.string().datetime().nullable().optional(), confirmar: z.boolean().optional(), notas: z.string().trim().max(500).nullable().optional(), lineas: z.array(lineaPedido) }).parse(req.body);
   if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, BigInt(b.ubicacion_id)))) throw new HttpError(403, 'No tienes acceso a esa ubicación');
   res.json(await svc.guardarPedido(req.auth!.negocioId, req.auth!.usuarioId, b, req.auth!.rol === 'admin'));
 }));
@@ -94,7 +94,7 @@ operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
 
 /** Revierte una compra mientras su inventario/lote todavía no haya sido utilizado. */
 operacionRouter.delete('/compras/:id', soloAdmin, asyncHandler(async (req, res) => {
-  res.json(await svc.eliminarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id))));
+  res.json(await svc.eliminarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
 }));
 
 /** Captura directa del inventario físico final, en el mismo orden del libro semanal. */
@@ -117,7 +117,7 @@ operacionRouter.get('/inventarios-finales', soloAdmin, asyncHandler(async (req, 
 /** Revierte y elimina una captura completa sin dejar saldos negativos. */
 operacionRouter.delete('/inventarios-finales/:token', soloAdmin, asyncHandler(async (req, res) => {
   const token = z.string().regex(/^(conteo|legacy)-\d+$/).parse(req.params.token);
-  res.json(await svc.eliminarInventarioFinal(req.auth!.negocioId, token));
+  res.json(await svc.eliminarInventarioFinal(req.auth!.negocioId, token, req.auth!.usuarioId));
 }));
 
 operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => {
@@ -130,7 +130,7 @@ operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => 
 
 /** Elimina un batch incorrecto y revierte materia prima, salidas y movimientos. */
 operacionRouter.delete('/produccion/:id', soloAdmin, asyncHandler(async (req, res) => {
-  res.json(await svc.eliminarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id))));
+  res.json(await svc.eliminarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
 }));
 
 operacionRouter.patch('/lotes/:id', soloAdmin, asyncHandler(async (req, res) => {

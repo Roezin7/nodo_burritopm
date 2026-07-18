@@ -64,7 +64,22 @@ export function suscribir(l: Listener): () => void {
 }
 
 export async function encolar(req: Omit<PendingReq, 'id' | 'ts'>) {
-  await (await db()).add(STORE, { ...req, ts: Date.now() });
+  const d = await db();
+  // Una venta se guarda como documento completo. Si se vuelve a editar sin conexión,
+  // conserva únicamente la versión más reciente del mismo restaurante/línea/fecha.
+  if (req.method === 'PUT' && req.path === '/operacion/pedidos' && req.body && typeof req.body === 'object') {
+    const actual = req.body as { ubicacion_id?: number; linea?: string; fecha_entrega?: string };
+    for (const [index, pendiente] of (await d.getAll(STORE) as PendingReq[]).entries()) {
+      if (pendiente.method !== req.method || pendiente.path !== req.path || !pendiente.body || typeof pendiente.body !== 'object') continue;
+      const anterior = pendiente.body as typeof actual;
+      if (anterior.ubicacion_id === actual.ubicacion_id && anterior.linea === actual.linea && anterior.fecha_entrega === actual.fecha_entrega) {
+        const keys = await d.getAllKeys(STORE);
+        const key = keys[index];
+        if (key !== undefined) await d.delete(STORE, key);
+      }
+    }
+  }
+  await d.add(STORE, { ...req, ts: Date.now() });
   await notificar();
 }
 

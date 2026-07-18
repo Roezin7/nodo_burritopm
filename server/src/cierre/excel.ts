@@ -34,10 +34,10 @@ async function datos(negocioId: bigint, semanaId: bigint) {
     },
   });
   if (!semana) throw new HttpError(404, 'Semana no encontrada');
-  const [pedidos, compras, producciones, existencias, productos, ubicaciones] = await Promise.all([
+  const [pedidos, compras, producciones, snapshot, existenciasVivas, productos, ubicaciones] = await Promise.all([
     prisma.pedidos_operativos.findMany({
-      where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { not: 'cancelado' } },
-      include: { ubicacion: true, empresa: true, lineas: { include: { producto: true }, orderBy: { producto: { orden_operativo: 'asc' } } } },
+      where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['borrador', 'cancelado'] } },
+      include: { ubicacion: true, empresa: true, lineas: { include: { producto: true, distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } } },
       orderBy: [{ fecha_entrega: 'asc' }, { ubicacion: { orden_operativo: 'asc' } }],
     }),
     prisma.compras.findMany({
@@ -48,10 +48,14 @@ async function datos(negocioId: bigint, semanaId: bigint) {
       where: { negocio_id: negocioId, fecha: { gte: semana.inicia_at, lte: semana.termina_at } },
       include: { materia_prima: true, salidas: { include: { producto: true } } }, orderBy: { fecha: 'asc' },
     }),
+    prisma.inventario_semanal.findMany({ where: { semana_id: semana.id }, include: { producto: true, ubicacion: true } }),
     prisma.existencias.findMany({ where: { negocio_id: negocioId }, include: { products: true, ubicaciones: true } }),
     prisma.products.findMany({ where: { negocio_id: negocioId, activo: true, linea_operacion: { not: null } }, orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }] }),
     prisma.ubicaciones.findMany({ where: { negocio_id: negocioId }, include: { empresa_cliente: true }, orderBy: { orden_operativo: 'asc' } }),
   ]);
+  const existencias = snapshot.length
+    ? snapshot.map((e) => ({ ...e, products: e.producto, ubicaciones: e.ubicacion }))
+    : existenciasVivas;
   return { semana, pedidos, compras, producciones, existencias, productos, ubicaciones };
 }
 
@@ -127,7 +131,16 @@ function valorPedido(d: Datos, linea: 'carne' | 'desechables' | null, codigo: st
     .filter((p) => (linea == null || p.linea_operacion === linea) && p.ubicacion.codigo === codigo && (dia == null || p.fecha_entrega.getUTCDay() === dia))
     .flatMap((p) => p.lineas)
     .filter((l) => l.product_id === productId)
-    .reduce((a, l) => a + num0(l.cantidad), 0);
+    .reduce((a, l) => a + (l.distribucion_lineas.length
+      ? l.distribucion_lineas.reduce((total, dl) => total + num0(dl.cantidad_recibida ?? dl.cantidad_cargada ?? dl.cantidad_aprobada ?? dl.cantidad_sugerida), 0)
+      : num0(l.cantidad)), 0);
+}
+
+function precioFacturado(d: Datos, productIds: bigint[]) {
+  const ids = new Set(productIds.map(String));
+  const lineas = d.semana.facturas.flatMap((f) => f.lineas).filter((l) => l.product_id != null && ids.has(l.product_id.toString()));
+  const cantidad = lineas.reduce((a, l) => a + num0(l.cantidad), 0);
+  return cantidad > 0 ? lineas.reduce((a, l) => a + num0(l.importe), 0) / cantidad : null;
 }
 
 function llenarWeeklyOrder(wb: ExcelJS.Workbook, d: Datos) {
@@ -312,9 +325,13 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   for (const row of [...new Set(filas)]) {
     const productosFila = carne.filter((p) => FILA_BILLING[p.sku] === row);
     const referencia = productosFila[0]!;
-    const basePrice = referencia.tipo_operativo === 'precio_fijo' || referencia.tipo_operativo === 'servicio'
-      ? Number(referencia.precio_venta_fijo ?? referencia.ultimo_costo ?? referencia.costo_promedio ?? 0)
-      : Number(referencia.ultimo_costo ?? referencia.costo_promedio ?? 0);
+    const precioFactura = precioFacturado(d, productosFila.map((p) => p.id));
+    const markup = referencia.tipo_operativo === 'proteina' ? Number(referencia.markup_caja ?? 0) : 0;
+    const basePrice = precioFactura != null
+      ? Math.max(0, precioFactura - markup)
+      : (referencia.tipo_operativo === 'precio_fijo' || referencia.tipo_operativo === 'servicio'
+          ? Number(referencia.precio_venta_fijo ?? referencia.ultimo_costo ?? referencia.costo_promedio ?? 0)
+          : Number(referencia.ultimo_costo ?? referencia.costo_promedio ?? 0));
     ws.getCell(row, 3).value = basePrice;
     for (const [codigo, col] of Object.entries(COLUMNA_BILLING)) {
       const qty = productosFila.reduce((total, p) => total + valorPedido(d, 'carne', codigo, p.id), 0);
@@ -324,12 +341,11 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   }
   for (const [codigo, col] of Object.entries(COLUMNA_BILLING)) {
     const facturas = d.semana.facturas.filter((f) => f.ubicacion.codigo === codigo);
-    const carne = facturas.filter((f) => f.linea_operacion === 'carne').reduce((a, f) => a + num0(f.total), 0);
-    const base = d.productos.filter((p) => p.linea_operacion === 'carne').reduce((a, p) => {
-      const precio = p.tipo_operativo === 'precio_fijo' || p.tipo_operativo === 'servicio'
-        ? Number(p.precio_venta_fijo ?? p.ultimo_costo ?? p.costo_promedio ?? 0)
-        : Number(p.ultimo_costo ?? p.costo_promedio ?? 0);
-      return a + valorPedido(d, 'carne', codigo, p.id) * precio;
+    const facturasCarne = facturas.filter((f) => f.linea_operacion === 'carne');
+    const carne = facturasCarne.reduce((a, f) => a + num0(f.total), 0);
+    const base = facturasCarne.flatMap((f) => f.lineas).reduce((a, l) => {
+      const markup = l.producto?.tipo_operativo === 'proteina' ? Number(l.producto.markup_caja ?? 0) : 0;
+      return a + Math.max(0, num0(l.importe) - num0(l.cantidad) * markup);
     }, 0);
     const desechables = facturas.filter((f) => f.linea_operacion === 'desechables').reduce((a, f) => a + num0(f.total), 0);
     ws.getCell(20, col).value = r2(base);
@@ -381,7 +397,13 @@ function llenarLibroCliente(wb: ExcelJS.Workbook, d: Datos, tipo: 'lbt' | 'auror
     const precioPorProducto = new Map(facturas.flatMap((f) => f.lineas).filter((l) => l.product_id != null).map((l) => [l.product_id!.toString(), num0(l.precio_unitario)]));
     const detalles = d.pedidos
       .filter((p) => p.ubicacion.codigo === codigo)
-      .flatMap((p) => p.lineas.map((l) => ({ fecha: p.fecha_entrega, linea: p.linea_operacion, producto: l.producto, cantidad: num0(l.cantidad), precio: precioPorProducto.get(l.product_id.toString()) ?? num0(l.precio_unitario) })))
+      .flatMap((p) => p.lineas.map((l) => ({
+        fecha: p.fecha_entrega, linea: p.linea_operacion, producto: l.producto,
+        cantidad: l.distribucion_lineas.length
+          ? l.distribucion_lineas.reduce((total, dl) => total + num0(dl.cantidad_recibida ?? dl.cantidad_cargada ?? dl.cantidad_aprobada ?? dl.cantidad_sugerida), 0)
+          : num0(l.cantidad),
+        precio: precioPorProducto.get(l.product_id.toString()) ?? num0(l.precio_unitario),
+      })))
       .sort((a, b) => a.fecha.getTime() - b.fecha.getTime() || a.producto.orden_operativo - b.producto.orden_operativo);
     let filaCarne = 10;
     let filaAurora = 10;

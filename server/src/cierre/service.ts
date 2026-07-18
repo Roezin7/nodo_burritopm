@@ -4,7 +4,7 @@ import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { preciosVentaSemana } from '../operacion/service.js';
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
-import { eliminarConteo } from '../conteos/service.js';
+import { eliminarConteoEnTx } from '../conteos/service.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -54,13 +54,15 @@ export function numeroFactura(anio: number, semana: number, empresa: string, ubi
   return `${anio}-${String(semana).padStart(2, '0')}-${limpio(empresa, 8)}-${limpio(ubicacion, 12)}-${linea === 'carne' ? 'M' : 'D'}`;
 }
 
-async function valuacionInventario(negocioId: bigint) {
+type Db = Prisma.TransactionClient | typeof prisma;
+
+async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
   const [existencias, lotes] = await Promise.all([
-    prisma.existencias.findMany({
+    db.existencias.findMany({
       where: { negocio_id: negocioId, OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }] },
       include: { products: { select: { linea_operacion: true, tipo_operativo: true } }, ubicaciones: { select: { nombre: true } } },
     }),
-    prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
+    db.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
   ]);
   let desechables = 0;
   let terminada = 0;
@@ -75,18 +77,18 @@ async function valuacionInventario(negocioId: bigint) {
   return { valor_carne: r2(terminada + fresca), valor_congelado: r2(congelada), valor_desechables: r2(desechables) };
 }
 
-async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: Date) {
-  const inv = await valuacionInventario(negocioId);
-  const desde = sumarDias(terminaAt, -20); // semana actual + dos anteriores completas
-  const facturas = await prisma.facturas.findMany({
-    where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] }, emitida_at: { gte: desde, lte: terminaAt } },
+async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: Date, db: Db = prisma) {
+  const inv = await valuacionInventario(negocioId, db);
+  const facturas = await db.facturas.findMany({
+    // Cuentas por cobrar es el saldo completo, no solo las últimas tres semanas.
+    where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] }, emitida_at: { lte: terminaAt } },
     include: { pagos: true },
   });
   const cobrar = r2(facturas.reduce((a, f) => a + Math.max(0, num0(f.total) - f.pagos.reduce((x, p) => x + num0(p.monto), 0)), 0));
-  const compras = await prisma.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' }, select: { total: true } });
+  const compras = await db.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' }, select: { total: true } });
   const pagar = r2(compras.reduce((a, c) => a + num0(c.total), 0));
   const balance = r2(inv.valor_carne + inv.valor_congelado + inv.valor_desechables + cobrar - pagar);
-  await prisma.semanas_operativas.update({ where: { id: semanaId }, data: { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance } });
+  await db.semanas_operativas.update({ where: { id: semanaId }, data: { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance } });
   return { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance };
 }
 
@@ -161,7 +163,9 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
     }
   }
 
-  const facturas = await prisma.$transaction(async (tx) => {
+  const cierre = await prisma.$transaction(async (tx) => {
+    const vigente = await tx.semanas_operativas.findUnique({ where: { id: semana.id }, select: { estado: true } });
+    if (vigente?.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
     // Conserva todo el historial para que un recierre genere v2, v3, etc. Consultar solo las
     // facturas vigentes hacía que una semana reabierta intentara crear otra v1 y chocara con
     // la llave única.
@@ -186,11 +190,22 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       for (const l of p.lineas) await tx.pedido_operativo_lineas.update({ where: { id: l.id }, data: { precio_unitario: precios.get(l.product_id.toString()) ?? l.precio_unitario } });
     }
     await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'cerrado' } });
+    const existencias = await tx.existencias.findMany({ where: { negocio_id: negocioId } });
+    await tx.inventario_semanal.deleteMany({ where: { semana_id: semana.id } });
+    if (existencias.length) {
+      await tx.inventario_semanal.createMany({
+        data: existencias.map((e) => ({
+          semana_id: semana.id, negocio_id: negocioId, ubicacion_id: e.ubicacion_id, product_id: e.product_id,
+          cantidad_disponible: e.cantidad_disponible, cantidad_reservada: e.cantidad_reservada,
+          cantidad_transito: e.cantidad_transito, costo_promedio: e.costo_promedio,
+        })),
+      });
+    }
     await tx.semanas_operativas.update({ where: { id: semana.id }, data: { estado: 'cerrada', cerrado_por: usuarioId, cerrado_at: new Date() } });
-    return creadas;
-  });
-  const balance = await calcularBalance(negocioId, semana.id, semana.termina_at);
-  return { semana_id: Number(semana.id), anio: semana.anio, semana: semana.semana, facturas: facturas.length, balance };
+    const balance = await calcularBalance(negocioId, semana.id, semana.termina_at, tx);
+    return { facturas: creadas.length, balance };
+  }, { isolationLevel: 'Serializable' });
+  return { semana_id: Number(semana.id), anio: semana.anio, semana: semana.semana, ...cierre };
 }
 
 export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuarioId: bigint) {
@@ -219,15 +234,17 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
     orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     select: { id: true },
   });
-  await prisma.$transaction([
-    prisma.facturas.updateMany({ where: { semana_id: s.id, estado: 'emitida' }, data: { estado: 'anulada' } }),
-    prisma.semanas_operativas.update({ where: { id: s.id }, data: { estado: 'reabierta', cerrado_at: null, cerrado_por: null } }),
-    prisma.pedidos_operativos.updateMany({ where: { id: { in: conPreparacion } }, data: { estado: 'en_preparacion' } }),
-    prisma.pedidos_operativos.updateMany({ where: { id: { in: sinPreparacion } }, data: { estado: 'confirmado' } }),
-  ]);
-  // El inventario físico era el ancla del cierre anterior. Se revierte para que compras y
-  // producción retroactivas se apliquen una sola vez; el admin lo captura de nuevo al terminar.
-  for (const inventario of inventariosFinales) await eliminarConteo(negocioId, inventario.id);
+  await prisma.$transaction(async (tx) => {
+    const vigente = await tx.semanas_operativas.findUnique({ where: { id: s.id }, select: { estado: true } });
+    if (vigente?.estado !== 'cerrada') throw new HttpError(409, 'La semana ya fue reabierta');
+    await tx.facturas.updateMany({ where: { semana_id: s.id, estado: 'emitida' }, data: { estado: 'anulada' } });
+    await tx.semanas_operativas.update({ where: { id: s.id }, data: { estado: 'reabierta', cerrado_at: null, cerrado_por: null } });
+    await tx.pedidos_operativos.updateMany({ where: { id: { in: conPreparacion } }, data: { estado: 'en_preparacion' } });
+    await tx.pedidos_operativos.updateMany({ where: { id: { in: sinPreparacion } }, data: { estado: 'confirmado' } });
+    // El ajuste físico y la semana se revierten juntos; nunca queda una reapertura parcial.
+    for (const inventario of inventariosFinales) await eliminarConteoEnTx(tx, negocioId, inventario.id, usuarioId, 'reabrir_semana');
+    await tx.inventario_semanal.deleteMany({ where: { semana_id: s.id } });
+  }, { isolationLevel: 'Serializable' });
   // La apertura se fija después de quitar el ajuste final. Esto también repara semanas antiguas
   // que fueron cerradas antes de que existiera la fotografía de inventario inicial.
   if (carniceria) await asegurarInventarioInicialSemanal(negocioId, usuarioId, iso(s.inicia_at), carniceria.id);

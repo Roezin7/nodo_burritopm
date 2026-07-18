@@ -41,6 +41,7 @@ export interface Usuario {
   id: number;
   nombre: string;
   rol: Rol;
+  requiere_cambio_pin?: boolean;
   ubicaciones?: UbicacionAsignada[];
 }
 

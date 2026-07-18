@@ -1,10 +1,8 @@
 # NODO · Burrito Parrilla Mexicana
 
-Sistema de **abastecimiento centralizado** (bodega central + ~15 sucursales) como **PWA**.
-Cada sucursal captura un **pedido directo** (cuánto quiere recibir, sin conteo físico ni stock
-objetivo); el sistema consolida los pedidos cerrados en un pedido maestro y el admin lo revisa
-y aprueba. La **bodega central** sí lleva inventario físico: su conteo cerrado reconcilia
-existencias y la carga del camión nunca excede lo disponible.
+Sistema operativo y contable de **Burrito Parrilla Mexicana** como **PWA**. Integra las dos
+operaciones físicas: carne en Carnicería y desechables en Bodega Addison, además de empresas,
+restaurantes, rutas, ventas, facturas, inventario y cierre semanal.
 UI en español · USD · `America/Chicago`.
 
 Proyecto independiente derivado del esqueleto de NODO (repo, base de datos y servicio
@@ -24,9 +22,10 @@ Monorepo con despliegue de **un solo servicio**: el servidor Node sirve la API R
 │       ├── auth/         PIN + JWT, roles, asignación de ubicación
 │       ├── ubicaciones/  bodega + sucursales
 │       ├── catalogo/     categorías, unidades, productos por ubicación
-│       ├── conteos/      pedido de sucursal / conteo físico de bodega (máquina de estados)
-│       ├── distribuciones/  abastecimiento, consolidado, aprobación (+ tests)
-│       └── dashboard/    panel del admin
+│       ├── operacion/     compras, producción, ventas y conciliación semanal
+│       ├── distribuciones/ preparación, despacho, recepción y reparto opcional
+│       ├── cierre/        facturación, balance y libros Excel
+│       └── dashboard/     panorama seleccionable por semana
 ├── client/          PWA (React + Vite + vite-plugin-pwa) → build a server/public
 ├── reference/       código de NODO conservado para fases posteriores (IA de conteo)
 └── package.json     workspaces npm
@@ -34,16 +33,15 @@ Monorepo con despliegue de **un solo servicio**: el servidor Node sirve la API R
 
 ## Modelo
 
-Organización (`negocios`, una fila) → **ubicaciones** (bodega | sucursal) → inventario por
-`(negocio_id, ubicacion_id)`. Roles: `admin`, `encargado_bodega`, `encargado_sucursal`,
-`repartidor`. Cantidades `Decimal(12,3)`; costos/factores `Decimal(12,4)`.
+Organización (`negocios`) → empresas de facturación → **ubicaciones** (bodega | sucursal) →
+inventario por `(ubicacion_id, product_id)`. Roles: `admin`, `encargado_bodega` y
+`encargado_sucursal`. Cantidades `Decimal(12,3)`; costos/factores `Decimal(12,4)`.
 
-**Flujo:** el encargado de cada sucursal captura su **pedido** (las cantidades que quiere
-recibir) y lo cierra → el admin **crea la distribución** copiando los pedidos cerrados →
-revisa el consolidado (por producto / por sucursal, con disponibilidad de bodega y faltante)
-→ ajusta y **aprueba** → bodega surte y carga (topado a sus existencias reales), reparto y
-recepción en sucursal. El conteo físico de sucursal ya no existe: solo la bodega concilia
-existencias con su conteo.
+**Flujo semanal:** Compras → Producción → Ventas → Preparación → Despacho → Reparto opcional →
+Recepción → Inventario final → Cierre. La captura habitual se concentra en compras, producción
+y ventas; los demás pasos muestran o validan lo que el sistema deriva. En carne se permiten
+saldos provisionales durante la semana para capturar la producción retroactivamente el sábado,
+pero el cierre exige inventario físico completo y ningún saldo negativo.
 
 ## Puesta en marcha (local)
 
@@ -85,6 +83,8 @@ Servicio propio + PostgreSQL propio. Build con el `Dockerfile` (single-service, 
 **Variables de entorno (Coolify):**
 - `DATABASE_URL` — Postgres de Coolify (red interna: `...@<servicio-db>:5432/...?sslmode=disable`).
 - `JWT_SECRET` — valor largo y aleatorio.
+- `SEED_ADMIN_PIN` y `SEED_REPARTO_PIN` — obligatorios en una instalación nueva de producción;
+  no se usan para sobrescribir cuentas que ya existen.
 - `ALLOWED_ORIGINS` — el dominio público (ej. `https://abasto.burritoparrilla.com`).
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` — avisos web push
   (`npx web-push generate-vapid-keys`). Si faltan, la app corre sin avisos.
@@ -93,44 +93,30 @@ Servicio propio + PostgreSQL propio. Build con el `Dockerfile` (single-service, 
 **HTTPS con dominio es obligatorio** para PWA/push (Coolify lo da con Let's Encrypt). En
 iPhone/iPad el push solo funciona con la **PWA instalada** (Compartir → Agregar a inicio).
 
-Al arrancar, el contenedor aplica `prisma migrate deploy`, crea el admin si hace falta y ejecuta
-el **bootstrap operativo idempotente**. Este último completa empresas, productos, proveedores y
-rutas faltantes sin sobrescribir cambios hechos por el admin. También carga una sola vez el snapshot
-histórico 3Q incluido en la imagen (pedidos, inventarios, facturación y cuentas por pagar); los
-despliegues posteriores reconocen la marca de importación y no restablecen cambios del admin
-(admin inicial `Admin`, PIN `1234` — cámbialo).
+Al arrancar como usuario sin privilegios, el contenedor aplica `prisma migrate deploy`, crea las
+cuentas iniciales si hacen falta y ejecuta el **bootstrap operativo idempotente**. Este último
+completa empresas, productos, proveedores y rutas faltantes sin borrar compras, producción,
+pedidos, inventario ni facturas capturadas por el admin.
+
+Las importaciones históricas, backfills y reinicios de semana quedan disponibles como comandos
+manuales, pero **no se ejecutan durante un deploy**. En particular, un redeploy no vuelve a importar
+los Excel ni reinicia la semana 29. (En desarrollo local, el PIN inicial por defecto es `1234`).
 Healthcheck: `/api/health`. Datos de prueba (sucursales/usuarios): scripts en `server/scripts/`.
 
-## Estado por bloque (Fase 1 — MVP)
+## Integridad y trazabilidad
 
-- [x] Bloque 0 — Bootstrap (proyecto nuevo, auth, PWA, re-marca)
-- [x] Bloque 1 — Organización + ubicaciones
-- [x] Bloque 2 — Usuarios, roles y asignación de ubicación
-- [x] Bloque 3 — Catálogo (categorías, unidades, productos con conversiones)
-- [x] Bloque 4 — Stock objetivo por (producto, ubicación)
-- [x] Bloque 5 — Conteo físico por ubicación (tablet)
-- [x] Bloque 6 — Abastecimiento + consolidado + aprobación
-- [x] Bloque 7 — Panel del administrador
-
-### Fase 2 — operación de bodega y entregas
-
-- [x] Bloque 8 — Ledger de movimientos + existencias (conteo cerrado siembra existencias)
-- [x] Bloque 9 — Preparación (picking), reserva en bodega y doble verificación
-- [x] Bloque 10 — Carga del camión y tránsito
-- [x] Bloque 11 — Recepción en sucursal e incidencias por diferencias
-
-Cadena de trazabilidad: pedido de sucursal → distribución → aprobación → **reserva** → preparación →
-**verificación (2ª persona)** → carga → **tránsito** → recepción → **incidencia**. Cada paso
-físico escribe un movimiento idempotente y actualiza `existencias` (disponible / reservada /
-tránsito) con costo promedio ponderado al recibir.
-
-**Siguiente (Fase 3 — compras y costos):** proveedores, sugerencias y órdenes de compra,
-recepción en bodega, reportes financieros de inventario.
+- Compras de materia prima crean lotes con cajas variables, peso total y costo total.
+- Producción consume lotes FIFO y calcula yield, costo por caja y precio semanal `costo + $15`
+  únicamente para proteínas.
+- Cerrar y reabrir una semana es atómico. Cada cierre congela cantidades y costos para que el
+  dashboard y los Excel históricos no cambien con el inventario vivo.
+- Cambiar PIN, rol o estado revoca sesiones anteriores. Los pedidos offline llevan versión y una
+  captura antigua se rechaza en vez de sobrescribir una corrección posterior.
+- Eliminaciones de compras, producción e inventarios dejan una entrada en la bitácora operativa.
 
 ## Reglas de oro
 
 - Todo registro lleva `negocio_id`; el inventario se scopea además por `ubicacion_id`.
-- La sucursal **pide directo**: su pedido cerrado es lo que el admin revisa y aprueba; no
-  toca existencias. Solo el conteo de **bodega** reconcilia inventario.
+- La sucursal pide directo; la existencia cambia al despachar/recibir y al conciliar almacenes.
 - Cada encargado solo opera sus ubicaciones asignadas (gating en backend, no solo UI).
 - Un pedido cerrado y una distribución aprobada no cambian en silencio.

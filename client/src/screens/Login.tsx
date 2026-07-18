@@ -36,7 +36,7 @@ export default function Login() {
     if (enviando) return;
     const next = (pin + d).slice(0, 6);
     setPin(next);
-    if (next.length >= 4) void intentar(next); // autoenvía al llegar a 4 dígitos
+    if (next.length === 6) void intentar(next);
   }
 
   // --- Paso 1: elegir usuario ---
@@ -115,6 +115,9 @@ export default function Login() {
         <button onClick={() => teclear('0')} disabled={enviando}>0</button>
         <button className="pinpad__ghost" onClick={() => setPin(pin.slice(0, -1))}>⌫</button>
       </div>
+      <button className="btn btn-primary" disabled={enviando || pin.length < 4} onClick={() => void intentar(pin)}>
+        {enviando ? 'Entrando…' : 'Entrar'}
+      </button>
     </div>
   );
 }

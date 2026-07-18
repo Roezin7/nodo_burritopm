@@ -115,8 +115,9 @@ export default function Usuarios() {
   }
 
   async function resetPin(u: UsuarioAdmin) {
-    const pin = window.prompt(`Nuevo PIN para ${u.nombre} (4 a 12 dígitos):`);
+    const pin = window.prompt(`Nuevo PIN para ${u.nombre} (4 a 6 dígitos):`);
     if (!pin) return;
+    if (!/^\d{4,6}$/.test(pin)) { setError('El PIN debe tener de 4 a 6 dígitos.'); return; }
     try {
       await api(`/auth/admin/usuarios/${u.id}/reset-pin`, { method: 'POST', body: { pin_nuevo: pin } });
       setError('');
@@ -171,9 +172,9 @@ export default function Usuarios() {
             PIN inicial
             <input
               value={form.pin}
-              onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 12) })}
+              onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
               inputMode="numeric"
-              placeholder="4 a 12 dígitos"
+              placeholder="4 a 6 dígitos"
             />
           </label>
         )}

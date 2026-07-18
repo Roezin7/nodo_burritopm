@@ -4,6 +4,7 @@ import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../auth/middleware.js';
 import * as svc from './service.js';
 import * as rutas from './rutas.service.js';
+import { prisma } from '../db.js';
 
 export const distribucionesRouter = Router();
 
@@ -16,6 +17,20 @@ const sucursal = requireRole('admin', 'encargado_sucursal');
 distribucionesRouter.use(requireAuth);
 const bodega = requireRole('admin', 'encargado_bodega');
 const etapaSchema = z.object({ items: z.array(z.object({ linea_id: z.coerce.number().int().positive(), cantidad: z.coerce.number().nonnegative() })) });
+
+async function exigirBodegasDeDistribucion(req: Parameters<typeof usuarioPuedeUbicacion>[0], distribucionId: bigint) {
+  if (req.auth?.rol === 'admin') return;
+  const lineas = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: distribucionId, distribuciones: { negocio_id: req.auth!.negocioId } },
+    include: { products: { select: { linea_operacion: true } } },
+  });
+  if (!lineas.length) throw new HttpError(404, 'Distribución no encontrada');
+  const codigos = new Set(lineas.map((l) => l.products.linea_operacion === 'carne' ? 'CARN' : 'BOD'));
+  const bodegas = await prisma.ubicaciones.findMany({ where: { negocio_id: req.auth!.negocioId, codigo: { in: [...codigos] }, activo: true } });
+  for (const bodega of bodegas) {
+    if (!(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, `No tienes acceso a ${bodega.nombre}`);
+  }
+}
 
 /** GET /distribuciones/recepciones?ubicacion=ID — pendientes de recibir en una sucursal. */
 distribucionesRouter.get(
@@ -186,6 +201,7 @@ distribucionesRouter.get(
   bodega,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
+    await exigirBodegasDeDistribucion(req, id);
     res.json(await svc.operacionDetalle(req.auth!.negocioId, id));
   }),
 );
@@ -196,6 +212,7 @@ distribucionesRouter.patch(
   bodega,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
+    await exigirBodegasDeDistribucion(req, id);
     const { items } = etapaSchema.parse(req.body);
     res.json(await svc.guardarCarga(req.auth!.negocioId, id, items));
   }),
@@ -207,6 +224,7 @@ distribucionesRouter.post(
   bodega,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
+    await exigirBodegasDeDistribucion(req, id);
     res.json(await svc.marcarVerificada(req.auth!.negocioId, id, req.auth!.usuarioId));
   }),
 );
@@ -217,6 +235,7 @@ distribucionesRouter.post(
   bodega,
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
+    await exigirBodegasDeDistribucion(req, id);
     res.json(await svc.confirmarCarga(req.auth!.negocioId, id, req.auth!.usuarioId));
   }),
 );
