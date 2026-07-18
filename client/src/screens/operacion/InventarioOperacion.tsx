@@ -6,6 +6,7 @@ import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 type Linea = 'todas' | 'carne' | 'desechables';
 
@@ -33,6 +34,8 @@ interface Existencia {
 interface Stock {
   items: Existencia[];
   valor_total: number;
+  fuente?: 'actual' | 'cierre_semanal';
+  semana_estado?: string | null;
 }
 interface InventarioGuardado {
   id: string;
@@ -78,18 +81,18 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     if (!almacenId) return;
     setStock(null); setError('');
     Promise.all([
-      api<Stock>(`/existencias?ubicacion=${almacenId}`),
+      api<Stock>(`/existencias?ubicacion=${almacenId}&semana=${semana.inicio}`),
       admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
     ])
       .then(([existencias, inventarios]) => { setStock(existencias); setHistorial(inventarios); })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'));
-  }, [almacenId, admin]);
+  }, [almacenId, admin, semana.inicio]);
   useEffect(() => { setFecha(fechaDentroDeSemana(semana)); setEditando(false); }, [semana.inicio, semana.fin]);
 
   async function recargar() {
     if (!almacenId) return;
     const [existencias, inventarios] = await Promise.all([
-      api<Stock>(`/existencias?ubicacion=${almacenId}`),
+      api<Stock>(`/existencias?ubicacion=${almacenId}&semana=${semana.inicio}`),
       admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
     ]);
     setStock(existencias); setHistorial(inventarios);
@@ -98,7 +101,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const historialSemana = historial.filter((i) => i.fecha >= semana.inicio && i.fecha <= semana.fin);
   const capturaSemana = !semana.actual ? historialSemana.find((i) => i.tipo === 'trazable' && i.lineas?.length) : undefined;
   const itemsPeriodo = useMemo(() => {
-    if (!capturaSemana?.lineas || !stock) return stock?.items ?? [];
+    if (!capturaSemana?.lineas || !stock || stock.fuente === 'cierre_semanal') return stock?.items ?? [];
     const cantidadesCapturadas = new Map(capturaSemana.lineas.map((l) => [l.product_id, l.cantidad]));
     return stock.items.map((i) => {
       const disponible = cantidadesCapturadas.get(i.product_id) ?? 0;
@@ -161,7 +164,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
       {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
-    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 8 : 7}</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">
@@ -173,7 +176,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     </div>
 
     {error && <p className="error-msg">{error}</p>}
-    {!semana.actual && <p className="notice">{capturaSemana ? <><strong>Inventario final de semana {semana.numero}:</strong> se muestra la captura física del {capturaSemana.fecha}.</> : <><strong>Sin captura histórica:</strong> no existe inventario final trazable para la semana {semana.numero}; el saldo mostrado es el actual.</>}</p>}
+    {!semana.actual && <p className="notice">{stock?.fuente === 'cierre_semanal' ? <><strong>Cierre de semana {semana.numero}:</strong> cantidades y costos provienen de la fotografía contable.</> : capturaSemana ? <><strong>Inventario final de semana {semana.numero}:</strong> se muestra la captura física del {capturaSemana.fecha}; la valuación todavía corresponde al costo vigente.</> : <><strong>Sin fotografía histórica:</strong> la semana no tiene un cierre disponible y el saldo mostrado es el actual.</>}</p>}
     {!stock && !error ? <Spinner label="Calculando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
         <div><span>Valor</span><strong>{usd(totales.valor)}</strong></div>
@@ -182,9 +185,9 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
         <div><span>En tránsito / hold</span><strong>{totales.transito.toLocaleString('es-MX')}</strong></div>
       </div>
 
-      <section className="workspace-card">
-        <div className="workspace-card-head">
-          <div><h2>{editando ? 'Captura física' : 'Productos'}</h2><p>{filas.length} renglones</p></div>
+      <CollapsibleSection title={editando ? 'Captura física' : 'Productos'} count={filas.length} className="inventory-product-list">
+        <div className="workspace-card-head collapsible-inner-toolbar">
+          <div />
           {!editando && <input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" />}
         </div>
         <div className="data-list data-list--inventory">
@@ -199,8 +202,8 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
           </div>)}
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
-      </section>
-      {admin && <section className="workspace-card inventory-history"><div className="workspace-card-head"><div><h2>Inventarios de semana {semana.numero}</h2><p>Capturas físicas guardadas dentro del periodo seleccionado.</p></div><span>{historialSemana.length}</span></div>{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>Motivo: {inventario.motivo}</small>}{inventario.tipo === 'anterior' && <small>Captura de la versión anterior; también puede revertirse.</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin inventario final</strong><span>No hay captura física guardada en esta semana.</span></div>}</section>}
+      </CollapsibleSection>
+      {admin && <CollapsibleSection title={`Inventarios de semana ${semana.numero}`} count={historialSemana.length} defaultOpen={false} className="inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin inventario final</strong></div>}</CollapsibleSection>}
       {editando && <div className="inventory-capture-actions"><label className="field"><span>{almacenActual?.codigo === 'CARN' ? 'Cierre del sábado' : `Fecha dentro de semana ${semana.numero}`}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} disabled={almacenActual?.codigo === 'CARN'} onChange={(e) => setFecha(e.target.value)} /></label><label className="field field--wide"><span>Observación del ajuste</span><input value={observacion} maxLength={500} placeholder="Ej. diferencia de conteo reportada por producción" onChange={(e) => setObservacion(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
       {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}

@@ -81,6 +81,17 @@ distribucionesRouter.post(
   }),
 );
 
+/** POST /distribuciones/recepciones/auditar-todas — el admin confirma completas las pendientes. */
+distribucionesRouter.post(
+  '/recepciones/auditar-todas',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const b = z.object({ desde: fechaParam, hasta: fechaParam })
+      .refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
+    res.json(await svc.confirmarRecepcionesSinFaltantesEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta));
+  }),
+);
+
 /** POST /distribuciones/:id/recibir { ubicacion_id, items } — recepción en sucursal. */
 distribucionesRouter.post(
   '/:id/recibir',

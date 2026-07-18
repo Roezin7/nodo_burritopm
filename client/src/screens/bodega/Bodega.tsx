@@ -5,6 +5,7 @@ import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface DistResumen { id: number; estado: string; creado_at: string; fecha_entrega: string | null; linea: LineaOperacion | null; total_lineas: number }
 interface OpItem {
@@ -84,11 +85,11 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>
       {!integrado && <header className="page-head">
-        <div><span className="eyebrow">Salida de almacén</span><h1>Despacho</h1><p className="page-sub">Surte la lista aprobada, verifica existencias y confirma la carga.</p></div>
+        <div><span className="eyebrow">Salida de almacén</span><h1>Despacho</h1></div>
       </header>}
       {!integrado && <FlujoStepper activo="bodega" />}
       {!integrado && <BodegaRutaTabs activo="bodega" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 5</span><h2>Despacho</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 4</span><h2>Despacho</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
@@ -99,7 +100,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
       {mostradas.length === 0 ? (
         <p className="muted">{tab === 'activos' ? 'No hay pedidos aprobados por surtir.' : 'Aún no hay pedidos en el historial.'}</p>
       ) : (
-        <div className="lista-ubicaciones">
+        <CollapsibleSection title={tab === 'activos' ? 'Pedidos por surtir' : 'Despachos anteriores'} count={mostradas.length}><div className="lista-ubicaciones">
           {mostradas.map((d) => (
             <button key={d.id} className="card card-click" onClick={() => void abrir(d.id)}>
               <div className="ubic-row">
@@ -109,7 +110,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
               </div>
             </button>
           ))}
-        </div>
+        </div></CollapsibleSection>
       )}
     </div>
   );
@@ -175,8 +176,7 @@ function OperacionView({ op, verificacionCarga, repartoHabilitado, integrado, on
           {totalFaltante > 0 && (
             <p className="aviso-falt">Hay {totalFaltante} producto{totalFaltante > 1 ? 's' : ''} pendiente{totalFaltante > 1 ? 's' : ''} de respaldar con producción o compras. Se registrará la carga real completa y la diferencia quedará visible para el cierre semanal.</p>
           )}
-          <div className="card">
-            <div className="card-head"><strong>Todo lo que sube al camión</strong><span className="muted">{op.total_carga.length} productos</span></div>
+          <CollapsibleSection title="Lista total a cargar" count={`${op.total_carga.length} productos`}>
             {[...op.total_carga].sort((a, b) => indiceEnOrden(a.sku, op.linea) - indiceEnOrden(b.sku, op.linea)).map((t) => (
               <div key={t.product_id} className={`carga-total-item ${t.faltante > 0 ? 'carga-total-item--falt' : ''}`}>
                 <span>
@@ -187,13 +187,11 @@ function OperacionView({ op, verificacionCarga, repartoHabilitado, integrado, on
                 <span className="carga-total-qty">{t.total_a_cargar} <small>{t.unidad}</small></span>
               </div>
             ))}
-            {editable && <p className="muted" style={{ marginTop: '0.6rem' }}>Para ajustar cantidades por sucursal, usa la pestaña <strong>Por sucursal</strong>.</p>}
-          </div>
+          </CollapsibleSection>
         </>
       ) : (
         op.grupos.map((g) => (
-          <div key={g.ubicacion.id} className="card">
-            <div className="card-head"><strong>{g.ubicacion.nombre}</strong></div>
+          <CollapsibleSection title={g.ubicacion.nombre} count={`${g.items.length} productos`} key={g.ubicacion.id}>
             {[...g.items].sort((a, b) => indiceEnOrden(a.sku, op.linea) - indiceEnOrden(b.sku, op.linea)).map((it) => (
               <div key={it.linea_id} className="dist-row">
                 <div className="conteo-prod">
@@ -210,7 +208,7 @@ function OperacionView({ op, verificacionCarga, repartoHabilitado, integrado, on
                 )}
               </div>
             ))}
-          </div>
+          </CollapsibleSection>
         ))
       )}
 

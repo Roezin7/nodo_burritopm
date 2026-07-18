@@ -9,20 +9,28 @@ import StockObjetivo from './StockObjetivo';
 import Proveedores from './Proveedores';
 import Spinner from '../../components/Spinner';
 import { useOperacionConfig } from '../../operacion-config';
+import { Link } from 'react-router-dom';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
 type Tab = 'ubicaciones' | 'usuarios' | 'proveedores' | 'categorias' | 'unidades' | 'productos' | 'stock' | 'operacion';
 
-const TABS: { clave: Tab; label: string }[] = [
-  { clave: 'ubicaciones', label: 'Restaurantes y bodegas' },
-  { clave: 'usuarios', label: 'Accesos' },
-  { clave: 'proveedores', label: 'Proveedores' },
-  { clave: 'categorias', label: 'Categorías' },
-  { clave: 'unidades', label: 'Unidades' },
-  { clave: 'productos', label: 'Productos' },
-  { clave: 'stock', label: 'Mínimos por almacén' },
-  { clave: 'operacion', label: 'Operación' },
+const GRUPOS: { titulo: string; items: { clave: Tab; label: string; descripcion: string }[] }[] = [
+  { titulo: 'Organización', items: [
+    { clave: 'ubicaciones', label: 'Ubicaciones', descripcion: 'Restaurantes y almacenes' },
+    { clave: 'usuarios', label: 'Accesos', descripcion: 'Usuarios, roles y PIN' },
+  ] },
+  { titulo: 'Catálogo', items: [
+    { clave: 'productos', label: 'Productos', descripcion: 'Carne y desechables' },
+    { clave: 'proveedores', label: 'Proveedores', descripcion: 'Proveedores activos' },
+    { clave: 'categorias', label: 'Categorías', descripcion: 'Orden del catálogo' },
+    { clave: 'unidades', label: 'Unidades', descripcion: 'Caja, pieza y peso' },
+  ] },
+  { titulo: 'Reglas', items: [
+    { clave: 'stock', label: 'Productos por ubicación', descripcion: 'Disponibilidad y mínimos' },
+    { clave: 'operacion', label: 'Flujo semanal', descripcion: 'Despacho, reparto y cierre' },
+  ] },
 ];
+const ITEMS = GRUPOS.flatMap((grupo) => grupo.items);
 
 const DIAS = [
   { n: 1, label: 'Lun' },
@@ -96,15 +104,11 @@ function Operacion() {
   if (verif === null || cargandoConfig) return <Spinner />;
   return (
     <>
-      <div className="card">
+      <div className="settings-card">
         <div className="cfg-switch">
           <div>
             <strong>Seguimiento de reparto</strong>
-            <p className="muted" style={{ margin: '0.2rem 0 0' }}>
-              {repartoHabilitado
-                ? 'Muestra Reparto entre Despacho y Recepción para registrar el recorrido y sus paradas.'
-                : 'Desactivado: al confirmar el despacho, el pedido pasa directamente a Recepción.'}
-            </p>
+            <p>{repartoHabilitado ? 'Despacho → Reparto → Recepción' : 'Despacho → Recepción'}</p>
           </div>
           <button
             type="button"
@@ -119,11 +123,8 @@ function Operacion() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="settings-card">
         <strong>Días de conteo físico</strong>
-        <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
-          Programa cuándo se solicita una conciliación física de bodega. Las fechas de pedido y entrega se controlan desde Rutas.
-        </p>
         <div className="dias-selector">
           {DIAS.map((d) => (
             <button
@@ -138,16 +139,14 @@ function Operacion() {
             </button>
           ))}
         </div>
-        {dias.length === 0 && <p className="muted" style={{ marginTop: '0.6rem' }}>Sin días: no se habilita solo (el admin puede abrirlo cuando quiera).</p>}
+        {dias.length === 0 && <small>Sin programación automática</small>}
       </div>
 
-      <div className="card">
+      <div className="settings-card">
         <div className="cfg-switch">
           <div>
             <strong>Verificación de carga</strong>
-            <p className="muted" style={{ margin: '0.2rem 0 0' }}>
-              Si está activa, Bodega confirma una revisión de 1 toque antes de enviar el pedido a Reparto o Recepción.
-            </p>
+            <p>Revisión antes de enviar el pedido</p>
           </div>
           <button
             type="button"
@@ -161,11 +160,8 @@ function Operacion() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="settings-card">
         <strong>Auto-cierre de recepción</strong>
-        <p className="muted" style={{ margin: '0.2rem 0 0.7rem' }}>
-          Si una sucursal no confirma su recepción, el pedido se cierra solo pasado este tiempo (se da por recibido lo enviado) para liberar el inventario en tránsito de la bodega.
-        </p>
         <div className="dias-selector">
           {AUTO_CIERRE_OPCIONES.map((o) => (
             <button
@@ -180,7 +176,7 @@ function Operacion() {
             </button>
           ))}
         </div>
-        {autoCierre === 0 && <p className="muted" style={{ marginTop: '0.6rem' }}>Desactivado: las recepciones sin confirmar quedan en tránsito hasta que alguien las cierre a mano.</p>}
+        {autoCierre === 0 && <small>Las recepciones quedan pendientes hasta confirmarlas</small>}
       </div>
       {error && <p className="error-msg">{error}</p>}
     </>
@@ -189,38 +185,34 @@ function Operacion() {
 
 export default function Configuracion() {
   const [tab, setTab] = useState<Tab>('ubicaciones');
+  const actual = ITEMS.find((item) => item.clave === tab)!;
 
   return (
     <div className="page">
       <header className="page-head">
         <div>
-            <span className="eyebrow">Administración del sistema</span>
+            <span className="eyebrow">Administración</span>
             <h1>Configuración</h1>
-            <p className="page-sub">Empresas, restaurantes, accesos, productos y reglas de operación.</p>
         </div>
       </header>
 
-      <div className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.clave}
-            className={tab === t.clave ? 'tab tab--on' : 'tab'}
-            onClick={() => setTab(t.clave)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="tab-body">
-        {tab === 'ubicaciones' && <Ubicaciones />}
-        {tab === 'usuarios' && <Usuarios />}
-        {tab === 'proveedores' && <Proveedores />}
-        {tab === 'categorias' && <Categorias />}
-        {tab === 'unidades' && <Unidades />}
-        {tab === 'productos' && <Productos />}
-        {tab === 'stock' && <StockObjetivo />}
-        {tab === 'operacion' && <Operacion />}
+      <div className="configuration-layout">
+        <nav className="configuration-nav" aria-label="Secciones de configuración">
+          {GRUPOS.map((grupo) => <div key={grupo.titulo}><span>{grupo.titulo}</span>{grupo.items.map((item) => <button key={item.clave} className={tab === item.clave ? 'is-active' : ''} onClick={() => setTab(item.clave)}><strong>{item.label}</strong><small>{item.descripcion}</small></button>)}</div>)}
+        </nav>
+        <main className="configuration-content">
+          <header className="configuration-content__head"><div><h2>{actual.label}</h2><p>{actual.descripcion}</p></div>{tab === 'operacion' && <Link className="btn btn-secondary btn-sm" to="/rutas">Editar rutas</Link>}</header>
+          <div className="tab-body">
+            {tab === 'ubicaciones' && <Ubicaciones />}
+            {tab === 'usuarios' && <Usuarios />}
+            {tab === 'proveedores' && <Proveedores />}
+            {tab === 'categorias' && <Categorias />}
+            {tab === 'unidades' && <Unidades />}
+            {tab === 'productos' && <Productos />}
+            {tab === 'stock' && <StockObjetivo />}
+            {tab === 'operacion' && <Operacion />}
+          </div>
+        </main>
       </div>
     </div>
   );

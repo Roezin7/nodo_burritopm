@@ -2,7 +2,7 @@ import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { preciosVentaSemana } from '../operacion/service.js';
+import { coberturaPedidosBpm, preciosVentaSemana } from '../operacion/service.js';
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { eliminarConteoEnTx } from '../conteos/service.js';
 
@@ -85,7 +85,7 @@ async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: D
     include: { pagos: true },
   });
   const cobrar = r2(facturas.reduce((a, f) => a + Math.max(0, num0(f.total) - f.pagos.reduce((x, p) => x + num0(p.monto), 0)), 0));
-  const compras = await db.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' }, select: { total: true } });
+  const compras = await db.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente', fecha: { lte: terminaAt } }, select: { total: true } });
   const pagar = r2(compras.reduce((a, c) => a + num0(c.total), 0));
   const balance = r2(inv.valor_carne + inv.valor_congelado + inv.valor_desechables + cobrar - pagar);
   await db.semanas_operativas.update({ where: { id: semanaId }, data: { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance } });
@@ -103,15 +103,33 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
 
+  // La valuación de cierre parte del ledger vivo; por eso los cierres operativos se hacen
+  // en orden. Si ya se capturó una semana posterior, cerrar ésta con el saldo actual
+  // produciría una fotografía históricamente falsa.
+  const [comprasPosteriores, produccionesPosteriores, pedidosPosteriores] = await Promise.all([
+    prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at }, estado: { not: 'cancelada' } } }),
+    prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at } } }),
+    prisma.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gt: semana.termina_at }, estado: { not: 'cancelado' }, lineas: { some: {} } } }),
+  ]);
+  if (comprasPosteriores || produccionesPosteriores || pedidosPosteriores) {
+    throw new HttpError(409, 'Hay operación capturada en una semana posterior. Cierra las semanas en orden para que la fotografía de inventario sea correcta.');
+  }
+
   // El cierre factura lo que realmente salió. No debe convertir silenciosamente una venta
   // confirmada pero nunca preparada/entregada en una factura ni congelar una ruta activa.
-  const [pedidosSinPreparar, distribucionesActivas] = await Promise.all([
+  const [pedidosSinPreparar, borradoresConVenta, distribucionesActivas, coberturaCarne, coberturaDesechables] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: {
         negocio_id: negocioId,
         fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at },
         estado: 'confirmado',
         lineas: { some: {} },
+      },
+    }),
+    prisma.pedidos_operativos.count({
+      where: {
+        negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at },
+        estado: 'borrador', lineas: { some: {} },
       },
     }),
     prisma.distribuciones.count({
@@ -121,12 +139,21 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
         estado: { notIn: ['cerrada', 'cerrada_con_incidencias', 'cancelada'] },
       },
     }),
+    coberturaPedidosBpm(negocioId, 'carne', iso(semana.inicia_at), iso(semana.termina_at)),
+    coberturaPedidosBpm(negocioId, 'desechables', iso(semana.inicia_at), iso(semana.termina_at)),
   ]);
+  if (borradoresConVenta) {
+    throw new HttpError(409, `Hay ${borradoresConVenta} venta(s) con cantidades todavía en borrador. Confírmalas o elimínalas antes del cierre.`);
+  }
+  const coberturaPendiente = [...coberturaCarne, ...coberturaDesechables].flatMap((dia) => dia.pendientes.map((nombre) => `${dia.fecha}: ${nombre}`));
+  if (coberturaPendiente.length) {
+    throw new HttpError(409, `Faltan pedidos BPM para cerrar: ${coberturaPendiente.slice(0, 6).join(', ')}${coberturaPendiente.length > 6 ? ` y ${coberturaPendiente.length - 6} más` : ''}.`);
+  }
   if (pedidosSinPreparar) {
     throw new HttpError(409, `Faltan ${pedidosSinPreparar} venta(s) por preparar y entregar antes del cierre.`);
   }
   if (distribucionesActivas) {
-    throw new HttpError(409, `Faltan ${distribucionesActivas} preparación(es) por despachar o recibir antes del cierre.`);
+    throw new HttpError(409, `Faltan ${distribucionesActivas} consolidado(s) por despachar o recibir antes del cierre.`);
   }
   await validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
   const pedidos = await prisma.pedidos_operativos.findMany({
@@ -212,6 +239,22 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
   const s = await prisma.semanas_operativas.findFirst({ where: { id: semanaId, negocio_id: negocioId } });
   if (!s) throw new HttpError(404, 'Semana no encontrada');
   if (s.estado !== 'cerrada') throw new HttpError(409, 'La semana no está cerrada');
+  // Una reapertura modifica el ledger vivo. Permitirla detrás de semanas posteriores
+  // haría que sus fotografías dejaran de corresponder al saldo actual. Las correcciones
+  // históricas deben empezar siempre por la última semana con operación.
+  const [semanaPosterior, comprasPosteriores, produccionesPosteriores, pedidosPosteriores] = await Promise.all([
+    prisma.semanas_operativas.findFirst({
+      where: { negocio_id: negocioId, inicia_at: { gt: s.inicia_at }, estado: 'cerrada' },
+      orderBy: { inicia_at: 'asc' }, select: { anio: true, semana: true },
+    }),
+    prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at }, estado: { not: 'cancelada' } } }),
+    prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at } } }),
+    prisma.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gt: s.termina_at }, estado: { not: 'cancelado' }, lineas: { some: {} } } }),
+  ]);
+  if (semanaPosterior || comprasPosteriores || produccionesPosteriores || pedidosPosteriores) {
+    const detalle = semanaPosterior ? ` La semana ${semanaPosterior.semana} de ${semanaPosterior.anio} ya está cerrada.` : '';
+    throw new HttpError(409, `Solo se puede reabrir la última semana con operación.${detalle} Corrige primero desde la semana más reciente para conservar la trazabilidad.`);
+  }
   const pagadas = await prisma.facturas.count({ where: { semana_id: s.id, estado: 'pagada' } });
   if (pagadas) throw new HttpError(409, 'No se puede reabrir una semana con facturas pagadas');
   const carniceria = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, codigo: 'CARN', activo: true }, select: { id: true } });

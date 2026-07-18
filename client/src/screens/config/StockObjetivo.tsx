@@ -3,6 +3,7 @@ import { api, ApiError } from '../../api';
 import Spinner from '../../components/Spinner';
 import type { Ubicacion } from './Ubicaciones';
 import UbicacionPicker from '../../components/UbicacionPicker';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface Item {
   product_id: number;
@@ -98,15 +99,9 @@ export default function StockObjetivo() {
         <p className="muted">No hay productos activos. Crea productos en la pestaña Productos.</p>
       ) : (
         <>
-          <p className="muted">
-            {esBodega
-              ? <>Habilita los productos de bodega y, si aplica, define mínimos operativos.</>
-              : <>Habilita los productos que esta sucursal puede pedir. Las cantidades las elige el restaurante al hacer su pedido.</>}
-          </p>
-          <div className={`so-grid-head ${esBodega ? 'so-grid-head--bodega' : 'so-grid-head--simple'}`}>
+          <CollapsibleSection title="Productos" count={items.filter((item) => item.habilitado).length} summary={`${items.length} disponibles`} className="config-list-section"><div className={`so-grid-head ${esBodega ? 'so-grid-head--bodega' : 'so-grid-head--simple'}`}>
             <span>Producto</span><span>Usa</span>{esBodega && <><span>Mín</span><span>Seguridad</span></>}
-          </div>
-          <div className="so-rows">
+          </div><div className="so-rows">
             {items.map((it, idx) => (
               <div key={it.product_id} className={`so-row ${esBodega ? 'so-row--bodega' : 'so-row--simple'} ${it.habilitado ? '' : 'so-row--off'}`}>
                 <div className="so-prod"><strong>{it.nombre}</strong><small className="muted">{it.unidad_distribucion}{it.categoria ? ` · ${it.categoria}` : ''}</small></div>
@@ -119,7 +114,7 @@ export default function StockObjetivo() {
                 )}
               </div>
             ))}
-          </div>
+          </div></CollapsibleSection>
           <div className="form-actions">
             <button className="btn btn-primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar configuración'}</button>
           </div>

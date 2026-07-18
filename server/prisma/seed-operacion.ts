@@ -94,7 +94,9 @@ async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: b
         linea_operacion: producto.linea_operacion ?? 'desechables', tipo_operativo: producto.tipo_operativo ?? 'desechable',
         costo_promedio: producto.costo_promedio ?? costo, ultimo_costo: producto.ultimo_costo ?? costo,
         precio_venta_fijo: producto.precio_venta_fijo ?? venta,
-        orden_operativo: indice + 1,
+        // 999 significa "sin ordenar". Una vez que el admin define una posición,
+        // el bootstrap no vuelve a imponer el orden del archivo inicial.
+        orden_operativo: producto.orden_operativo === 999 ? indice + 1 : producto.orden_operativo,
       },
     });
   }
@@ -116,7 +118,7 @@ async function main() {
   for (const [nombre, codigo] of ubicacionesBpm) {
     await prisma.ubicaciones.upsert({
       where: { negocio_id_codigo: { negocio_id: org.id, codigo } },
-      update: { empresa_cliente_id: empresas.BPM.id },
+      update: {},
       create: { negocio_id: org.id, nombre, codigo, tipo: 'sucursal', empresa_cliente_id: empresas.BPM.id },
     });
   }
@@ -125,20 +127,20 @@ async function main() {
     update: {},
     create: { negocio_id: org.id, nombre: 'Bodega Adison', codigo: 'BOD', tipo: 'bodega' },
   });
-  await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo: { in: bpmActivas } }, data: { empresa_cliente_id: empresas.BPM.id } });
+  await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo: { in: bpmActivas }, empresa_cliente_id: null }, data: { empresa_cliente_id: empresas.BPM.id } });
   for (const [nombre, codigo, activo] of nuevas) {
     const empresa = codigo.startsWith('T') ? empresas.LBT.id : ['AUROR', 'BURLI'].includes(codigo) ? empresas.AUR.id : empresas.BPM.id;
-    await prisma.ubicaciones.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo } }, update: { empresa_cliente_id: empresa }, create: { negocio_id: org.id, nombre, codigo, tipo: 'sucursal', activo, empresa_cliente_id: empresa } });
+    await prisma.ubicaciones.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo } }, update: {}, create: { negocio_id: org.id, nombre, codigo, tipo: 'sucursal', activo, empresa_cliente_id: empresa } });
   }
   const aurora = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: org.id, codigo: 'AUROR' } });
-  await prisma.ubicaciones.update({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'BURLI' } }, data: { entrega_en_ubicacion_id: aurora.id } });
+  await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo: 'BURLI', entrega_en_ubicacion_id: null }, data: { entrega_en_ubicacion_id: aurora.id } });
   const carniceria = await prisma.ubicaciones.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'CARN' } }, update: {}, create: { negocio_id: org.id, nombre: 'Carnicería', codigo: 'CARN', tipo: 'bodega' } });
 
   // Mismo orden horizontal que Weekly Order/Billing. Los proyectos inactivos conservan
   // su posición para que al abrirlos no cambie el libro ni la captura semanal.
   const ordenUbicaciones = ['LOMBA', 'NAPER', 'CAROL', 'LISLE', 'GLEND', 'WESTC', 'BATAV', 'ALGON', 'NAPER2', 'ROLLI', 'SCHAU', 'CRYST', 'LAKEZ', 'FRANK', 'PLAIN', 'AUROR', 'BURLI', 'TGE', 'TST', 'TLO', 'TNA', 'TBO'];
   for (const [indice, codigo] of ordenUbicaciones.entries()) {
-    await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo }, data: { orden_operativo: indice + 1 } });
+    await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo, orden_operativo: 999 }, data: { orden_operativo: indice + 1 } });
   }
 
   await seedDesechables(org.id, catDesechables.id, caja.id);
@@ -158,10 +160,26 @@ async function main() {
     const data = { nombre: p.nombre, categoria_id: catCarne.id, unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, linea_operacion: 'carne' as const, tipo_operativo: p.tipo, requiere_refrigeracion: p.tipo !== 'servicio', peso_caja_lb: pesoNormalizado, ultimo_costo: costo, costo_promedio: costo, markup_caja: p.markup, precio_venta_fijo: 'precio' in p ? p.precio : null, produccion_dias: p.dias, orden_operativo: orden };
     const producto = await prisma.products.upsert({
       where: { negocio_id_sku: { negocio_id: org.id, sku: p.sku } },
-      update: { unidad_distribucion_id: unidadId, unidad_compra_id: esCaja ? caja.id : pieza.id, unidad_almacen_id: unidadId, peso_caja_lb: pesoNormalizado, markup_caja: p.markup, orden_operativo: orden },
+      update: {},
       create: { negocio_id: org.id, sku: p.sku, ...data },
     });
     if (costo != null && producto.ultimo_costo == null) await prisma.products.update({ where: { id: producto.id }, data: { ultimo_costo: costo, costo_promedio: producto.costo_promedio ?? costo } });
+  }
+  const productosCarne = new Map((await prisma.products.findMany({ where: { negocio_id: org.id, sku: { in: carne.map((p) => p.sku) } } })).map((p) => [p.sku, p.id]));
+  const recetas = [
+    ['RAW-INSIDE-SKIRT', 'MEAT-STEAK', false], ['RAW-CHICKEN', 'MEAT-CHICKEN', false],
+    ['RAW-PORK-BUTT', 'MEAT-PASTOR-BPM', false], ['RAW-PORK-BUTT', 'MEAT-PASTOR-TAP', false],
+    ['RAW-PORK-BUTT', 'MEAT-CARNITAS', true], ['RAW-OUTSIDE-SKIRT', 'MEAT-ASADA', false],
+    ['RAW-OUTSIDE-SKIRT', 'MEAT-FAJITAS', false], ['RAW-INSIDE-ROUND', 'MEAT-MILANESA', false],
+    ['RAW-TAPATIOS-TACO', 'MEAT-TAPATIOS-TACO', false],
+  ] as const;
+  for (const [orden, [materiaSku, salidaSku, sinCosto]] of recetas.entries()) {
+    const materia_prima_id = productosCarne.get(materiaSku); const producto_salida_id = productosCarne.get(salidaSku);
+    if (!materia_prima_id || !producto_salida_id) continue;
+    await prisma.recetas_produccion.upsert({
+      where: { producto_salida_id }, update: {},
+      create: { negocio_id: org.id, materia_prima_id, producto_salida_id, sin_costo: sinCosto, orden },
+    });
   }
   for (const nombre of ['Christ Panos', 'Gordon', 'Sysco', 'Amigos', 'Super Clean', 'BRD']) {
     await prisma.proveedores.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre } }, update: {}, create: { negocio_id: org.id, nombre } });
@@ -175,15 +193,19 @@ async function main() {
   }
 
   let reparto = await prisma.usuarios.findFirst({ where: { negocio_id: org.id, rol: 'encargado_bodega', activo: true }, orderBy: { id: 'asc' } });
+  let repartoCreado = false;
   if (!reparto) {
     if (process.env.NODE_ENV === 'production' && !process.env.SEED_REPARTO_PIN) {
       throw new Error('SEED_REPARTO_PIN es obligatorio para crear el usuario de bodega en producción');
     }
     reparto = await prisma.usuarios.create({ data: { negocio_id: org.id, nombre: 'Bodega y reparto', rol: 'encargado_bodega', pin_hash: await bcrypt.hash(process.env.SEED_REPARTO_PIN ?? '4321', 10), requiere_cambio_pin: true } });
+    repartoCreado = true;
   }
   if (await bcrypt.compare('4321', reparto.pin_hash)) await prisma.usuarios.update({ where: { id: reparto.id }, data: { requiere_cambio_pin: true } });
   const adison = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: org.id, codigo: 'BOD' } });
-  for (const ubicacion_id of [adison.id, carniceria.id]) await prisma.usuario_ubicaciones.upsert({ where: { usuario_id_ubicacion_id: { usuario_id: reparto.id, ubicacion_id } }, update: {}, create: { usuario_id: reparto.id, ubicacion_id } });
+  if (repartoCreado) {
+    for (const ubicacion_id of [adison.id, carniceria.id]) await prisma.usuario_ubicaciones.create({ data: { usuario_id: reparto.id, ubicacion_id } });
+  }
   console.log('✅ Operación 3Q preparada: empresas, ubicaciones, productos, proveedores y 8 rutas.');
 }
 

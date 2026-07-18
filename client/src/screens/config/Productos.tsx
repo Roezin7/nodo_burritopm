@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import Spinner from '../../components/Spinner';
+import CollapsibleSection from '../../components/CollapsibleSection';
 import type { Categoria } from './Categorias';
 import type { Unidad } from './Unidades';
 
@@ -32,6 +33,8 @@ export interface Producto {
   produccion_dias: number[];
   orden_operativo: number;
   activo: boolean;
+  materia_prima_id: number | null;
+  subproducto_sin_costo: boolean;
 }
 
 interface FormState {
@@ -56,13 +59,15 @@ interface FormState {
   peso_caja_lb: string;
   produccion_dias: number[];
   orden_operativo: string;
+  materia_prima_id: string;
+  subproducto_sin_costo: boolean;
 }
 
 const VACIO: FormState = {
   id: null, nombre: '', sku: '', categoria_id: '', unidad_distribucion_id: '', unidad_compra_id: '',
   unidad_almacen_id: '', factor_compra_almacen: '1', factor_almacen_distribucion: '1', ultimo_costo: '',
   administrado_bodega: true, requiere_refrigeracion: false, stock_min_bodega: '', stock_seguridad_bodega: '',
-  linea_operacion: '', tipo_operativo: '', precio_venta_fijo: '', markup_caja: '0', peso_caja_lb: '', produccion_dias: [], orden_operativo: '999',
+  linea_operacion: '', tipo_operativo: '', precio_venta_fijo: '', markup_caja: '0', peso_caja_lb: '', produccion_dias: [], orden_operativo: '999', materia_prima_id: '', subproducto_sin_costo: false,
 };
 
 const numOrUndef = (s: string) => (s.trim() === '' ? undefined : Number(s));
@@ -75,6 +80,7 @@ export default function Productos() {
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
+  const [buscar, setBuscar] = useState('');
 
   async function cargar() {
     setCargando(true);
@@ -109,6 +115,7 @@ export default function Productos() {
       linea_operacion: p.linea_operacion ?? '', tipo_operativo: p.tipo_operativo ?? '', precio_venta_fijo: p.precio_venta_fijo?.toString() ?? '',
       markup_caja: p.markup_caja.toString(), peso_caja_lb: p.peso_caja_lb?.toString() ?? '', produccion_dias: p.produccion_dias,
       orden_operativo: p.orden_operativo.toString(),
+      materia_prima_id: p.materia_prima_id?.toString() ?? '', subproducto_sin_costo: p.subproducto_sin_costo,
     });
     setError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -143,6 +150,8 @@ export default function Productos() {
       peso_caja_lb: form.peso_caja_lb.trim() === '' ? null : Number(form.peso_caja_lb),
       produccion_dias: form.produccion_dias,
       orden_operativo: Number(form.orden_operativo || 999),
+      materia_prima_id: form.materia_prima_id ? Number(form.materia_prima_id) : null,
+      subproducto_sin_costo: form.subproducto_sin_costo,
     };
     try {
       if (form.id == null) await api('/catalogo/productos', { method: 'POST', body });
@@ -168,6 +177,8 @@ export default function Productos() {
   const unidadesActivas = unidades.filter((u) => u.activo);
   const catsActivas = cats.filter((c) => c.activo);
   const sinUnidades = unidadesActivas.length === 0;
+  const consulta = buscar.trim().toLowerCase();
+  const productosVisibles = productos.filter((producto) => !consulta || `${producto.nombre} ${producto.sku} ${producto.linea_operacion ?? ''} ${producto.tipo_operativo ?? ''}`.toLowerCase().includes(consulta));
 
   return (
     <div>
@@ -184,7 +195,7 @@ export default function Productos() {
           </select>
         </label>
         <label>
-          Unidad de distribución (lo que cuenta/recibe la sucursal)
+          Unidad de venta
           <select value={form.unidad_distribucion_id} onChange={(e) => setForm({ ...form, unidad_distribucion_id: e.target.value })}>
             <option value="">— Elegir —</option>
             {unidadesActivas.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
@@ -192,7 +203,7 @@ export default function Productos() {
         </label>
 
         <details className="prod-extra">
-          <summary>Compra y almacén (opcional, para reabasto de bodega)</summary>
+          <summary>Conversiones de compra</summary>
           <label>
             Unidad de compra
             <select value={form.unidad_compra_id} onChange={(e) => setForm({ ...form, unidad_compra_id: e.target.value })}>
@@ -227,14 +238,23 @@ export default function Productos() {
             </select>
           </label>
           <label>Tipo operativo
-            <select value={form.tipo_operativo} onChange={(e) => setForm({ ...form, tipo_operativo: e.target.value, markup_caja: e.target.value === 'proteina' ? '15' : form.markup_caja })}>
+            <select value={form.tipo_operativo} onChange={(e) => setForm({ ...form, tipo_operativo: e.target.value, markup_caja: e.target.value === 'proteina' ? '15' : form.markup_caja, materia_prima_id: e.target.value === 'materia_prima' ? '' : form.materia_prima_id, subproducto_sin_costo: e.target.value === 'proteina' ? false : form.subproducto_sin_costo })}>
               <option value="">— Ninguno —</option><option value="desechable">Desechable</option><option value="materia_prima">Materia prima</option><option value="proteina">Proteína producida</option><option value="precio_fijo">Precio fijo</option><option value="servicio">Servicio / catering</option>
             </select>
           </label>
-          <label>Precio de venta fijo (vacío = usar costo)<input value={form.precio_venta_fijo} onChange={(e) => setForm({ ...form, precio_venta_fijo: e.target.value })} inputMode="decimal" placeholder="0.00" /></label>
+          <label>Precio fijo de venta<input value={form.precio_venta_fijo} onChange={(e) => setForm({ ...form, precio_venta_fijo: e.target.value })} inputMode="decimal" placeholder="Vacío = costo" /></label>
           <label>Markup por caja {form.tipo_operativo === 'proteina' ? '(fijo)' : ''}<input value={form.tipo_operativo === 'proteina' ? '15' : form.markup_caja} disabled={form.tipo_operativo === 'proteina'} onChange={(e) => setForm({ ...form, markup_caja: e.target.value })} inputMode="decimal" /></label>
           <label>{form.tipo_operativo === 'materia_prima' ? 'Peso promedio de caja comprada (lb)' : form.tipo_operativo === 'proteina' ? 'Peso de caja terminada (lb)' : 'Peso por caja (lb)'}<input value={form.peso_caja_lb} onChange={(e) => setForm({ ...form, peso_caja_lb: e.target.value })} inputMode="decimal" /></label>
           <label>Orden en pedidos y libros<input type="number" min="0" value={form.orden_operativo} onChange={(e) => setForm({ ...form, orden_operativo: e.target.value })} inputMode="numeric" /></label>
+          {form.linea_operacion === 'carne' && form.tipo_operativo !== 'materia_prima' && <>
+            <label>Se produce a partir de
+              <select value={form.materia_prima_id} onChange={(e) => setForm({ ...form, materia_prima_id: e.target.value })}>
+                <option value="">— No es producto de producción —</option>
+                {productos.filter((p) => p.activo && p.tipo_operativo === 'materia_prima').map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+            </label>
+            {form.materia_prima_id && form.tipo_operativo !== 'proteina' && <label className="ubic-check"><input type="checkbox" checked={form.subproducto_sin_costo} onChange={(e) => setForm({ ...form, subproducto_sin_costo: e.target.checked })} /><span>Subproducto vendible sin costo del batch</span></label>}
+          </>}
           <div><span className="muted">Días sugeridos de producción</span><div className="dist-suc-mini">{['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((dia, i) => <label className="chip" key={dia}><input type="checkbox" checked={form.produccion_dias.includes(i)} onChange={(e) => setForm({ ...form, produccion_dias: e.target.checked ? [...form.produccion_dias, i].sort() : form.produccion_dias.filter((d) => d !== i) })} /> {dia}</label>)}</div></div>
         </details>
 
@@ -267,8 +287,8 @@ export default function Productos() {
       ) : productos.length === 0 ? (
         <p className="muted">Aún no hay productos.</p>
       ) : (
-        <div className="lista-ubicaciones">
-          {productos.map((p) => (
+        <CollapsibleSection title="Productos registrados" count={productosVisibles.length} summary={`${productos.length} totales`} className="config-list-section"><input className="compact-search config-list-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar producto o SKU" /><div className="lista-ubicaciones">
+          {productosVisibles.map((p) => (
             <div key={p.id} className={`card ${p.activo ? '' : 'card--off'}`}>
               <div className="ubic-row">
                 <div>
@@ -290,7 +310,8 @@ export default function Productos() {
               </div>
             </div>
           ))}
-        </div>
+          {!productosVisibles.length && <div className="empty-state"><strong>Sin coincidencias</strong></div>}
+        </div></CollapsibleSection>
       )}
     </div>
   );

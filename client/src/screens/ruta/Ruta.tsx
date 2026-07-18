@@ -110,7 +110,7 @@ function RutaRepartidor({ integrado, semana }: { integrado: boolean; semana: Sem
       </header>}
       {!integrado && <FlujoStepper activo="ruta" />}
       {!integrado && <BodegaRutaTabs activo="reparto" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 6</span><h2>Reparto</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 5</span><h2>Reparto</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
       <div className="tabs">
@@ -362,7 +362,7 @@ function MonitorRutas({ integrado, semana }: { integrado: boolean; semana: Seman
       </header>}
       {!integrado && <FlujoStepper activo="ruta" />}
       {!integrado && <BodegaRutaTabs activo="reparto" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 6</span><h2>Reparto</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 5</span><h2>Reparto</h2></div></header>}
 
       <div className="tabs">
         <button className={tab === 'activas' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activas')}>Activas ({rutas.length})</button>

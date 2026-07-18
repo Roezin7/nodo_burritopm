@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import Spinner from '../components/Spinner';
 import { crearSemana, etiquetaRango, moverSemana, semanasAlrededor } from '../semana';
+import { useSemanaGlobal } from '../semana-context';
 
 interface Panorama {
   periodo: { anio: number; semana: number; inicia_at: string; termina_at: string; estado: string };
@@ -25,7 +26,7 @@ function Desglose({ filas }: { filas: { label: string; valor: number; tono?: str
 export default function PanelAdmin() {
   const [p, setP] = useState<Panorama | null>(null);
   const [error, setError] = useState('');
-  const [semana, setSemana] = useState(crearSemana());
+  const { semana, seleccionarSemana, rutaSemana } = useSemanaGlobal();
   const opciones = semanasAlrededor(crearSemana());
   useEffect(() => {
     setP(null); setError('');
@@ -37,17 +38,17 @@ export default function PanelAdmin() {
   const maxEmpresa = Math.max(1, ...p.ventas.por_empresa.map((e) => e.total));
   return <div className="panel-admin overview">
     <section className="global-week-picker overview-week-picker" aria-label="Semana del panorama">
-      <button className="icon-btn" aria-label="Semana anterior" onClick={() => setSemana(moverSemana(semana, -1))}>←</button>
-      <label><span>Panorama general</span><select value={semana.inicio} onChange={(e) => setSemana(crearSemana(e.target.value))}>{opciones.map((s) => <option key={s.inicio} value={s.inicio}>Semana {s.numero} · {s.anio} · {etiquetaRango(s)}</option>)}</select></label>
-      <button className="icon-btn" aria-label="Semana siguiente" onClick={() => setSemana(moverSemana(semana, 1))}>→</button>
-      {!semana.actual && <button className="btn btn-ghost btn-sm" onClick={() => setSemana(crearSemana())}>Semana actual</button>}
+      <button className="icon-btn" aria-label="Semana anterior" onClick={() => seleccionarSemana(moverSemana(semana, -1).inicio)}>←</button>
+      <label><span>Panorama general</span><select value={semana.inicio} onChange={(e) => seleccionarSemana(e.target.value)}>{opciones.map((s) => <option key={s.inicio} value={s.inicio}>Semana {s.numero} · {s.anio} · {etiquetaRango(s)}</option>)}</select></label>
+      <button className="icon-btn" aria-label="Semana siguiente" onClick={() => seleccionarSemana(moverSemana(semana, 1).inicio)}>→</button>
+      {!semana.actual && <button className="btn btn-ghost btn-sm" onClick={() => seleccionarSemana(crearSemana().inicio)}>Semana actual</button>}
     </section>
     <div className="overview-head">
       <div><h2>Panorama semanal</h2><p className="muted">Semana {p.periodo.semana} · {fecha(p.periodo.inicia_at)}–{fecha(p.periodo.termina_at)} · {p.periodo.estado}</p></div>
       <span className={`chip ${p.ventas.fuente === 'facturado' ? 'chip--ok' : 'chip--info'}`}>{p.ventas.fuente === 'facturado' ? 'Facturado' : 'Proyección en curso'}</span>
     </div>
 
-    {p.alertas.length > 0 && <div className="overview-alerts">{p.alertas.map((a) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>)}</div>}
+    {p.alertas.length > 0 && <div className="overview-alerts">{p.alertas.map((a) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>)}</div>}
 
     <div className="kpi-grid overview-kpis">
       <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
@@ -58,22 +59,22 @@ export default function PanelAdmin() {
 
     <div className="overview-grid">
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Quién genera la venta de la semana</div></div><Link className="link-btn" to="/semana/ventas">Ver ventas →</Link></div>
+        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Quién genera la venta de la semana</div></div><Link className="link-btn" to={rutaSemana('/semana/ventas')}>Ver ventas →</Link></div>
         {p.ventas.por_empresa.map((e) => <div className="company-sale" key={e.codigo}><div className="overview-row-head"><span><strong>{e.codigo}</strong> · {e.nombre}</span><strong>{usd(e.total)}</strong></div><div className="company-track"><span className="company-meat" style={{ width: `${(e.carne / maxEmpresa) * 100}%` }} /><span className="company-disposable" style={{ width: `${(e.desechables / maxEmpresa) * 100}%` }} /></div><small>Carne {usd(e.carne)} · Desechables {usd(e.desechables)}</small></div>)}
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Bodega Adison y Carnicería</div></div><Link className="link-btn" to="/semana/inventario">Revisar →</Link></div>
+        <div className="card-head"><div><strong>Inventario</strong><div className="muted">Bodega Adison y Carnicería</div></div><Link className="link-btn" to={rutaSemana('/semana/inventario')}>Revisar →</Link></div>
         <Desglose filas={[{ label: 'Materia prima fresca', valor: p.inventario.materia_prima_fresca }, { label: 'Materia prima congelada', valor: p.inventario.materia_prima_congelada, tono: 'bar-frozen' }, { label: 'Carne terminada', valor: p.inventario.carne_terminada, tono: 'bar-meat' }, { label: 'Desechables', valor: p.inventario.desechables, tono: 'bar-disposable' }]} />
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to="/semana/cierre">Abrir cierre →</Link></div>
+        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
         <div className="cash-grid"><div><small>Por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Cobro vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>requiere seguimiento</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>Pago vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere seguimiento</span></div></div>
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Acumulado semanal</div></div><Link className="link-btn" to="/semana/compras">Registrar →</Link></div>
+        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Acumulado semanal</div></div><Link className="link-btn" to={rutaSemana('/semana/compras')}>Registrar →</Link></div>
         <div className="production-summary"><div><small>Costo procesado</small><strong>{usd(p.produccion.costo)}</strong></div><div><small>Cajas producidas</small><strong>{p.produccion.cajas.toLocaleString('es-MX')}</strong></div><div><small>Yield</small><strong>{p.produccion.yield.toFixed(1)}%</strong></div><div><small>Compras</small><strong>{usd(p.produccion.compras_semana)}</strong></div></div>
       </section>
     </div>

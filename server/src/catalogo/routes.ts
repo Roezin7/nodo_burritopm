@@ -162,7 +162,7 @@ type ProductoConRel = NonNullable<Awaited<ReturnType<typeof findProducto>>>;
 function findProducto(id: bigint, negocioId: bigint) {
   return prisma.products.findFirst({
     where: { id, negocio_id: negocioId },
-    include: { categorias: true, unidad_distribucion: true, unidad_compra: true, unidad_almacen: true },
+    include: { categorias: true, unidad_distribucion: true, unidad_compra: true, unidad_almacen: true, recetas_como_salida: true },
   });
 }
 
@@ -195,6 +195,8 @@ function productoDTO(p: ProductoConRel) {
     orden_operativo: p.orden_operativo,
     produccion_dias: p.produccion_dias,
     activo: p.activo,
+    materia_prima_id: p.recetas_como_salida[0] ? Number(p.recetas_como_salida[0].materia_prima_id) : null,
+    subproducto_sin_costo: p.recetas_como_salida[0]?.sin_costo ?? false,
   };
 }
 
@@ -204,7 +206,7 @@ catalogoRouter.get(
   asyncHandler(async (req, res) => {
     const ps = await prisma.products.findMany({
       where: { negocio_id: req.auth!.negocioId },
-      include: { categorias: true, unidad_distribucion: true, unidad_compra: true, unidad_almacen: true },
+      include: { categorias: true, unidad_distribucion: true, unidad_compra: true, unidad_almacen: true, recetas_como_salida: true },
       orderBy: [{ activo: 'desc' }, { linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
     });
     res.json(ps.map(productoDTO));
@@ -235,6 +237,8 @@ const productoSchema = z.object({
   peso_caja_lb: z.coerce.number().positive().optional().nullable(),
   produccion_dias: z.array(z.coerce.number().int().min(0).max(6)).max(7).optional(),
   orden_operativo: z.coerce.number().int().nonnegative().optional(),
+  materia_prima_id: z.coerce.number().int().positive().optional().nullable(),
+  subproducto_sin_costo: z.boolean().optional(),
 });
 
 /** Valida que categoría y unidades referidas pertenezcan al negocio. */
@@ -251,6 +255,10 @@ async function validarRefs(negocioId: bigint, b: z.infer<typeof productoSchema>)
     const c = await prisma.categorias.findFirst({ where: { id: BigInt(b.categoria_id), negocio_id: negocioId } });
     if (!c) throw new HttpError(400, 'La categoría no pertenece al negocio');
   }
+  if (b.materia_prima_id != null) {
+    const materia = await prisma.products.findFirst({ where: { id: BigInt(b.materia_prima_id), negocio_id: negocioId, tipo_operativo: 'materia_prima', activo: true } });
+    if (!materia) throw new HttpError(400, 'La materia prima de la receta no es válida');
+  }
 }
 
 catalogoRouter.post(
@@ -265,8 +273,8 @@ catalogoRouter.post(
       where: { negocio_id: req.auth!.negocioId, OR: [{ sku }, { nombre: b.nombre.trim() }] },
     });
     if (dup) throw new HttpError(409, 'Ya existe un producto con ese nombre o SKU');
-    const p = await prisma.products.create({
-      data: {
+    const p = await prisma.$transaction(async (tx) => {
+      const creado = await tx.products.create({ data: {
         negocio_id: req.auth!.negocioId,
         nombre: b.nombre.trim(),
         sku,
@@ -291,7 +299,12 @@ catalogoRouter.post(
         peso_caja_lb: b.peso_caja_lb ?? null,
         produccion_dias: [...new Set(b.produccion_dias ?? [])],
         orden_operativo: b.orden_operativo ?? 999,
-      },
+      } });
+      if (b.materia_prima_id) await tx.recetas_produccion.create({ data: {
+        negocio_id: req.auth!.negocioId, materia_prima_id: BigInt(b.materia_prima_id), producto_salida_id: creado.id,
+        sin_costo: b.subproducto_sin_costo ?? false, orden: b.orden_operativo ?? 999,
+      } });
+      return creado;
     });
     res.status(201).json({ id: Number(p.id) });
   }),
@@ -308,7 +321,7 @@ catalogoRouter.patch(
     if (!actual) throw new HttpError(404, 'Producto no encontrado');
 
     // Validar refs solo si vienen.
-    if (b.unidad_distribucion_id || b.categoria_id || b.unidad_compra_id || b.unidad_almacen_id) {
+    if (b.unidad_distribucion_id || b.categoria_id || b.unidad_compra_id || b.unidad_almacen_id || b.materia_prima_id) {
       await validarRefs(req.auth!.negocioId, {
         ...b,
         unidad_distribucion_id: b.unidad_distribucion_id ?? Number(actual.unidad_distribucion_id),
@@ -326,9 +339,8 @@ catalogoRouter.patch(
       if (dup) throw new HttpError(409, 'Ya existe un producto con ese nombre o SKU');
     }
 
-    await prisma.products.update({
-      where: { id },
-      data: {
+    await prisma.$transaction(async (tx) => {
+      await tx.products.update({ where: { id }, data: {
         nombre: b.nombre?.trim(),
         sku,
         codigo_barras: b.codigo_barras === undefined ? undefined : b.codigo_barras?.trim() || null,
@@ -353,7 +365,17 @@ catalogoRouter.patch(
         produccion_dias: b.produccion_dias === undefined ? undefined : [...new Set(b.produccion_dias)],
         orden_operativo: b.orden_operativo,
         activo: b.activo,
-      },
+      } });
+      if (b.materia_prima_id !== undefined) {
+        if (b.materia_prima_id == null) await tx.recetas_produccion.deleteMany({ where: { producto_salida_id: id, negocio_id: req.auth!.negocioId } });
+        else await tx.recetas_produccion.upsert({
+          where: { producto_salida_id: id },
+          update: { materia_prima_id: BigInt(b.materia_prima_id), sin_costo: b.subproducto_sin_costo ?? false, orden: b.orden_operativo ?? actual.orden_operativo },
+          create: { negocio_id: req.auth!.negocioId, materia_prima_id: BigInt(b.materia_prima_id), producto_salida_id: id, sin_costo: b.subproducto_sin_costo ?? false, orden: b.orden_operativo ?? actual.orden_operativo },
+        });
+      } else if (b.subproducto_sin_costo !== undefined) {
+        await tx.recetas_produccion.updateMany({ where: { producto_salida_id: id, negocio_id: req.auth!.negocioId }, data: { sin_costo: b.subproducto_sin_costo } });
+      }
     });
     res.json({ ok: true });
   }),

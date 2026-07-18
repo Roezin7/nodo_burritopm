@@ -1,5 +1,5 @@
 // Lenguaje visual compartido del flujo de abastecimiento: chips de estado consistentes
-// y el stepper de 5 pasos (Inventario → Plan → Bodega → Ruta → Recepción), interactivo.
+// y el stepper operativo (Ventas → Despacho → Ruta → Recepción), interactivo.
 import { NavLink } from 'react-router-dom';
 import { useAuth, type Rol } from './auth';
 import { useOperacionConfig } from './operacion-config';
@@ -82,10 +82,9 @@ export function ParadaChip({ estado }: { estado: string }) {
 export const paradaLabel = (estado: string) => PARADA[estado]?.label ?? estado;
 
 // ── Stepper de 5 pasos (menú interactivo) ──────────────────────────────────
-export type PasoFlujo = 'conteo' | 'plan' | 'bodega' | 'ruta' | 'recepcion';
+export type PasoFlujo = 'conteo' | 'bodega' | 'ruta' | 'recepcion';
 const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] = [
   { clave: 'conteo', label: 'Ventas', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
-  { clave: 'plan', label: 'Preparación', ruta: '/distribucion', roles: ['admin'] },
   { clave: 'bodega', label: 'Despacho', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', label: 'Reparto', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },
   { clave: 'recepcion', label: 'Recepción', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },

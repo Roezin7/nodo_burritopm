@@ -59,7 +59,7 @@ operacionRouter.put('/pedidos/semana', soloAdmin, asyncHandler(async (req, res) 
 /** Confirma en bloque los pedidos capturados de una fecha o semana. */
 operacionRouter.post('/pedidos/confirmar-todos', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({ linea, desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
-  res.json(await svc.confirmarPedidosEnRango(req.auth!.negocioId, b.linea, b.desde, b.hasta));
+  res.json(await svc.confirmarPedidosEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.linea, b.desde, b.hasta));
 }));
 
 /** Convierte pedidos confirmados en distribución y genera todas las rutas del día. */
@@ -107,6 +107,15 @@ operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
     lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
   res.status(201).json(await svc.registrarCompra(req.auth!.negocioId, req.auth!.usuarioId, b));
+}));
+
+/** Corrige una compra pendiente mientras sus lotes todavía estén íntegros. */
+operacionRouter.patch('/compras/:id', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({
+    proveedor_id: id, ubicacion_id: id, fecha, referencia: z.string().trim().max(120).nullable().optional(),
+    lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
+  }).parse(req.body);
+  res.json(await svc.editarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, b));
 }));
 
 /** Revierte una compra mientras su inventario/lote todavía no haya sido utilizado. */

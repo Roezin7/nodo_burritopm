@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface Incidencia {
   id: number;
@@ -35,7 +36,7 @@ export default function Incidencias() {
   return (
     <div className="page">
       <header className="page-head">
-        <div><h1>Incidencias</h1><p className="page-sub">Diferencias de recepción y alertas operativas.</p></div>
+        <div><h1>Incidencias</h1></div>
       </header>
       <div className="tabs">
         <button className={estado === 'abierta' ? 'tab tab--on' : 'tab'} onClick={() => setEstado('abierta')}>Abiertas</button>
@@ -45,7 +46,7 @@ export default function Incidencias() {
       {lista.length === 0 ? (
         <p className="muted">Sin incidencias {estado === 'abierta' ? 'abiertas' : ''}. 🎉</p>
       ) : (
-        <div className="lista-ubicaciones">
+        <CollapsibleSection title={estado === 'abierta' ? 'Incidencias abiertas' : 'Historial de incidencias'} count={lista.length}><div className="lista-ubicaciones">
           {lista.map((i) => (
             <div key={i.id} className={`card ${i.estado === 'abierta' ? 'card--falt' : ''}`}>
               <div className="ubic-row">
@@ -66,7 +67,7 @@ export default function Incidencias() {
               </div>
             </div>
           ))}
-        </div>
+        </div></CollapsibleSection>
       )}
     </div>
   );

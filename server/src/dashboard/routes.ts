@@ -4,6 +4,7 @@ import { num, num0 } from '../lib/num.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
 import { semanaDeFecha } from '../cierre/service.js';
+import { preciosVentaSemana } from '../operacion/service.js';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
@@ -17,9 +18,10 @@ const EN_RUTA_O_DESPUES = new Set(['en_transito', 'parcialmente_entregada', 'ent
 const DIST_FINAL = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'] as const;
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-const precioPedido = (l: { precio_unitario: Prisma.Decimal | null; producto: { precio_venta_fijo: Prisma.Decimal | null; ultimo_costo: Prisma.Decimal | null; costo_promedio: Prisma.Decimal | null; tipo_operativo: string | null; markup_caja: Prisma.Decimal } }) => {
+const precioPedido = (l: { precio_unitario: Prisma.Decimal | null; producto: { id: bigint; precio_venta_fijo: Prisma.Decimal | null; ultimo_costo: Prisma.Decimal | null; costo_promedio: Prisma.Decimal | null; tipo_operativo: string | null; markup_caja: Prisma.Decimal } }, preciosSemanales?: Map<string, number | null>) => {
   const guardado = num(l.precio_unitario);
   if (guardado != null) return guardado;
+  if (l.producto.tipo_operativo === 'proteina' && preciosSemanales) return preciosSemanales.get(l.producto.id.toString()) ?? 0;
   const fijo = num(l.producto.precio_venta_fijo);
   if (fijo != null) return fijo;
   const costo = num(l.producto.ultimo_costo) ?? num(l.producto.costo_promedio) ?? 0;
@@ -161,6 +163,9 @@ dashboardRouter.get(
     const existencias = snapshot.length
       ? snapshot.map((e) => ({ ...e, products: e.producto, ubicaciones: e.ubicacion }))
       : existenciasVivas;
+    const productosPedidos = [...new Map(pedidos.flatMap((p) => p.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
+    const preciosSemanales = await preciosVentaSemana(negocioId, productosPedidos, iso(periodo.lunes), iso(periodo.sabado));
+    const proteinasSinPrecio = productosPedidos.filter((p) => p.tipo_operativo === 'proteina' && preciosSemanales.get(p.id.toString()) == null);
 
     const facturasOperativas = facturasSemana.filter((f) => !f.numero.endsWith('-OPEN'));
     const usarFacturas = facturasOperativas.length > 0;
@@ -180,7 +185,7 @@ dashboardRouter.get(
       for (const p of pedidos.filter((x) => x.estado !== 'borrador')) {
         const g = porEmpresa.get(p.empresa_cliente_id.toString());
         for (const l of p.lineas) {
-          const total = num0(l.cantidad) * precioPedido(l);
+          const total = num0(l.cantidad) * precioPedido(l, preciosSemanales);
           const linea = l.producto.linea_operacion ?? p.linea_operacion;
           if (linea === 'carne') ventaCarne += total; else ventaDesechables += total;
           if (g) { g[linea] += total; g.total += total; }
@@ -236,6 +241,7 @@ dashboardRouter.get(
     if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/semana/compras' });
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
     if (provisionales > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Inventario por conciliar', detalle: `${provisionales} saldos provisionales negativos`, ruta: '/semana/inventario' });
+    if (!usarFacturas && proteinasSinPrecio.length > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Venta pendiente de producción', detalle: `Falta calcular costo + $15 de ${proteinasSinPrecio.map((p) => p.nombre).join(', ')}`, ruta: '/semana/produccion' });
     const borradores = pedidos.filter((p) => p.estado === 'borrador').length;
     if (borradores > 0) alertas.push({ tipo: 'pedido', titulo: 'Pedidos sin confirmar', detalle: `${borradores} pedidos permanecen en borrador`, ruta: '/pedidos' });
     if (paradasPendientes > 0) alertas.push({ tipo: 'reparto', titulo: 'Entregas por completar', detalle: `${paradasPendientes} paradas pendientes`, ruta: '/ruta' });

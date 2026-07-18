@@ -220,25 +220,38 @@ existenciasRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const ubicacionId = BigInt(z.coerce.number().int().positive().parse(req.query.ubicacion));
+    const semanaReferencia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().parse(req.query.semana);
     if (!(await usuarioPuedeUbicacion(req, ubicacionId))) throw new HttpError(403, 'No tienes acceso a esta ubicación');
 
     const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: req.auth!.negocioId } });
     if (!ubicacion) throw new HttpError(404, 'Ubicación no encontrada');
     const linea = ubicacion.codigo === 'CARN' ? 'carne' : ubicacion.codigo === 'BOD' ? 'desechables' : undefined;
+    const diaSemana = semanaReferencia ? new Date(`${semanaReferencia}T00:00:00.000Z`) : null;
+    const semana = diaSemana ? await prisma.semanas_operativas.findFirst({
+      where: { negocio_id: req.auth!.negocioId, inicia_at: { lte: diaSemana }, termina_at: { gte: diaSemana } },
+      select: { id: true, estado: true },
+    }) : null;
+    const snapshot = semana ? await prisma.inventario_semanal.findMany({ where: { semana_id: semana.id, ubicacion_id: ubicacionId } }) : [];
+    const usarSnapshot = semana?.estado === 'cerrada';
+    const snapshotIds = snapshot.map((e) => e.product_id);
     const [productos, filas] = await Promise.all([
       prisma.products.findMany({
-        where: { negocio_id: req.auth!.negocioId, activo: true, linea_operacion: linea },
+        where: {
+          negocio_id: req.auth!.negocioId,
+          linea_operacion: linea,
+          OR: snapshotIds.length ? [{ activo: true }, { id: { in: snapshotIds } }] : [{ activo: true }],
+        },
         include: { unidad_distribucion: true },
         orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
       }),
-      prisma.existencias.findMany({ where: { ubicacion_id: ubicacionId } }),
+      usarSnapshot ? Promise.resolve(snapshot) : prisma.existencias.findMany({ where: { ubicacion_id: ubicacionId } }),
     ]);
     const porProducto = new Map(filas.map((e) => [e.product_id.toString(), e]));
     const items = productos.map((producto) => {
       const e = porProducto.get(producto.id.toString());
       const disp = num0(e?.cantidad_disponible);
       const transito = num0(e?.cantidad_transito);
-      const costo = num(e?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+      const costo = num(e?.costo_promedio) ?? (usarSnapshot ? null : num(producto.ultimo_costo) ?? num(producto.costo_promedio));
       return {
         product_id: Number(producto.id),
         nombre: producto.nombre,
@@ -253,6 +266,11 @@ existenciasRouter.get(
         valor: costo != null ? Math.round((disp + transito) * costo * 100) / 100 : 0,
       };
     });
-    res.json({ items, valor_total: Math.round(items.reduce((a, i) => a + i.valor, 0) * 100) / 100 });
+    res.json({
+      items,
+      valor_total: Math.round(items.reduce((a, i) => a + i.valor, 0) * 100) / 100,
+      fuente: usarSnapshot ? 'cierre_semanal' : 'actual',
+      semana_estado: semana?.estado ?? null,
+    });
   }),
 );

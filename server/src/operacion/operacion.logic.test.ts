@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
+
+describe('cobertura configurada de BPM', () => {
+  it('respeta rutas por día y puntos físicos de entrega compartidos', () => {
+    const fechas = [new Date('2026-07-15T00:00:00.000Z'), new Date('2026-07-18T00:00:00.000Z')];
+    const sucursales = [
+      { id: 1n, nombre: 'Lombard', entrega_en_ubicacion_id: null },
+      { id: 2n, nombre: 'Burlington', entrega_en_ubicacion_id: 3n },
+      { id: 4n, nombre: 'Fuera de ruta', entrega_en_ubicacion_id: null },
+    ];
+    const paradas = new Map([[3, new Set(['1', '3'])], [6, new Set(['1'])]]);
+    const presentes = new Set(['2026-07-15:1', '2026-07-18:1']);
+    expect(calcularCoberturaBpm(fechas, sucursales, paradas, presentes)).toEqual([
+      { fecha: '2026-07-15', total: 2, confirmados: 1, pendientes: ['Burlington'] },
+      { fecha: '2026-07-18', total: 1, confirmados: 1, pendientes: [] },
+    ]);
+  });
+});
 
 describe('reglas de precio de carne', () => {
   it('suma $15 una sola vez a una proteína producida', () => {

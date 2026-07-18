@@ -14,6 +14,7 @@ import OperacionAdmin from './screens/operacion/OperacionAdmin';
 import SemanaOperacion from './screens/operacion/SemanaOperacion';
 import { Component, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
 import { OperacionConfigProvider } from './operacion-config';
+import { SemanaProvider } from './semana-context';
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean }> {
   state = { fallo: false };
@@ -72,7 +73,7 @@ function AppBody() {
         <Route path="/rutas" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="rutas" /></SoloRol>} />
         <Route path="/facturacion" element={<Navigate to="/semana/cierre" replace />} />
         <Route path="/operacion" element={<Navigate to="/semana" replace />} />
-        <Route path="/distribucion" element={<Navigate to="/semana/preparacion" replace />} />
+        <Route path="/distribucion" element={<Navigate to="/semana/ventas" replace />} />
         <Route path="/bodega" element={<Navigate to="/semana/despacho" replace />} />
         <Route path="/ruta" element={<Navigate to="/semana/reparto" replace />} />
         <Route path="/recepcion" element={<Navigate to="/semana/recepcion" replace />} />
@@ -99,9 +100,11 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <BrowserRouter>
-            <OperacionConfigProvider>
-              <AppErrorBoundary><AppBody /></AppErrorBoundary>
-            </OperacionConfigProvider>
+            <SemanaProvider>
+              <OperacionConfigProvider>
+                <AppErrorBoundary><AppBody /></AppErrorBoundary>
+              </OperacionConfigProvider>
+            </SemanaProvider>
           </BrowserRouter>
         </AuthProvider>
       </ToastProvider>

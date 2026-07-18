@@ -7,6 +7,7 @@ import { useOffline } from './offline';
 import BurritoLockup from './brand/BurritoLockup';
 import { useOperacionConfig } from './operacion-config';
 import { api, ApiError } from './api';
+import { useSemanaGlobal } from './semana-context';
 
 import type { Rol } from './auth';
 
@@ -26,7 +27,6 @@ const ITEMS: Item[] = [
   { ruta: '/semana/compras', label: 'Compras', icono: 'cart', grupo: 'captura', soloAdmin: true },
   { ruta: '/semana/produccion', label: 'Producción', icono: 'factory', grupo: 'captura', soloAdmin: true },
   { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'captura', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/semana/preparacion', label: 'Preparación', icono: 'package', grupo: 'proceso', soloAdmin: true },
   { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'proceso', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
   { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'proceso', roles: ['admin', 'encargado_sucursal'] },
@@ -81,7 +81,8 @@ export default function Shell({ children }: { children: ReactNode }) {
   const { tema, alternar } = useTema();
   const { online, pendientes, sincronizar } = useOffline();
   const { repartoHabilitado } = useOperacionConfig();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
+  const { rutaSemana } = useSemanaGlobal();
   const [masAbierto, setMasAbierto] = useState(false);
 
   const items = ITEMS.filter((i) => {
@@ -98,10 +99,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
     : i.ruta === '/semana' ? pathname === '/semana' : pathname.startsWith(i.ruta);
-  const inicioSemana = new URLSearchParams(search).get('semana');
-  const destino = (i: Item) => i.ruta.startsWith('/semana/') && inicioSemana
-    ? `${i.ruta}?semana=${inicioSemana}`
-    : i.ruta;
+  const destino = (i: Item) => i.ruta.startsWith('/semana') ? rutaSemana(i.ruta) : i.ruta;
   const etiquetaItem = (i: Item) => usuario?.rol === 'admin' && i.ruta === '/semana/recepcion' ? 'Auditoría' : i.label;
   const enMas = extras.some(itemActivo);
 

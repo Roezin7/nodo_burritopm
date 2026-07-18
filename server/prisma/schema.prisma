@@ -88,35 +88,36 @@ model negocios {
   aviso_rezagados_at  DateTime? @db.Date
   creado_at           DateTime  @default(now()) @db.Timestamptz(6)
 
-  usuarios           usuarios[]
-  ubicaciones        ubicaciones[]
-  categorias         categorias[]
-  unidades           unidades[]
-  products           products[]
-  empresas_clientes  empresas_clientes[]
-  pedidos_operativos pedidos_operativos[]
-  plantillas_ruta    plantillas_ruta[]
-  proveedores        proveedores[]
-  compras            compras[]
-  producciones       producciones[]
-  semanas_operativas semanas_operativas[]
-  inventario_semanal inventario_semanal[]
+  usuarios            usuarios[]
+  ubicaciones         ubicaciones[]
+  categorias          categorias[]
+  unidades            unidades[]
+  products            products[]
+  empresas_clientes   empresas_clientes[]
+  pedidos_operativos  pedidos_operativos[]
+  plantillas_ruta     plantillas_ruta[]
+  proveedores         proveedores[]
+  compras             compras[]
+  producciones        producciones[]
+  semanas_operativas  semanas_operativas[]
+  inventario_semanal  inventario_semanal[]
   auditoria_operativa auditoria_operativa[]
-  facturas           facturas[]
+  facturas            facturas[]
+  recetas_produccion  recetas_produccion[]
 }
 
 model usuarios {
-  id         BigInt     @id @default(autoincrement())
-  negocio_id BigInt
-  nombre     String
-  rol        RolUsuario @default(encargado_sucursal)
-  pin_hash   String
-  activo     Boolean    @default(true)
+  id                  BigInt     @id @default(autoincrement())
+  negocio_id          BigInt
+  nombre              String
+  rol                 RolUsuario @default(encargado_sucursal)
+  pin_hash            String
+  activo              Boolean    @default(true)
   // Se incrementa al cambiar PIN, rol o estado para revocar sesiones anteriores.
-  auth_version Int      @default(1)
-  requiere_cambio_pin Boolean @default(false)
-  creado_at  DateTime   @default(now()) @db.Timestamptz(6)
-  negocios   negocios   @relation(fields: [negocio_id], references: [id])
+  auth_version        Int        @default(1)
+  requiere_cambio_pin Boolean    @default(false)
+  creado_at           DateTime   @default(now()) @db.Timestamptz(6)
+  negocios            negocios   @relation(fields: [negocio_id], references: [id])
 
   ubicaciones_asignadas usuario_ubicaciones[]
 
@@ -172,6 +173,25 @@ model ubicaciones {
   @@index([negocio_id])
   @@index([negocio_id, orden_operativo])
   @@index([empresa_cliente_id])
+}
+
+// Relación editable entre la materia prima comprada y cada salida de producción.
+// `sin_costo` identifica subproductos vendibles (p. ej. Carnitas) que no absorben
+// el costo del batch principal.
+model recetas_produccion {
+  id                 BigInt  @id @default(autoincrement())
+  negocio_id         BigInt
+  materia_prima_id   BigInt
+  producto_salida_id BigInt  @unique
+  sin_costo          Boolean @default(false)
+  orden              Int     @default(0)
+
+  negocio         negocios @relation(fields: [negocio_id], references: [id])
+  materia_prima   products @relation("receta_materia", fields: [materia_prima_id], references: [id], onDelete: Cascade)
+  producto_salida products @relation("receta_salida", fields: [producto_salida_id], references: [id], onDelete: Cascade)
+
+  @@unique([materia_prima_id, producto_salida_id])
+  @@index([negocio_id, materia_prima_id])
 }
 
 // Razón comercial que paga las facturas. Una empresa puede tener varias ubicaciones;
@@ -282,24 +302,26 @@ model products {
   // Días de producción sugeridos (0=Dom … 6=Sáb); el admin siempre puede producir fuera de programa.
   produccion_dias        Int[]                  @default([])
 
-  negocios            negocios                  @relation(fields: [negocio_id], references: [id])
-  categorias          categorias?               @relation(fields: [categoria_id], references: [id])
-  unidad_distribucion unidades                  @relation("unidad_distribucion", fields: [unidad_distribucion_id], references: [id])
-  unidad_compra       unidades?                 @relation("unidad_compra", fields: [unidad_compra_id], references: [id])
-  unidad_almacen      unidades?                 @relation("unidad_almacen", fields: [unidad_almacen_id], references: [id])
-  producto_ubicacion  producto_ubicacion[]
-  conteo_lineas       conteo_lineas[]
-  distribucion_lineas distribucion_lineas[]
-  historial_pedidos   historial_pedidos[]
-  existencias         existencias[]
-  movimientos         movimientos_inventario[]
-  pedido_lineas       pedido_operativo_lineas[]
-  compra_lineas       compra_lineas[]
-  produccion_materia  producciones[]            @relation("produccion_materia")
-  produccion_salidas  produccion_salidas[]
-  factura_lineas      factura_lineas[]
-  lotes_materia_prima lotes_materia_prima[]
-  inventario_semanal  inventario_semanal[]
+  negocios             negocios                  @relation(fields: [negocio_id], references: [id])
+  categorias           categorias?               @relation(fields: [categoria_id], references: [id])
+  unidad_distribucion  unidades                  @relation("unidad_distribucion", fields: [unidad_distribucion_id], references: [id])
+  unidad_compra        unidades?                 @relation("unidad_compra", fields: [unidad_compra_id], references: [id])
+  unidad_almacen       unidades?                 @relation("unidad_almacen", fields: [unidad_almacen_id], references: [id])
+  producto_ubicacion   producto_ubicacion[]
+  conteo_lineas        conteo_lineas[]
+  distribucion_lineas  distribucion_lineas[]
+  historial_pedidos    historial_pedidos[]
+  existencias          existencias[]
+  movimientos          movimientos_inventario[]
+  pedido_lineas        pedido_operativo_lineas[]
+  compra_lineas        compra_lineas[]
+  produccion_materia   producciones[]            @relation("produccion_materia")
+  produccion_salidas   produccion_salidas[]
+  factura_lineas       factura_lineas[]
+  lotes_materia_prima  lotes_materia_prima[]
+  inventario_semanal   inventario_semanal[]
+  recetas_como_materia recetas_produccion[]      @relation("receta_materia")
+  recetas_como_salida  recetas_produccion[]      @relation("receta_salida")
 
   @@unique([negocio_id, sku])
   @@unique([negocio_id, nombre])
@@ -891,9 +913,9 @@ model semanas_operativas {
   cuentas_por_pagar  Decimal      @default(0) @db.Decimal(14, 2)
   balance_neto       Decimal      @default(0) @db.Decimal(14, 2)
 
-  negocios       negocios         @relation(fields: [negocio_id], references: [id])
-  distribuciones distribuciones[]
-  facturas       facturas[]
+  negocios           negocios             @relation(fields: [negocio_id], references: [id])
+  distribuciones     distribuciones[]
+  facturas           facturas[]
   inventario_semanal inventario_semanal[]
 
   @@unique([negocio_id, anio, semana])
@@ -913,10 +935,10 @@ model inventario_semanal {
   costo_promedio      Decimal? @db.Decimal(12, 4)
   creado_at           DateTime @default(now()) @db.Timestamptz(6)
 
-  semana   semanas_operativas @relation(fields: [semana_id], references: [id], onDelete: Cascade)
-  negocio  negocios            @relation(fields: [negocio_id], references: [id])
-  ubicacion ubicaciones         @relation(fields: [ubicacion_id], references: [id])
-  producto products             @relation(fields: [product_id], references: [id])
+  semana    semanas_operativas @relation(fields: [semana_id], references: [id], onDelete: Cascade)
+  negocio   negocios           @relation(fields: [negocio_id], references: [id])
+  ubicacion ubicaciones        @relation(fields: [ubicacion_id], references: [id])
+  producto  products           @relation(fields: [product_id], references: [id])
 
   @@id([semana_id, ubicacion_id, product_id])
   @@index([negocio_id, semana_id])
@@ -926,14 +948,14 @@ model inventario_semanal {
 // Bitácora append-only de eliminaciones/correcciones materiales. No tiene relación
 // al usuario para conservar el evento incluso si esa cuenta se elimina después.
 model auditoria_operativa {
-  id          BigInt   @id @default(autoincrement())
-  negocio_id  BigInt
-  usuario_id  BigInt
-  accion      String
-  entidad     String
-  entidad_id  BigInt?
-  datos       Json
-  creado_at   DateTime @default(now()) @db.Timestamptz(6)
+  id         BigInt   @id @default(autoincrement())
+  negocio_id BigInt
+  usuario_id BigInt
+  accion     String
+  entidad    String
+  entidad_id BigInt?
+  datos      Json
+  creado_at  DateTime @default(now()) @db.Timestamptz(6)
 
   negocio negocios @relation(fields: [negocio_id], references: [id])
 

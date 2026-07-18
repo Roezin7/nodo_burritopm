@@ -7,6 +7,40 @@ import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.j
 import { avisarConfirmarRecepcion, avisarPedidoEnCamino } from '../push/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 import { asegurarInventarioInicialSemanal, repararPedidosHuerfanos } from '../operacion/conciliacion.js';
+import type { Prisma } from '@prisma/client';
+
+async function pedidosVinculados(tx: Prisma.TransactionClient, distribucionId: bigint) {
+  const lineas = await tx.distribucion_lineas.findMany({
+    where: { distribucion_id: distribucionId, pedido_linea_id: { not: null } },
+    select: { pedido_linea: { select: { pedido_id: true } } },
+  });
+  return [...new Set(lineas.flatMap((linea) => linea.pedido_linea ? [linea.pedido_linea.pedido_id] : []).map(String))].map(BigInt);
+}
+
+async function marcarPedidosDeDistribucion(
+  tx: Prisma.TransactionClient,
+  distribucionId: bigint,
+  estado: 'en_preparacion' | 'despachado' | 'entregado',
+) {
+  const ids = await pedidosVinculados(tx, distribucionId);
+  if (ids.length) await tx.pedidos_operativos.updateMany({
+    where: { id: { in: ids }, estado: { notIn: estado === 'despachado' ? ['cerrado', 'cancelado', 'entregado'] : ['cerrado', 'cancelado'] } },
+    data: { estado },
+  });
+}
+
+async function marcarPedidosRecibidosEnUbicacion(tx: Prisma.TransactionClient, distribucionId: bigint, ubicacionId: bigint) {
+  const pendientes = await tx.distribucion_lineas.count({ where: { distribucion_id: distribucionId, ubicacion_destino_id: ubicacionId, cantidad_recibida: null } });
+  if (pendientes) return;
+  const lineas = await tx.distribucion_lineas.findMany({
+    where: { distribucion_id: distribucionId, ubicacion_destino_id: ubicacionId, pedido_linea_id: { not: null } },
+    select: { pedido_linea: { select: { pedido_id: true } } },
+  });
+  const ids = [...new Set(lineas.flatMap((l) => l.pedido_linea ? [l.pedido_linea.pedido_id.toString()] : []))].map(BigInt);
+  if (ids.length) await tx.pedidos_operativos.updateMany({
+    where: { id: { in: ids }, estado: { notIn: ['cerrado', 'cancelado'] } }, data: { estado: 'entregado' },
+  });
+}
 
 /** Último pedido CERRADO de la sucursal: mapa product_id(string) → cantidad pedida, y su id. */
 async function pedidoCerradoSucursal(ubicacionId: bigint) {
@@ -164,7 +198,7 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
   });
   const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
 
-  if (!dist.fecha_entrega || !dist.linea_operacion) throw new HttpError(409, 'Esta preparación anterior no admite ventas operativas nuevas');
+  if (!dist.fecha_entrega || !dist.linea_operacion) throw new HttpError(409, 'Este consolidado anterior no admite ventas operativas nuevas');
   const pedidos = await prisma.pedidos_operativos.findMany({
     where: {
       negocio_id: negocioId,
@@ -176,7 +210,7 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
     },
     include: { lineas: { include: { producto: true } }, ubicacion: true },
   });
-  if (!pedidos.length) throw new HttpError(400, 'Esas sucursales no tienen una venta confirmada pendiente para esta preparación');
+  if (!pedidos.length) throw new HttpError(400, 'Esas sucursales no tienen una venta confirmada pendiente para este consolidado');
 
   const lineasData = pedidos.flatMap((pedido) => pedido.lineas.map((linea) => ({
     distribucion_id: id,
@@ -224,12 +258,12 @@ export async function cambiarEstadoAdmin(negocioId: bigint, id: bigint, estado: 
   const dist = await cargarDistribucion(negocioId, id);
   if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (estado !== 'en_revision' || !['calculada', 'en_revision', 'aprobada', 'verificada'].includes(dist.estado)) {
-    throw new HttpError(409, 'Ese estado no puede forzarse. Usa las acciones del flujo o elimina la preparación para reconstruirla.');
+    throw new HttpError(409, 'Ese estado no puede forzarse. Usa las acciones del flujo o elimina el consolidado para reconstruirlo.');
   }
   const movidas = await prisma.distribucion_lineas.count({
     where: { distribucion_id: id, OR: [{ cantidad_cargada: { gt: 0 } }, { cantidad_recibida: { not: null } }] },
   });
-  if (movidas) throw new HttpError(409, 'La preparación ya movió inventario y no puede volver manualmente a revisión');
+  if (movidas) throw new HttpError(409, 'El consolidado ya movió inventario y no puede volver manualmente a revisión');
   await prisma.distribuciones.update({ where: { id }, data: { estado } });
   return { ok: true, estado };
 }
@@ -367,7 +401,7 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
     // atorada para siempre en "en_preparacion".
     if (pedidosOperativos.length) {
       await tx.pedidos_operativos.updateMany({
-        where: { id: { in: pedidosOperativos.map((p) => p.pedido_id) }, estado: 'en_preparacion' },
+        where: { id: { in: pedidosOperativos.map((p) => p.pedido_id) }, estado: { in: ['en_preparacion', 'despachado', 'entregado'] } },
         data: { estado: 'confirmado' },
       });
     }
@@ -573,7 +607,7 @@ export async function ajustarLineas(negocioId: bigint, id: bigint, ajustes: { li
   const lineas = await prisma.distribucion_lineas.findMany({
     where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id },
   });
-  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a esta preparación');
+  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a este consolidado');
   const porId = new Map(lineas.map((l) => [l.id.toString(), l]));
   await prisma.$transaction(
     ajustes.map((a) => {
@@ -731,9 +765,10 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
     }
     // Una preparación completamente en cero no genera tránsito ni ruta.
     if (totalCargado <= 0) {
-      throw new HttpError(409, 'La preparación no tiene cantidades para cargar.');
+      throw new HttpError(409, 'El consolidado no tiene cantidades para cargar.');
     }
     await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
+    await marcarPedidosDeDistribucion(tx, id, 'despachado');
     if (negocio?.reparto_habilitado) {
       // Con seguimiento de reparto, el camión cargado pone las rutas planeadas en curso.
       await asegurarRutaEnCurso(tx, negocioId, id, usuarioId, sucursalesConCarga);
@@ -991,6 +1026,8 @@ export async function recibirDistribucion(
     const conIncidencia = await tx.distribucion_lineas.count({ where: { distribucion_id: id, incidencia_id: { not: null } } });
     const nuevoEstado = pendientes > 0 ? 'parcialmente_entregada' : conIncidencia > 0 ? 'cerrada_con_incidencias' : 'cerrada';
     await tx.distribuciones.update({ where: { id }, data: { estado: nuevoEstado } });
+    await marcarPedidosDeDistribucion(tx, id, pendientes > 0 ? 'despachado' : 'entregado');
+    await marcarPedidosRecibidosEnUbicacion(tx, id, ubicacionId);
     // Sella la parada de esta sucursal en la ruta (si existe).
     await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal);
   }, { isolationLevel: 'Serializable' });
@@ -1022,7 +1059,6 @@ export async function auditarFaltantesRecepcion(
     where: { distribucion_id: id, ubicacion_destino_id: ubicacionId, cantidad_cargada: { gt: 0 } },
   });
   if (!lineas.length) throw new HttpError(404, 'No hay una recepción para este restaurante');
-  if (!faltantes.some((f) => f.cantidad > 0) && !lineas.some((l) => l.incidencia_id != null)) throw new HttpError(400, 'Registra al menos un faltante');
   const validas = new Set(lineas.map((l) => Number(l.id)));
   if (ids.some((lineaId) => !validas.has(lineaId))) throw new HttpError(400, 'Una o más líneas no pertenecen a esta recepción');
   const faltanteDe = new Map(faltantes.map((f) => [f.linea_id, redondear3(f.cantidad)]));
@@ -1096,10 +1132,37 @@ export async function auditarFaltantesRecepcion(
     await tx.distribuciones.update({
       where: { id }, data: { estado: pendientes > 0 ? 'parcialmente_entregada' : conIncidencia > 0 ? 'cerrada_con_incidencias' : 'cerrada' },
     });
+    await marcarPedidosDeDistribucion(tx, id, pendientes > 0 ? 'despachado' : 'entregado');
+    await marcarPedidosRecibidosEnUbicacion(tx, id, ubicacionId);
     const incidenciaEnSucursal = await tx.distribucion_lineas.count({ where: { distribucion_id: id, ubicacion_destino_id: ubicacionId, incidencia_id: { not: null } } });
     await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal > 0);
   }, { isolationLevel: 'Serializable' });
   return { ok: true };
+}
+
+/** El admin puede validar de una vez todas las recepciones pendientes de una semana.
+ * Equivale a confirmar que lo cargado llegó completo; las recepciones con una auditoría
+ * previa no se pisan y se corrigen individualmente. */
+export async function confirmarRecepcionesSinFaltantesEnRango(
+  negocioId: bigint,
+  usuarioId: bigint,
+  desde: string,
+  hasta: string,
+) {
+  const registros = await auditoriaRecepciones(negocioId, desde, hasta);
+  const pendientes = registros.filter((registro) => registro.estado === 'pendiente');
+  let confirmadas = 0;
+  for (const registro of pendientes) {
+    await auditarFaltantesRecepcion(
+      negocioId,
+      BigInt(registro.distribucion_id),
+      BigInt(registro.ubicacion.id),
+      usuarioId,
+      registro.lineas.map((linea) => ({ linea_id: linea.linea_id, cantidad: 0 })),
+    );
+    confirmadas += 1;
+  }
+  return { confirmadas };
 }
 
 /**
@@ -1248,7 +1311,7 @@ export async function guardarCarga(negocioId: bigint, id: bigint, items: { linea
       where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id },
       select: { id: true, cantidad_aprobada: true, cantidad_sugerida: true },
     });
-  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a esta preparación');
+  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a este consolidado');
   const porId = new Map(lineas.map((l) => [Number(l.id), l]));
   for (const item of items) {
     const linea = porId.get(item.linea_id)!;

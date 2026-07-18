@@ -3,6 +3,7 @@ import { api, ApiError } from '../../api';
 import Spinner from '../../components/Spinner';
 import { useAuth, type Rol } from '../../auth';
 import type { Ubicacion } from './Ubicaciones';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface UsuarioAdmin {
   id: number;
@@ -211,7 +212,7 @@ export default function Usuarios() {
       {cargando ? (
         <Spinner />
       ) : (
-        <>
+        <CollapsibleSection title="Usuarios registrados" count={filtrados.length} className="config-list-section">
           {usuarios.length > 6 && (
             <input className="inv-search" type="search" placeholder="Buscar usuario o rol…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginTop: '0.5rem' }} />
           )}
@@ -248,7 +249,7 @@ export default function Usuarios() {
               </div>
             );
           })}
-        </>
+        </CollapsibleSection>
       )}
     </div>
   );

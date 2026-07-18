@@ -7,6 +7,7 @@ import { FlujoStepper } from '../../flujo';
 import { Icono } from '../../icons';
 import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPicker';
 import Spinner from '../../components/Spinner';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface InventarioResumen {
   id: number;
@@ -177,8 +178,7 @@ export default function Inventario() {
 
   // Solo el historial de inventarios (lista). Se reutiliza en bodega y sucursales.
   const renderHistorial = (esPedido = false) => (
-    <>
-      <h3 className="seccion-title">{esPedido ? 'Historial de pedidos' : 'Historial de inventarios'}</h3>
+    <CollapsibleSection title={esPedido ? 'Historial de pedidos' : 'Historial de inventarios'} count={histFiltrado.length} defaultOpen={false}>
       {inventarios.length > 8 && (
         <input className="inv-search" type="search" placeholder="Buscar por fecha…" value={q} onChange={(e) => setQ(e.target.value)} />
       )}
@@ -200,7 +200,7 @@ export default function Inventario() {
           ))}
         </div>
       )}
-    </>
+    </CollapsibleSection>
   );
 
   // Sesión de hoy + historial (sucursal/personal). `promo`=false usa el aviso discreto.
@@ -459,7 +459,7 @@ function SucursalesOverview({ sucursales, onElegir }: { sucursales: UbicacionAsi
   const lista = [...sucursales].sort((a, b) => (valorDe.get(b.id)?.valor ?? 0) - (valorDe.get(a.id)?.valor ?? 0));
 
   return (
-    <div className="lista-ubicaciones">
+    <CollapsibleSection title="Sucursales" count={lista.length}><div className="lista-ubicaciones">
       {lista.length === 0 ? (
         <p className="muted">No hay sucursales activas.</p>
       ) : (
@@ -473,7 +473,7 @@ function SucursalesOverview({ sucursales, onElegir }: { sucursales: UbicacionAsi
           );
         })
       )}
-    </div>
+    </div></CollapsibleSection>
   );
 }
 

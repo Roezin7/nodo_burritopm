@@ -44,8 +44,8 @@ function TareaHoy({ repartoHabilitado }: { repartoHabilitado: boolean }) {
           if (alerta) return { titulo: alerta.titulo, sub: alerta.detalle, ruta: alerta.ruta };
           if (d.operacion.distribuciones_abiertas > 0) return {
             titulo: 'Distribuciones en proceso',
-            sub: repartoHabilitado ? 'Revisa preparación, despacho y reparto' : 'Revisa preparación, despacho y recepción',
-            ruta: '/semana/preparacion',
+            sub: repartoHabilitado ? 'Revisa despacho y reparto' : 'Revisa despacho y recepción',
+            ruta: '/semana/despacho',
           };
           return null;
         }
@@ -87,7 +87,6 @@ const MODULOS: Modulo[] = [
   { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/semana/produccion', soloAdmin: true },
   { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
   { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
-  { clave: 'distribucion', titulo: 'Preparación', icono: 'package', desc: 'Consolidar pedidos y preparar entregas', ruta: '/semana/preparacion', soloAdmin: true },
   { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'], requiereReparto: true },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['admin', 'encargado_sucursal'] },

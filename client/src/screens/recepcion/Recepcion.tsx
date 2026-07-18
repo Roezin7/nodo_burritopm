@@ -6,6 +6,7 @@ import UbicacionPicker from '../../components/UbicacionPicker';
 import Spinner from '../../components/Spinner';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface LineaRec {
   linea_id: number;
@@ -97,7 +98,7 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
         <div><h1>Confirmar recepción</h1><p className="page-sub">{repartoHabilitado ? 'Confirma lo que llegó del camión o indica una diferencia.' : 'Confirma lo despachado o reporta faltantes.'}</p></div>
       </header>}
       {!integrado && <FlujoStepper activo="recepcion" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Confirmar recepción</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 6 : 5}</span><h2>Confirmar recepción</h2></div></header>}
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes una sucursal asignada.</p>
@@ -120,11 +121,7 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
               <p className="muted">Aún no hay recepciones registradas.</p>
             ) : (
               historial.map((d) => (
-                <div key={d.id} className="card">
-                  <div className="card-head">
-                    <strong>Pedido #{d.id}</strong>
-                    <span className="muted">{d.fecha_entrega ?? new Date(d.recibido_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })}</span>
-                  </div>
+                <CollapsibleSection key={d.id} title={`Pedido #${d.id}`} count={`${d.lineas.length} productos`} summary={d.fecha_entrega ?? new Date(d.recibido_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })}>
                   {d.con_incidencia && <p className="txt-danger" style={{ margin: '0 0 0.4rem' }}>Se recibió con diferencias.</p>}
                   {d.lineas.map((l) => (
                     <div key={l.linea_id} className="dist-row">
@@ -135,7 +132,7 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
                       <span className="dist-aprob">{l.recibida ?? '—'}</span>
                     </div>
                   ))}
-                </div>
+                </CollapsibleSection>
               ))
             )
           ) : dists.length === 0 ? (
@@ -145,8 +142,8 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
               const pendiente = d.lineas.some((l) => l.recibida == null);
               const enProblema = problema.has(d.id);
               return (
-                <div key={d.id} className="card">
-                  <div className="card-head"><strong>Pedido #{d.id} · {d.fecha_entrega ?? 'sin fecha'}</strong> <EstadoDistChip estado={d.estado} /></div>
+                <CollapsibleSection key={d.id} title={`Pedido #${d.id}`} count={`${d.lineas.length} productos`} summary={d.fecha_entrega ?? 'Sin fecha'}>
+                  <div className="receipt-status"><EstadoDistChip estado={d.estado} /></div>
                   {d.lineas.map((l) => (
                     <div key={l.linea_id} className="dist-row">
                       <div className="conteo-prod">
@@ -177,7 +174,7 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
                       </div>
                     )
                   )}
-                </div>
+                </CollapsibleSection>
               );
             })
           )}
@@ -211,15 +208,15 @@ function AuditoriaRecepcion({ integrado, semana, repartoHabilitado }: { integrad
     setFaltantes(Object.fromEntries(registro.lineas.map((linea) => [linea.linea_id, linea.faltante > 0 ? String(linea.faltante) : ''])));
     setError(''); setOk('');
   }
-  async function guardar(registro: AuditoriaRec) {
-    const items = registro.lineas.map((linea) => ({ linea_id: linea.linea_id, cantidad: Number(faltantes[linea.linea_id] || 0) }));
-    if (!items.some((item) => item.cantidad > 0) && registro.estado !== 'con_faltantes') { setError('Indica al menos un artículo faltante.'); return; }
+  async function guardar(registro: AuditoriaRec, todoCorrecto = false) {
+    const items = registro.lineas.map((linea) => ({ linea_id: linea.linea_id, cantidad: todoCorrecto ? 0 : Number(faltantes[linea.linea_id] || 0) }));
     setBusy(true); setError(''); setOk('');
     try {
       await api(`/distribuciones/recepciones/${registro.distribucion_id}/auditar`, {
         method: 'POST', body: { ubicacion_id: registro.ubicacion.id, faltantes: items },
       });
-      setEditando(''); setFaltantes({}); setOk(`Faltantes registrados para ${registro.ubicacion.nombre}.`);
+      const hayFaltantes = items.some((item) => item.cantidad > 0);
+      setEditando(''); setFaltantes({}); setOk(hayFaltantes ? `Faltantes registrados para ${registro.ubicacion.nombre}.` : `${registro.ubicacion.nombre} confirmado sin faltantes.`);
       await cargarAuditoria();
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la auditoría.'); }
     finally { setBusy(false); }
@@ -233,24 +230,35 @@ function AuditoriaRecepcion({ integrado, semana, repartoHabilitado }: { integrad
   const auditadas = registros.filter((r) => r.estado !== 'pendiente').length;
   const fechaLabel = (iso: string) => iso === 'Sin fecha' ? iso : new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
 
+  async function confirmarTodas() {
+    if (!pendientes || !window.confirm(`Se confirmarán ${pendientes} recepciones pendientes como completas. ¿Continuar?`)) return;
+    setBusy(true); setError(''); setOk('');
+    try {
+      const r = await api<{ confirmadas: number }>('/distribuciones/recepciones/auditar-todas', { method: 'POST', body: { desde: semana.inicio, hasta: semana.fin } });
+      setOk(`${r.confirmadas} recepciones confirmadas sin faltantes.`);
+      await cargarAuditoria();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron confirmar las recepciones.'); }
+    finally { setBusy(false); }
+  }
+
   return <div className={integrado ? 'embedded-operation reception-audit' : 'page reception-audit'}>
-    {!integrado && <header className="page-head"><div><span className="eyebrow">Control administrativo</span><h1>Auditoría de recepción</h1><p className="page-sub">Revisa todas las sucursales y registra únicamente los artículos que faltaron.</p></div></header>}
+    {!integrado && <header className="page-head"><div><span className="eyebrow">Control administrativo</span><h1>Auditoría de recepción</h1></div></header>}
     {!integrado && <FlujoStepper activo="recepcion" />}
-    {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Auditoría de recepción</h2><p>Faltantes por restaurante</p></div></header>}
+    {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 6 : 5}</span><h2>Auditoría de recepción</h2><p>Faltantes por restaurante</p></div></header>}
 
     <div className="metric-strip metric-strip--four reception-audit-metrics"><div><span>Recepciones</span><strong>{registros.length}</strong></div><div><span>Pendientes del restaurante</span><strong>{pendientes}</strong></div><div><span>Auditadas</span><strong>{auditadas}</strong></div><div><span>Con faltantes</span><strong>{conFaltantes}</strong></div></div>
-    <section className="workspace-card reception-audit-toolbar"><div className="segmented segmented--small"><button className={filtro === 'todos' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('todos')}>Todas</button><button className={filtro === 'pendiente' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('pendiente')}>Pendientes</button><button className={filtro === 'con_faltantes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('con_faltantes')}>Con faltantes</button><button className={filtro === 'sin_faltantes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('sin_faltantes')}>Sin faltantes</button></div><input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar restaurante" /></section>
+    <section className="workspace-card reception-audit-toolbar"><div className="segmented segmented--small"><button className={filtro === 'todos' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('todos')}>Todas</button><button className={filtro === 'pendiente' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('pendiente')}>Pendientes</button><button className={filtro === 'con_faltantes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('con_faltantes')}>Con faltantes</button><button className={filtro === 'sin_faltantes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('sin_faltantes')}>Sin faltantes</button></div><input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar restaurante" />{pendientes > 0 && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void confirmarTodas()}>Confirmar pendientes</button>}</section>
     {error && <p className="error-msg">{error}</p>}
     {ok && <p className="ok-msg">{ok}</p>}
-    {cargando ? <Spinner label="Cargando auditoría…" /> : <div className="reception-audit-days">{fechas.map((fecha) => <section key={fecha}><div className="section-heading"><div><span className="eyebrow">Entrega</span><h2>{fechaLabel(fecha)}</h2></div><span>{visibles.filter((r) => (r.fecha_entrega ?? 'Sin fecha') === fecha).length} restaurantes</span></div><div className="reception-audit-grid">{visibles.filter((r) => (r.fecha_entrega ?? 'Sin fecha') === fecha).map((registro) => {
+    {cargando ? <Spinner label="Cargando auditoría…" /> : <div className="reception-audit-days">{fechas.map((fecha) => <CollapsibleSection title={fechaLabel(fecha)} count={`${visibles.filter((r) => (r.fecha_entrega ?? 'Sin fecha') === fecha).length} restaurantes`} key={fecha}><div className="reception-audit-grid">{visibles.filter((r) => (r.fecha_entrega ?? 'Sin fecha') === fecha).map((registro) => {
       const clave = `${registro.distribucion_id}:${registro.ubicacion.id}`;
       const abierto = editando === clave;
       return <article className={`workspace-card reception-audit-card reception-audit-card--${registro.estado}`} key={clave}>
-        <header><div><strong>{registro.ubicacion.nombre}</strong><small>{registro.ubicacion.codigo} · preparación #{registro.distribucion_id}</small></div><span className={`chip ${registro.estado === 'con_faltantes' ? 'chip--warn' : registro.estado === 'sin_faltantes' ? 'chip--ok' : 'chip--info'}`}>{registro.estado === 'con_faltantes' ? `${registro.total_faltante} faltantes` : registro.estado === 'sin_faltantes' ? 'Sin faltantes' : 'Por confirmar'}</span></header>
+        <header><div><strong>{registro.ubicacion.nombre}</strong><small>{registro.ubicacion.codigo} · consolidado #{registro.distribucion_id}</small></div><span className={`chip ${registro.estado === 'con_faltantes' ? 'chip--warn' : registro.estado === 'sin_faltantes' ? 'chip--ok' : 'chip--info'}`}>{registro.estado === 'con_faltantes' ? `${registro.total_faltante} faltantes` : registro.estado === 'sin_faltantes' ? 'Sin faltantes' : 'Por confirmar'}</span></header>
         <div className="reception-audit-lines"><div className="reception-audit-line reception-audit-line--head"><span>Artículo</span><span>Enviado</span><span>{abierto ? 'Faltó' : 'Recibido'}</span></div>{registro.lineas.map((linea) => <div className={`reception-audit-line ${linea.faltante > 0 ? 'has-shortage' : ''}`} key={linea.linea_id}><span><strong>{linea.nombre}</strong><small>{linea.unidad}</small></span><span>{linea.esperado.toLocaleString('es-MX')}</span>{abierto ? <input type="number" min="0" max={linea.esperado} step="0.5" inputMode="decimal" aria-label={`Faltante de ${linea.nombre} en ${registro.ubicacion.nombre}`} value={faltantes[linea.linea_id] ?? ''} placeholder="0" onChange={(e) => setFaltantes({ ...faltantes, [linea.linea_id]: e.target.value })} /> : <span>{linea.recibida == null ? 'Pendiente' : linea.recibida.toLocaleString('es-MX')}{linea.faltante > 0 && <small>Faltó {linea.faltante}</small>}</span>}</div>)}</div>
-        <footer>{abierto ? <><button className="btn btn-secondary" disabled={busy} onClick={() => { setEditando(''); setFaltantes({}); }}>Cancelar</button><button className="btn btn-primary" disabled={busy || (registro.estado !== 'con_faltantes' && !registro.lineas.some((linea) => Number(faltantes[linea.linea_id] || 0) > 0))} onClick={() => void guardar(registro)}>{busy ? 'Guardando…' : registro.estado === 'con_faltantes' ? 'Guardar corrección' : 'Guardar faltantes'}</button></> : <><span>{registro.estado === 'pendiente' ? 'Esperando confirmación del restaurante.' : registro.estado === 'con_faltantes' ? 'Incidencia registrada.' : 'Sin faltantes registrados.'}</span><button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => abrir(registro)}>{registro.estado === 'con_faltantes' ? 'Corregir auditoría' : 'Registrar faltante'}</button></>}</footer>
+        <footer>{abierto ? <><button className="btn btn-secondary" disabled={busy} onClick={() => { setEditando(''); setFaltantes({}); }}>Cancelar</button><button className="btn btn-secondary" disabled={busy} onClick={() => void guardar(registro, true)}>Todo correcto</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardar(registro)}>{busy ? 'Guardando…' : registro.estado === 'con_faltantes' ? 'Guardar corrección' : registro.lineas.some((linea) => Number(faltantes[linea.linea_id] || 0) > 0) ? 'Guardar faltantes' : 'Confirmar sin faltantes'}</button></> : <><span>{registro.estado === 'pendiente' ? 'Pendiente de validación.' : registro.estado === 'con_faltantes' ? 'Incidencia registrada.' : 'Sin faltantes registrados.'}</span>{registro.estado === 'pendiente' && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void guardar(registro, true)}>Todo correcto</button>}<button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => abrir(registro)}>{registro.estado === 'con_faltantes' ? 'Corregir auditoría' : 'Registrar faltante'}</button></>}</footer>
       </article>;
-    })}</div></section>)}</div>}
+    })}</div></CollapsibleSection>)}</div>}
     {!cargando && !visibles.length && <div className="empty-state"><strong>No hay recepciones en este filtro</strong><span>Cambia el estado, la búsqueda o la semana.</span></div>}
   </div>;
 }

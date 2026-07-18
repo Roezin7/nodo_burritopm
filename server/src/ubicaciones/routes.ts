@@ -16,6 +16,9 @@ interface UbicacionDTO {
   direccion: string | null;
   tipo: 'bodega' | 'sucursal';
   activo: boolean;
+  empresa_cliente_id: number | null;
+  entrega_en_ubicacion_id: number | null;
+  orden_operativo: number;
 }
 
 function dto(u: {
@@ -25,9 +28,37 @@ function dto(u: {
   direccion: string | null;
   tipo: 'bodega' | 'sucursal';
   activo: boolean;
+  empresa_cliente_id: bigint | null;
+  entrega_en_ubicacion_id: bigint | null;
+  orden_operativo: number;
 }): UbicacionDTO {
-  return { id: Number(u.id), nombre: u.nombre, codigo: u.codigo, direccion: u.direccion, tipo: u.tipo, activo: u.activo };
+  return {
+    id: Number(u.id), nombre: u.nombre, codigo: u.codigo, direccion: u.direccion, tipo: u.tipo, activo: u.activo,
+    empresa_cliente_id: u.empresa_cliente_id ? Number(u.empresa_cliente_id) : null,
+    entrega_en_ubicacion_id: u.entrega_en_ubicacion_id ? Number(u.entrega_en_ubicacion_id) : null,
+    orden_operativo: u.orden_operativo,
+  };
 }
+
+async function validarReferencias(negocioId: bigint, empresaId?: number | null, entregaId?: number | null) {
+  if (empresaId) {
+    const existe = await prisma.empresas_clientes.count({ where: { id: BigInt(empresaId), negocio_id: negocioId, activo: true } });
+    if (!existe) throw new HttpError(400, 'La empresa seleccionada no pertenece al negocio');
+  }
+  if (entregaId) {
+    const existe = await prisma.ubicaciones.count({ where: { id: BigInt(entregaId), negocio_id: negocioId, tipo: 'sucursal', activo: true } });
+    if (!existe) throw new HttpError(400, 'El punto de entrega seleccionado no es válido');
+  }
+}
+
+/** Empresas disponibles para facturar y agrupar restaurantes. */
+ubicacionesRouter.get('/empresas', requireAuth, asyncHandler(async (req, res) => {
+  const empresas = await prisma.empresas_clientes.findMany({
+    where: { negocio_id: req.auth!.negocioId, activo: true }, orderBy: { codigo: 'asc' },
+    select: { id: true, codigo: true, nombre: true },
+  });
+  res.json(empresas.map((e) => ({ ...e, id: Number(e.id) })));
+}));
 
 /** GET /ubicaciones — lista (incluye inactivas) para gestión. Cualquier usuario autenticado. */
 ubicacionesRouter.get(
@@ -47,6 +78,9 @@ const crearSchema = z.object({
   codigo: z.string().min(1).max(20),
   direccion: z.string().optional(),
   tipo,
+  empresa_cliente_id: z.coerce.number().int().positive().nullable().optional(),
+  entrega_en_ubicacion_id: z.coerce.number().int().positive().nullable().optional(),
+  orden_operativo: z.coerce.number().int().min(0).max(9999).optional(),
 });
 
 /** POST /ubicaciones — crea bodega o sucursal (admin). */
@@ -56,6 +90,7 @@ ubicacionesRouter.post(
   soloAdmin,
   asyncHandler(async (req, res) => {
     const b = crearSchema.parse(req.body);
+    await validarReferencias(req.auth!.negocioId, b.empresa_cliente_id, b.entrega_en_ubicacion_id);
     const codigo = b.codigo.trim().toUpperCase();
     const dup = await prisma.ubicaciones.findFirst({
       where: { negocio_id: req.auth!.negocioId, codigo },
@@ -68,6 +103,9 @@ ubicacionesRouter.post(
         codigo,
         direccion: b.direccion?.trim() || null,
         tipo: b.tipo,
+        empresa_cliente_id: b.tipo === 'sucursal' && b.empresa_cliente_id ? BigInt(b.empresa_cliente_id) : null,
+        entrega_en_ubicacion_id: b.tipo === 'sucursal' && b.entrega_en_ubicacion_id ? BigInt(b.entrega_en_ubicacion_id) : null,
+        orden_operativo: b.orden_operativo ?? 999,
       },
     });
     res.status(201).json(dto(u));
@@ -80,6 +118,9 @@ const editarSchema = z.object({
   direccion: z.string().nullable().optional(),
   tipo: tipo.optional(),
   activo: z.boolean().optional(),
+  empresa_cliente_id: z.coerce.number().int().positive().nullable().optional(),
+  entrega_en_ubicacion_id: z.coerce.number().int().positive().nullable().optional(),
+  orden_operativo: z.coerce.number().int().min(0).max(9999).optional(),
 });
 
 /** PATCH /ubicaciones/:id — edita / activa / desactiva (admin). */
@@ -90,6 +131,7 @@ ubicacionesRouter.patch(
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
     const b = editarSchema.parse(req.body);
+    await validarReferencias(req.auth!.negocioId, b.empresa_cliente_id, b.entrega_en_ubicacion_id);
     const actual = await prisma.ubicaciones.findFirst({
       where: { id, negocio_id: req.auth!.negocioId },
     });
@@ -111,6 +153,9 @@ ubicacionesRouter.patch(
         direccion: b.direccion === undefined ? undefined : b.direccion?.trim() || null,
         tipo: b.tipo,
         activo: b.activo,
+        empresa_cliente_id: b.tipo === 'bodega' ? null : b.empresa_cliente_id === undefined ? undefined : b.empresa_cliente_id ? BigInt(b.empresa_cliente_id) : null,
+        entrega_en_ubicacion_id: b.tipo === 'bodega' ? null : b.entrega_en_ubicacion_id === undefined ? undefined : b.entrega_en_ubicacion_id ? BigInt(b.entrega_en_ubicacion_id) : null,
+        orden_operativo: b.orden_operativo,
       },
     });
     res.json(dto(u));

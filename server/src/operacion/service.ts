@@ -16,17 +16,6 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
 const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029']);
 
-const salidasPorMateria: Record<string, string[]> = {
-  'RAW-INSIDE-SKIRT': ['MEAT-STEAK'],
-  'RAW-CHICKEN': ['MEAT-CHICKEN'],
-  // Carnitas aprovecha el remanente de Pork Butt. Se registra como subproducto
-  // vendible a precio fijo, pero no absorbe costo ni peso del batch principal.
-  'RAW-PORK-BUTT': ['MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP', 'MEAT-CARNITAS'],
-  'RAW-OUTSIDE-SKIRT': ['MEAT-ASADA', 'MEAT-FAJITAS'],
-  'RAW-INSIDE-ROUND': ['MEAT-MILANESA'],
-  'RAW-TAPATIOS-TACO': ['MEAT-TAPATIOS-TACO'],
-};
-
 export interface LoteFifoCalculable {
   cajas: number;
   peso_lb: number;
@@ -161,7 +150,7 @@ export function skuPastorParaEmpresa(empresaCodigo: string) {
 }
 
 export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubicacionesPermitidas?: bigint[], fechaReferencia?: string) {
-  const [empresas, ubicaciones, productos, proveedores, plantillas, semanas] = await Promise.all([
+  const [empresas, ubicaciones, productos, proveedores, plantillas, semanas, recetas] = await Promise.all([
     prisma.empresas_clientes.findMany({
       where: { negocio_id: negocioId, activo: true },
       orderBy: { nombre: 'asc' },
@@ -187,6 +176,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       orderBy: [{ anio: 'desc' }, { semana: 'desc' }],
       take: 52,
     }),
+    prisma.recetas_produccion.findMany({ where: { negocio_id: negocioId }, orderBy: [{ materia_prima_id: 'asc' }, { orden: 'asc' }] }),
   ]);
   const rangoPrecio = fechaReferencia ? rangoSemana(fechaReferencia) : null;
   const preciosSemana = rangoPrecio ? await preciosVentaSemana(negocioId, productos, rangoPrecio.desde, rangoPrecio.hasta) : null;
@@ -226,6 +216,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       paradas: p.paradas.map((x) => ({ ubicacion_id: Number(x.ubicacion_id), nombre: x.ubicacion.nombre, orden: x.orden, opcional: x.opcional })),
     })) : [],
     calendario_pedidos: calendarioPedidos,
+    recetas_produccion: esAdmin ? recetas.map((r) => ({ materia_prima_id: Number(r.materia_prima_id), producto_salida_id: Number(r.producto_salida_id), sin_costo: r.sin_costo, orden: r.orden })) : [],
     semanas: semanas.map((s) => ({
       id: Number(s.id), anio: s.anio, semana: s.semana, inicia_at: iso(s.inicia_at), termina_at: iso(s.termina_at), estado: s.estado,
     })),
@@ -336,7 +327,7 @@ async function guardarPedidoEnTx(
     if (pedido && !['borrador', 'confirmado'].includes(pedido.estado)) {
       throw new HttpError(409, pedido.estado === 'cerrado'
         ? 'El pedido pertenece a un cierre. Reabre la semana antes de corregirlo.'
-        : 'El pedido ya entró a preparación. Elimina esa preparación para corregir la venta y volver a generarla.');
+        : 'La venta ya fue consolidada. Elimina ese consolidado para corregirla y volver a generarlo.');
     }
     pedido = pedido
       ? await tx.pedidos_operativos.update({
@@ -409,12 +400,59 @@ export async function guardarPedidosSemana(
   };
 }
 
-/**
- * Confirma en un solo paso todos los borradores que sí contienen cantidades.
- * Los borradores vacíos se conservan como borrador y nunca pasan a preparación.
- */
+export function calcularCoberturaBpm(
+  fechasEsperadas: Date[],
+  sucursales: { id: bigint; nombre: string; entrega_en_ubicacion_id: bigint | null }[],
+  paradasPorDia: Map<number, Set<string>>,
+  presentes: Set<string>,
+) {
+  return fechasEsperadas.map((dia) => {
+    const paradas = paradasPorDia.get(dia.getUTCDay()) ?? new Set<string>();
+    const esperadas = sucursales.filter((u) => paradas.has((u.entrega_en_ubicacion_id ?? u.id).toString()));
+    const pendientes = esperadas.filter((u) => !presentes.has(`${iso(dia)}:${u.id}`)).map((u) => u.nombre);
+    return { fecha: iso(dia), total: esperadas.length, confirmados: esperadas.length - pendientes.length, pendientes };
+  });
+}
+
+/** Cobertura esperada de BPM derivada de las rutas configuradas, no de días fijos. */
+export async function coberturaPedidosBpm(negocioId: bigint, linea: LineaOperacion, desde: string, hasta: string) {
+  const bpm = await prisma.empresas_clientes.findFirst({
+    where: { negocio_id: negocioId, codigo: 'BPM', activo: true }, select: { id: true },
+  });
+  const sucursales = bpm ? await prisma.ubicaciones.findMany({
+    where: { negocio_id: negocioId, empresa_cliente_id: bpm.id, tipo: 'sucursal', activo: true },
+    select: { id: true, nombre: true, entrega_en_ubicacion_id: true },
+    orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
+  }) : [];
+  const plantillas = await prisma.plantillas_ruta.findMany({
+    where: { negocio_id: negocioId, linea_operacion: linea, activo: true },
+    select: { dia_semana: true, paradas: { select: { ubicacion_id: true } } },
+  });
+  const paradasPorDia = new Map<number, Set<string>>();
+  for (const plantilla of plantillas) {
+    const paradas = paradasPorDia.get(plantilla.dia_semana) ?? new Set<string>();
+    for (const parada of plantilla.paradas) paradas.add(parada.ubicacion_id.toString());
+    paradasPorDia.set(plantilla.dia_semana, paradas);
+  }
+  const fechasEsperadas: Date[] = [];
+  for (let cursor = fecha(desde); cursor <= fecha(hasta); cursor = sumarDias(cursor, 1)) {
+    if (paradasPorDia.has(cursor.getUTCDay())) fechasEsperadas.push(cursor);
+  }
+  const pedidos = sucursales.length && fechasEsperadas.length ? await prisma.pedidos_operativos.findMany({
+    where: {
+      negocio_id: negocioId, linea_operacion: linea, ubicacion_id: { in: sucursales.map((u) => u.id) },
+      fecha_entrega: { in: fechasEsperadas }, estado: { notIn: ['borrador', 'cancelado'] }, lineas: { some: {} },
+    },
+    select: { ubicacion_id: true, fecha_entrega: true },
+  }) : [];
+  const presentes = new Set(pedidos.map((p) => `${iso(p.fecha_entrega)}:${p.ubicacion_id}`));
+  return calcularCoberturaBpm(fechasEsperadas, sucursales, paradasPorDia, presentes);
+}
+
+/** Confirma todos los borradores con cantidades; los vacíos nunca pasan a preparación. */
 export async function confirmarPedidosEnRango(
   negocioId: bigint,
+  usuarioId: bigint,
   linea: LineaOperacion,
   desde: string,
   hasta: string,
@@ -433,47 +471,46 @@ export async function confirmarPedidosEnRango(
     });
   }
 
-  // BPM opera con todas sus sucursales activas. La cobertura no inventa cantidades:
-  // hace visible cualquier restaurante que aún no tenga un pedido confirmado.
-  const bpm = await prisma.empresas_clientes.findFirst({
-    where: { negocio_id: negocioId, codigo: 'BPM', activo: true },
-    select: { id: true },
-  });
-  const sucursalesBpm = bpm
-    ? await prisma.ubicaciones.findMany({
-        where: { negocio_id: negocioId, empresa_cliente_id: bpm.id, tipo: 'sucursal', activo: true },
-        select: { id: true, nombre: true },
-        orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
-      })
-    : [];
-  const fechasEsperadas: Date[] = [];
-  for (let cursor = fecha(desde); cursor <= fecha(hasta); cursor = sumarDias(cursor, 1)) {
-    const dia = cursor.getUTCDay();
-    if ((linea === 'carne' && [3, 6].includes(dia)) || (linea === 'desechables' && dia === 3)) fechasEsperadas.push(cursor);
-  }
-  const pedidosBpm = sucursalesBpm.length && fechasEsperadas.length
-    ? await prisma.pedidos_operativos.findMany({
-        where: {
-          negocio_id: negocioId,
-          linea_operacion: linea,
-          ubicacion_id: { in: sucursalesBpm.map((u) => u.id) },
-          fecha_entrega: { in: fechasEsperadas },
-          estado: { notIn: ['borrador', 'cancelado'] },
-          lineas: { some: {} },
+  const cobertura_bpm = await coberturaPedidosBpm(negocioId, linea, desde, hasta);
+
+  // "Confirmar todos" es el punto en que el admin declara terminada la captura. Si la
+  // cobertura BPM está completa, el sistema consolida y aprueba las preparaciones solo;
+  // el paso Preparación queda para revisar/imprimir y no para repetir la captura.
+  let preparaciones = { creadas: 0, existentes: 0, aprobadas: 0 };
+  if (cobertura_bpm.every((c) => c.pendientes.length === 0)) {
+    const generadas = await crearPreparacionesEnRango(negocioId, usuarioId, desde, hasta, linea);
+    const aprobables = await prisma.distribuciones.findMany({
+      where: {
+        negocio_id: negocioId, linea_operacion: linea,
+        fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+        estado: { in: ['calculada', 'en_revision'] },
+      },
+      select: { id: true },
+    });
+    if (aprobables.length) await prisma.$transaction(async (tx) => {
+      const lineasSinAprobar = await tx.distribucion_lineas.findMany({
+        where: { distribucion_id: { in: aprobables.map((d) => d.id) }, cantidad_aprobada: null },
+      });
+      for (const l of lineasSinAprobar) await tx.distribucion_lineas.update({
+        where: { id: l.id },
+        data: {
+          cantidad_aprobada: l.cantidad_sugerida,
+          costo_total: r2(num0(l.cantidad_sugerida) * (num(l.costo_unitario) ?? 0)),
         },
-        select: { ubicacion_id: true, fecha_entrega: true },
-      })
-    : [];
-  const presentes = new Set(pedidosBpm.map((p) => `${iso(p.fecha_entrega)}:${p.ubicacion_id}`));
-  const cobertura_bpm = fechasEsperadas.map((dia) => {
-    const pendientes = sucursalesBpm.filter((u) => !presentes.has(`${iso(dia)}:${u.id}`)).map((u) => u.nombre);
-    return { fecha: iso(dia), total: sucursalesBpm.length, confirmados: sucursalesBpm.length - pendientes.length, pendientes };
-  });
+      });
+      await tx.distribuciones.updateMany({
+        where: { id: { in: aprobables.map((d) => d.id) } },
+        data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
+      });
+    });
+    preparaciones = { creadas: generadas.creadas.length, existentes: generadas.existentes, aprobadas: aprobables.length };
+  }
 
   return {
     confirmados: conPedido.length,
     borradores_vacios: borradores.length - conPedido.length,
     cobertura_bpm,
+    preparaciones,
   };
 }
 
@@ -679,6 +716,145 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     return c;
   }, { isolationLevel: 'Serializable' });
   return { id: Number(compra.id), total, vence_at: iso(compra.vence_at) };
+}
+
+/**
+ * Corrige una compra sin romper su trazabilidad. Se retira temporalmente la entrada
+ * anterior y se vuelve a aplicar la corregida dentro de la misma transacción.
+ */
+export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint, input: CompraInput) {
+  await asegurarSemanaEditable(negocioId, input.fecha);
+  const [proveedor, ubicacion, productos, compraActual] = await Promise.all([
+    prisma.proveedores.findFirst({ where: { id: BigInt(input.proveedor_id), negocio_id: negocioId, activo: true } }),
+    prisma.ubicaciones.findFirst({ where: { id: BigInt(input.ubicacion_id), negocio_id: negocioId, activo: true } }),
+    prisma.products.findMany({ where: { id: { in: input.lineas.map((l) => BigInt(l.product_id)) }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true } }),
+    prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId }, select: { fecha: true } }),
+  ]);
+  if (!compraActual) throw new HttpError(404, 'Compra no encontrada');
+  await asegurarSemanaEditable(negocioId, iso(compraActual.fecha));
+  if (!proveedor) throw new HttpError(400, 'Proveedor no válido');
+  if (!ubicacion) throw new HttpError(400, 'Ubicación no válida');
+  if (!input.lineas.length || input.lineas.some((l) => l.cajas <= 0 || l.costo_total < 0)) throw new HttpError(400, 'La compra requiere cantidad y costo válidos');
+  if (productos.length !== new Set(input.lineas.map((l) => String(l.product_id))).size) throw new HttpError(400, 'La compra contiene un producto no válido');
+  for (const linea of input.lineas) {
+    const producto = productos.find((p) => p.id === BigInt(linea.product_id))!;
+    if (producto.tipo_operativo === 'materia_prima' && (linea.peso_total_lb ?? 0) <= 0) throw new HttpError(400, `${producto.nombre} requiere peso total`);
+    if (producto.linea_operacion === 'carne' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${producto.nombre} debe recibirse en Carnicería`);
+    if (producto.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${producto.nombre} debe recibirse en Bodega Adison`);
+  }
+
+  const total = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
+  const nuevaFecha = fecha(input.fecha);
+  return prisma.$transaction(async (tx) => {
+    const anterior = await tx.compras.findFirst({
+      where: { id: compraId, negocio_id: negocioId },
+      include: { lineas: { include: { producto: true, lote: { include: { _count: { select: { consumos: true, ajustes: true } } } } } } },
+    });
+    if (!anterior) throw new HttpError(404, 'Compra no encontrada');
+    if (anterior.estado !== 'pendiente') throw new HttpError(409, 'Solo se pueden editar compras pendientes de pago.');
+    if (anterior.ubicacion_id !== ubicacion.id) throw new HttpError(409, 'No se puede cambiar el almacén de una compra existente.');
+
+    const gruposAnteriores = new Map<string, { productId: bigint; cajas: number; costo: number; materiaPrima: boolean; nombre: string }>();
+    for (const linea of anterior.lineas) {
+      const materiaPrima = linea.producto.tipo_operativo === 'materia_prima';
+      if (materiaPrima) {
+        const lote = linea.lote;
+        const integro = lote
+          && Math.abs(num0(lote.cajas_disponibles) - num0(lote.cajas_iniciales)) <= 0.001
+          && Math.abs(num0(lote.peso_disponible_lb) - num0(lote.peso_inicial_lb)) <= 0.001
+          && Math.abs(num0(lote.costo_disponible) - num0(lote.costo_inicial)) <= 0.01
+          && lote._count.consumos === 0 && lote._count.ajustes === 0;
+        if (!integro) throw new HttpError(409, `${linea.producto.nombre}: esta compra ya fue utilizada y no se puede editar.`);
+      }
+      const clave = linea.product_id.toString();
+      const grupo = gruposAnteriores.get(clave) ?? { productId: linea.product_id, cajas: 0, costo: 0, materiaPrima, nombre: linea.producto.nombre };
+      grupo.cajas = r3(grupo.cajas + num0(linea.cajas));
+      grupo.costo = r2(grupo.costo + num0(linea.costo_total));
+      gruposAnteriores.set(clave, grupo);
+    }
+
+    for (const grupo of gruposAnteriores.values()) {
+      const existencia = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: anterior.ubicacion_id, product_id: grupo.productId } } });
+      const cantidad = num0(existencia?.cantidad_disponible);
+      if (cantidad + 0.0001 < grupo.cajas) throw new HttpError(409, `${grupo.nombre}: el inventario disponible ya es menor que la compra. Revierte primero su uso.`);
+      const cantidadBase = r3(cantidad - grupo.cajas);
+      const valorBase = Math.max(0, cantidad * (num(existencia?.costo_promedio) ?? 0) - grupo.costo);
+      await tx.existencias.updateMany({
+        where: { ubicacion_id: anterior.ubicacion_id, product_id: grupo.productId },
+        data: { cantidad_disponible: cantidadBase, costo_promedio: cantidadBase > 0 ? r4(valorBase / cantidadBase) : null },
+      });
+    }
+
+    const lotesAnteriores = anterior.lineas.flatMap((linea) => linea.lote ? [linea.lote.id] : []);
+    if (lotesAnteriores.length) await tx.lotes_materia_prima.deleteMany({ where: { id: { in: lotesAnteriores } } });
+    await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'compra', documento_id: compraId } });
+    await tx.compra_lineas.deleteMany({ where: { compra_id: compraId } });
+    await tx.compras.update({
+      where: { id: compraId },
+      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, vence_at: sumarDias(nuevaFecha, 14), referencia: input.referencia, total },
+    });
+
+    for (const [indice, linea] of input.lineas.entries()) {
+      const productId = BigInt(linea.product_id);
+      const producto = productos.find((p) => p.id === productId)!;
+      const materiaPrima = producto.tipo_operativo === 'materia_prima';
+      const pesoTotal = linea.peso_total_lb ?? 0;
+      const lotesPrevios = materiaPrima ? await tx.lotes_materia_prima.findMany({
+        where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: productId, cajas_disponibles: { gt: 0 } },
+        select: { cajas_disponibles: true, peso_disponible_lb: true },
+      }) : [];
+      const cajasPrevias = lotesPrevios.reduce((suma, lote) => suma + num0(lote.cajas_disponibles), 0);
+      const pesoPrevio = lotesPrevios.reduce((suma, lote) => suma + num0(lote.peso_disponible_lb), 0);
+      const costoCaja = r4(linea.costo_total / linea.cajas);
+      const compraLinea = await tx.compra_lineas.create({
+        data: { compra_id: compraId, product_id: productId, cajas: r3(linea.cajas), peso_total_lb: r3(pesoTotal), costo_total: r2(linea.costo_total), congelado: materiaPrima && (linea.congelado ?? false) },
+      });
+      if (materiaPrima) await tx.lotes_materia_prima.create({
+        data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: productId, compra_linea_id: compraLinea.id, fecha: nuevaFecha, congelado: linea.congelado ?? false, cajas_iniciales: r3(linea.cajas), cajas_disponibles: r3(linea.cajas), peso_inicial_lb: r3(pesoTotal), peso_disponible_lb: r3(pesoTotal), costo_inicial: r2(linea.costo_total), costo_disponible: r2(linea.costo_total) },
+      });
+      await aplicarMovimiento(tx, {
+        negocioId, productId, tipo: 'compra_recibida', cantidad: linea.cajas, usuarioId,
+        destinoId: ubicacion.id, costoUnitario: costoCaja, documentoTipo: 'compra', documentoId: compraId,
+        comentario: `${proveedor.nombre}${materiaPrima && linea.congelado ? ' · congelado' : ''}`,
+        idempotencyKey: `compra:${compraId}:${indice}`,
+        deltas: [{ ubicacionId: ubicacion.id, productId, disponible: linea.cajas, costoUnitario: costoCaja }],
+      });
+      await tx.products.update({
+        where: { id: productId },
+        data: { ultimo_costo: costoCaja, peso_caja_lb: materiaPrima ? r3((pesoPrevio + pesoTotal) / (cajasPrevias + linea.cajas)) : undefined },
+      });
+    }
+    const productosNuevos = new Set(input.lineas.map((linea) => String(linea.product_id)));
+    for (const grupo of gruposAnteriores.values()) {
+      if (productosNuevos.has(grupo.productId.toString())) continue;
+      const ultimaLinea = await tx.compra_lineas.findFirst({
+        where: { product_id: grupo.productId, compra: { negocio_id: negocioId } },
+        orderBy: { id: 'desc' },
+        select: { cajas: true, peso_total_lb: true, costo_total: true },
+      });
+      const cajasUltima = num0(ultimaLinea?.cajas);
+      const lotesRestantes = grupo.materiaPrima ? await tx.lotes_materia_prima.findMany({
+        where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: grupo.productId, cajas_disponibles: { gt: 0 } },
+        select: { cajas_disponibles: true, peso_disponible_lb: true },
+      }) : [];
+      const cajasLotes = lotesRestantes.reduce((suma, lote) => suma + num0(lote.cajas_disponibles), 0);
+      const pesoLotes = lotesRestantes.reduce((suma, lote) => suma + num0(lote.peso_disponible_lb), 0);
+      await tx.products.update({
+        where: { id: grupo.productId },
+        data: {
+          ultimo_costo: cajasUltima > 0 ? r4(num0(ultimaLinea?.costo_total) / cajasUltima) : null,
+          peso_caja_lb: grupo.materiaPrima ? (cajasLotes > 0 ? r3(pesoLotes / cajasLotes) : null) : undefined,
+        },
+      });
+    }
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: 'editar', entidad: 'compra', entidad_id: compraId,
+        datos: { anterior: { fecha: iso(anterior.fecha), total: num0(anterior.total) }, nuevo: { fecha: input.fecha, total } },
+      },
+    });
+    return { id: Number(compraId), total, vence_at: iso(sumarDias(nuevaFecha, 14)) };
+  }, { isolationLevel: 'Serializable' });
 }
 
 /**
@@ -1031,15 +1207,16 @@ async function registrarProduccionEnTransaccion(
   const salidaIds = input.salidas.map((s) => BigInt(s.product_id));
   const productos = await tx.products.findMany({ where: { id: { in: salidaIds }, negocio_id: negocioId, linea_operacion: 'carne', tipo_operativo: { in: ['proteina', 'precio_fijo'] }, activo: true } });
   if (productos.length !== new Set(salidaIds.map(String)).size) throw new HttpError(400, 'Hay productos terminados no válidos');
-  const permitidas = new Set(salidasPorMateria[materia.sku] ?? []);
-  if (productos.some((p) => !permitidas.has(p.sku))) throw new HttpError(400, 'Una salida no corresponde a la materia prima seleccionada');
+  const recetas = await tx.recetas_produccion.findMany({ where: { negocio_id: negocioId, materia_prima_id: materiaId, producto_salida_id: { in: productos.map((p) => p.id) } } });
+  const recetaPorSalida = new Map(recetas.map((r) => [r.producto_salida_id.toString(), r]));
+  if (productos.some((p) => !recetaPorSalida.has(p.id.toString()))) throw new HttpError(400, 'Una salida no corresponde a la materia prima seleccionada');
   if (!productos.some((p) => p.tipo_operativo === 'proteina')) throw new HttpError(400, 'La producción requiere al menos un producto principal además de los subproductos');
   for (const s of input.salidas) {
     const p = productos.find((x) => x.id === BigInt(s.product_id))!;
-    const esCarnitasSinCosto = materia.sku === 'RAW-PORK-BUTT' && p.sku === 'MEAT-CARNITAS';
-    if (p.tipo_operativo !== 'proteina' && !esCarnitasSinCosto) throw new HttpError(400, `${p.nombre} no es una salida de producción válida`);
+    const esSubproductoSinCosto = recetaPorSalida.get(p.id.toString())?.sin_costo ?? false;
+    if (p.tipo_operativo !== 'proteina' && !esSubproductoSinCosto) throw new HttpError(400, `${p.nombre} no es una salida de producción válida`);
     if (p.tipo_operativo === 'proteina' && num(p.peso_caja_lb) == null) throw new HttpError(400, `${p.nombre} no tiene peso estándar por caja`);
-    if (esCarnitasSinCosto && p.precio_venta_fijo == null) throw new HttpError(400, 'Carnitas requiere un precio fijo de venta en Configuración');
+    if (esSubproductoSinCosto && p.precio_venta_fijo == null) throw new HttpError(400, `${p.nombre} requiere un precio fijo de venta en Configuración`);
   }
   const semanaProduccion = rangoSemana(input.fecha);
   const lotes = await tx.lotes_materia_prima.findMany({
@@ -1070,7 +1247,7 @@ async function registrarProduccionEnTransaccion(
   const costoEntrada = calculoFifo.costo_total;
   const salidas = input.salidas.map((s) => {
     const p = productos.find((x) => x.id === BigInt(s.product_id))!;
-    const esSubproductoSinCosto = materia.sku === 'RAW-PORK-BUTT' && p.sku === 'MEAT-CARNITAS';
+    const esSubproductoSinCosto = recetaPorSalida.get(p.id.toString())?.sin_costo ?? false;
     const pesoCaja = esSubproductoSinCosto ? 0 : num0(p.peso_caja_lb);
     return { input: s, producto: p, pesoCaja, pesoTotal: r3(s.cajas * pesoCaja) };
   });
@@ -1278,11 +1455,11 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
     resumen_proteinas: resumenProteinas,
-    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado })) })),
+    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado })) })),
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
     // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.
-    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: num0(s.precio_venta_caja) })) })),
+    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, tipo: s.producto.tipo_operativo, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: num0(s.precio_venta_caja) })) })),
     lotes: lotes.map((l) => ({ id: Number(l.id), fecha: iso(l.fecha), producto: l.producto.nombre, product_id: Number(l.product_id), cajas: num0(l.cajas_disponibles), peso_lb: num0(l.peso_disponible_lb), costo: num0(l.costo_disponible), congelado: l.congelado })),
   };
 }

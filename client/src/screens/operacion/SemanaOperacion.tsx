@@ -1,15 +1,15 @@
-import { Navigate, NavLink, useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, NavLink, useParams } from 'react-router-dom';
 import { useAuth, type Rol } from '../../auth';
 import Pedidos from './Pedidos';
 import OperacionAdmin from './OperacionAdmin';
 import InventarioOperacion from './InventarioOperacion';
-import Distribucion from '../distribucion/Distribucion';
 import Bodega from '../bodega/Bodega';
 import Ruta from '../ruta/Ruta';
 import Recepcion from '../recepcion/Recepcion';
 import { crearSemana, etiquetaRango, moverSemana, semanasAlrededor } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 import Spinner from '../../components/Spinner';
+import { useSemanaGlobal } from '../../semana-context';
 
 const capturas = [
   { clave: 'compras', label: 'Compras', numero: 1 },
@@ -18,12 +18,11 @@ const capturas = [
 ] as const;
 
 const proceso = [
-  { clave: 'preparacion', label: 'Preparación', numero: 4 },
-  { clave: 'despacho', label: 'Despacho', numero: 5 },
-  { clave: 'reparto', label: 'Reparto', numero: 6 },
-  { clave: 'recepcion', label: 'Recepción', numero: 7 },
-  { clave: 'inventario', label: 'Inventario', numero: 8 },
-  { clave: 'cierre', label: 'Cierre', numero: 9 },
+  { clave: 'despacho', label: 'Despacho', numero: 4 },
+  { clave: 'reparto', label: 'Reparto', numero: 5 },
+  { clave: 'recepcion', label: 'Recepción', numero: 6 },
+  { clave: 'inventario', label: 'Inventario', numero: 7 },
+  { clave: 'cierre', label: 'Cierre', numero: 8 },
 ] as const;
 
 const tareasPorRol = [
@@ -41,11 +40,8 @@ export default function SemanaOperacion() {
   const { usuario } = useAuth();
   const { repartoHabilitado, cargando: cargandoConfig } = useOperacionConfig();
   const { paso } = useParams();
-  const [params, setParams] = useSearchParams();
-  const semana = crearSemana(params.get('semana') ?? undefined);
+  const { semana, seleccionarSemana: cambiarSemana, rutaSemana } = useSemanaGlobal();
   const opcionesSemana = semanasAlrededor(crearSemana());
-  const cambiarSemana = (inicio: string) => setParams({ semana: crearSemana(inicio).inicio });
-  const rutaSemana = (ruta: string) => `${ruta}?semana=${semana.inicio}`;
   if (!usuario) return null;
   if (cargandoConfig) return <Spinner />;
   if (paso === 'reparto' && !repartoHabilitado) {
@@ -59,7 +55,8 @@ export default function SemanaOperacion() {
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
-    if (paso === 'seguimiento') return <Navigate to={rutaSemana('/semana/preparacion')} replace />;
+    if (paso === 'preparacion') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
+    if (paso === 'seguimiento') return <Navigate to={rutaSemana('/semana/despacho')} replace />;
     const actual = (paso ?? 'compras') as PasoAdmin;
     const todos = [...capturas, ...procesoVisible];
     if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/compras')} replace />;
@@ -71,7 +68,7 @@ export default function SemanaOperacion() {
         <div><span className="eyebrow">Operación semanal</span><h1>{enCaptura ? 'Captura' : 'Proceso'}</h1></div>
         <nav className="weekly-mode-tabs" aria-label="Grupo de operación">
           <NavLink to={rutaSemana('/semana/compras')} className={enCaptura ? 'is-active' : ''}>Captura</NavLink>
-          <NavLink to={rutaSemana('/semana/preparacion')} className={!enCaptura ? 'is-active' : ''}>Proceso</NavLink>
+          <NavLink to={rutaSemana('/semana/despacho')} className={!enCaptura ? 'is-active' : ''}>Proceso</NavLink>
         </nav>
       </header>
 
@@ -85,7 +82,6 @@ export default function SemanaOperacion() {
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}
         {actual === 'produccion' && <OperacionAdmin seccion="produccion" integrado semana={semana} />}
         {actual === 'ventas' && <Pedidos integrado semana={semana} />}
-        {actual === 'preparacion' && <Distribucion integrado semana={semana} />}
         {actual === 'despacho' && <Bodega integrado semana={semana} />}
         {actual === 'reparto' && <Ruta integrado semana={semana} />}
         {actual === 'recepcion' && <Recepcion integrado semana={semana} />}

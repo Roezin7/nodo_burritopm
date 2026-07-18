@@ -6,6 +6,7 @@ import { EstadoDistChip, FaseChip, ParadaChip, FlujoStepper } from '../../flujo'
 import Spinner from '../../components/Spinner';
 import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 import { crearSemana, hoyChicago, type SemanaSeleccionada } from '../../semana';
+import CollapsibleSection from '../../components/CollapsibleSection';
 
 interface DistResumen {
   id: number;
@@ -21,7 +22,7 @@ interface DistResumen {
 const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Pedido #${d.id}`;
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
-export default function Distribucion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
+export default function Distribucion({ integrado = false, semana = crearSemana(), soloRevision = false }: { integrado?: boolean; semana?: SemanaSeleccionada; soloRevision?: boolean }) {
   const toast = useToast();
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [abierta, setAbierta] = useState<number | null>(null);
@@ -107,13 +108,28 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
     finally { setCreando(false); }
   }
 
+  async function reconstruirFaltantes() {
+    setCreando(true); setError('');
+    try {
+      const creadas = await api<{ creadas: { id: number }[]; existentes: number; borradores_omitidos: number }>('/operacion/distribuciones/crear-todas', {
+        method: 'POST', body: { desde: semana.inicio, hasta: semana.fin },
+      });
+      const aprobadas = await api<{ aprobadas: number }>('/distribuciones/aprobar-todas', {
+        method: 'POST', body: { desde: semana.inicio, hasta: semana.fin },
+      });
+      toast.ok(`${creadas.creadas.length} consolidados reconstruidos · ${aprobadas.aprobadas} aprobados.`);
+      await cargar();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron reconstruir los consolidados.'); }
+    finally { setCreando(false); }
+  }
+
   if (abierta != null) {
-    return <Consolidado id={abierta} onSalir={() => { setAbierta(null); void cargar(); }} />;
+    return <Consolidado id={abierta} integrado={integrado || soloRevision} onSalir={() => { setAbierta(null); void cargar(); }} />;
   }
 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>
-      {!integrado && <header className="page-head">
+      {!soloRevision && !integrado && <header className="page-head">
         <div>
           <span className="eyebrow">Pedidos confirmados</span>
           <h1>Preparación de entregas</h1>
@@ -121,11 +137,11 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
         </div>
       </header>}
 
-      {!integrado && <FlujoStepper activo="plan" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 4</span><h2>Preparación</h2></div></header>}
+      {!soloRevision && !integrado && <FlujoStepper activo="conteo" />}
+      {!soloRevision && integrado && <header className="embedded-head"><div><span className="eyebrow">Ventas</span><h2>Consolidados automáticos</h2></div></header>}
 
       {error && <p className="error-msg">{error}</p>}
-      <section className="workspace-card preparation-builder">
+      {!soloRevision && <section className="workspace-card preparation-builder">
         <div>
           <span className="eyebrow">Nueva preparación</span>
           <h2>Consolidar pedidos</h2>
@@ -141,15 +157,19 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
         </div>
         <div className="preparation-batch-actions"><span>Semana {semana.numero} · {semana.inicio} al {semana.fin}</span><button className="btn btn-secondary" disabled={creando} onClick={() => void crearTodas()}>Crear todas</button><button className="btn btn-secondary" disabled={creando} onClick={() => void aprobarTodas()}>Aprobar todas</button></div>
         <Link className="preparation-orders-link" to={`/semana/ventas?semana=${semana.inicio}`}>Revisar o capturar ventas →</Link>
-      </section>
+      </section>}
 
-      <h3 className="seccion-title">Preparaciones</h3>
+      {soloRevision && <section className="workspace-card consolidated-sales-head">
+        <div><span className="eyebrow">Ventas confirmadas</span><h2>Consolidados y rutas</h2><p>Revisa o elimina un consolidado antes del despacho.</p></div>
+        <button className="btn btn-secondary" disabled={creando} onClick={() => void reconstruirFaltantes()}>{creando ? 'Reconstruyendo…' : 'Reconstruir faltantes'}</button>
+      </section>}
+
       {cargando ? (
         <Spinner />
       ) : lista.length === 0 ? (
-        <p className="muted">Aún no hay distribuciones.</p>
+        <p className="muted">Aún no hay consolidados.</p>
       ) : (
-        <div className="lista-ubicaciones">
+        <CollapsibleSection title={`Consolidados de semana ${semana.numero}`} count={lista.length}><div className="lista-ubicaciones">
           {lista.map((d) => (
             <button key={d.id} className="card card-click" onClick={() => setAbierta(d.id)}>
               <div className="ubic-row">
@@ -163,7 +183,7 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
               </div>
             </button>
           ))}
-        </div>
+        </div></CollapsibleSection>
       )}
     </div>
   );
@@ -215,7 +235,7 @@ interface VistaProducto {
   total_faltante_valor: number;
 }
 
-function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
+function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado?: boolean; onSalir: () => void }) {
   const toast = useToast();
   const [vista, setVista] = useState<'producto' | 'sucursal' | 'ruta'>('producto');
   const [prod, setProd] = useState<VistaProducto | null>(null);
@@ -300,7 +320,7 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   }
 
   async function eliminar() {
-    if (!window.confirm('¿Eliminar esta preparación? Se devolverá a la bodega central el inventario que las sucursales aún tengan, se borrarán sus rutas e incidencias y las ventas volverán a estado confirmado para poder corregirlas. No se puede deshacer.')) return;
+    if (!window.confirm('¿Eliminar este consolidado? Se devolverá a la bodega central el inventario que las sucursales aún tengan, se borrarán sus rutas e incidencias y las ventas volverán a estado confirmado para poder corregirlas. No se puede deshacer.')) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'DELETE' });
@@ -333,10 +353,10 @@ function Consolidado({ id, onSalir }: { id: number; onSalir: () => void }) {
   }
 
   return (
-    <div className="page conteo-page">
+    <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← Pedidos</button>
+          <button className="link-btn" onClick={onSalir}>← Consolidados</button>
           <h1>{nombre?.trim() || `Pedido #${id}`} {estado && <EstadoDistChip estado={estado} />}</h1>
           {nombre?.trim() && <p className="page-sub">Pedido #{id}</p>}
         </div>
@@ -491,11 +511,10 @@ function RutaPlanner({ id }: { id: number }) {
   return (
     <>
       {error && <p className="error-msg">{error}</p>}
-      {cargando ? <Spinner label="Cargando rutas…" /> : rutas.length === 0 ? <div className="empty-state"><strong>No hay rutas generadas</strong></div> : <div className="generated-route-grid">{rutas.map((ruta) => <section className="card generated-route" key={ruta.ruta_id}>
-        <div className="card-head"><div><span className="eyebrow">{ruta.conductor ?? 'Por asignar'}</span><strong>{ruta.nombre}</strong></div><span className="order-status">{ruta.estado}</span></div>
+      {cargando ? <Spinner label="Cargando rutas…" /> : rutas.length === 0 ? <div className="empty-state"><strong>No hay rutas generadas</strong></div> : <div className="generated-route-grid">{rutas.map((ruta) => <CollapsibleSection title={ruta.nombre} count={`${ruta.paradas.length} paradas`} summary={ruta.conductor ?? 'Por asignar'} className="generated-route" key={ruta.ruta_id}>
         <div className="ruta-tablero">{ruta.paradas.length ? [...ruta.paradas].sort((a, b) => a.orden - b.orden).map((p) => <div key={p.parada_id} className="ruta-parada-fila"><span className="parada-orden">{p.orden}</span><span><strong>{p.ubicacion.nombre}</strong></span><ParadaChip estado={p.estado} /></div>) : <p className="muted">Ruta creada; todavía no tiene pedidos confirmados asignados.</p>}</div>
-      </section>)}</div>}
-      <p className="operation-footnote">El orden permanente se modifica en <Link to="/rutas">Configuración de rutas</Link>.</p>
+      </CollapsibleSection>)}</div>}
+      <p className="operation-footnote"><Link to="/rutas">Editar orden de rutas</Link></p>
     </>
   );
 }
