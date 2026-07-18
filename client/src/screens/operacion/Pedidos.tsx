@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { api, ApiError, fueEncolado, type Encolado } from '../../api';
 import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
@@ -8,7 +8,7 @@ import { crearSemana, etiquetaRango, inicioDeSemana, type SemanaSeleccionada } f
 
 type Linea = 'carne' | 'desechables';
 interface Catalogo {
-  ubicaciones: { id: number; nombre: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
+  ubicaciones: { id: number; nombre: string; codigo: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
   productos: { id: number; sku: string; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; precio_pendiente: boolean; peso_caja_lb: number | null }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: Linea; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
   calendario_pedidos: { ubicacion_id: number; linea: Linea; dia_semana: number; rutas: { id: number; nombre: string; codigo: string; conductor: string }[] }[];
@@ -261,6 +261,16 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
 const clavePedidoSemanal = (ubicacionId: number, fechaEntrega: string) => `${ubicacionId}|${fechaEntrega}`;
 const claveCantidadSemanal = (ubicacionId: number, fechaEntrega: string, productId: number) => `${ubicacionId}|${fechaEntrega}|${productId}`;
 const pedidoEditable = (pedido?: Pedido) => !pedido || ['borrador', 'confirmado'].includes(pedido.estado);
+const abreviaturasUbicacion: Record<string, string> = {
+  LOMBA: 'LO', NAPER: 'NA', CAROL: 'CS', LISLE: 'LI', GLEND: 'GH', WESTC: 'WEST', BATAV: 'BT', ALGON: 'AL',
+  NAPER2: 'N2', ROLLI: 'RM', SCHAU: 'SC', CRYST: 'CRY-L', LAKEZ: 'LZ', FRANK: 'FR', PLAIN: 'PL', AUROR: 'AUR',
+  TGE: 'T-GE', TLO: 'T-LO', TST: 'T-ST', TNA: 'T-NA', TBO: 'T-BO',
+};
+const abreviaturaUbicacion = (ubicacion: Catalogo['ubicaciones'][number]) => abreviaturasUbicacion[ubicacion.codigo] ?? ubicacion.codigo.slice(0, 5).toUpperCase();
+const fechaHoja = (iso: string) => {
+  const d = new Date(`${iso}T12:00:00`);
+  return `${String(d.getDate()).padStart(2, '0')}-${d.toLocaleDateString('en-US', { month: 'short' })}-${String(d.getFullYear()).slice(-2)}`;
+};
 
 function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCerrada, onActualizado }: {
   catalogo: Catalogo;
@@ -323,11 +333,23 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
     (suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0) * (producto.precio ?? 0), 0,
   ), 0), 0);
   const ventasCapturadas = programadas.flatMap((fila) => fila.entregas.map((entrega) => porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha)))).filter((p) => p?.lineas.length).length;
+  const fechasVisibles = [...new Set(visibles.flatMap((fila) => fila.entregas.map((entrega) => entrega.fecha)))].sort();
+  const filasFormato = filasOrden(linea, catalogo.productos);
 
   function cambiarCantidad(ubicacionId: number, fechaEntrega: string, productId: number, valor: string) {
     const clavePedido = clavePedidoSemanal(ubicacionId, fechaEntrega);
     setCantidades((actual) => ({ ...actual, [claveCantidadSemanal(ubicacionId, fechaEntrega, productId)]: valor }));
     setCambios((actual) => actual.includes(clavePedido) ? actual : [...actual, clavePedido]);
+  }
+
+  function navegarConEnter(evento: ReactKeyboardEvent<HTMLInputElement>) {
+    if (evento.key !== 'Enter') return;
+    evento.preventDefault();
+    const celdas = [...document.querySelectorAll<HTMLInputElement>('input[data-weekly-matrix-input]:not(:disabled)')]
+      .sort((a, b) => Number(a.dataset.navOrder) - Number(b.dataset.navOrder));
+    const actual = celdas.indexOf(evento.currentTarget);
+    const siguiente = celdas[actual + (evento.shiftKey ? -1 : 1)];
+    if (siguiente) { siguiente.focus(); siguiente.select(); }
   }
 
   async function guardarSemana(confirmar: boolean) {
@@ -396,18 +418,37 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
     {error && <p className="error-msg">{error}</p>}
     {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
     <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(importe)}</strong></div></div>
-    {cargando ? <Spinner label="Cargando semana…" /> : <div className="weekly-sales-locations">{visibles.map((fila) => {
-      const totalRestaurante = fila.entregas.reduce((total, entrega) => total + fila.productos.reduce((suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0), 0), 0);
-      return <section className="workspace-card weekly-sales-location" key={fila.ubicacion.id}>
-        <header><div><span className="eyebrow">{fila.ubicacion.empresa?.codigo}</span><h2>{fila.ubicacion.nombre}</h2><small>{fila.ubicacion.entrega_en ? `Entrega en ${fila.ubicacion.entrega_en.nombre}` : fila.ubicacion.empresa?.nombre}</small></div><strong>{totalRestaurante.toLocaleString('es-MX')} unidades</strong></header>
-        <div className="weekly-sales-table-wrap"><table className="weekly-sales-table"><thead><tr><th>Producto</th>{fila.entregas.map((entrega) => {
-          const pedido = porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha));
-          return <th key={entrega.fecha}><strong>{fechaEntregaCorta(entrega.fecha)}</strong><span className={`order-status order-status--${pedido?.estado ?? 'pendiente'}`}>{pedido?.estado.replaceAll('_', ' ') ?? 'sin capturar'}</span></th>;
-        })}</tr></thead><tbody>{fila.productos.map((producto) => <tr key={producto.id}><td><strong>{nombreEnVenta(producto.sku, producto.nombre, linea)}</strong><small>{producto.peso_caja_lb ? `${producto.peso_caja_lb} lb/caja` : producto.unidad} · {producto.precio_pendiente ? 'Precio pendiente' : usd(producto.precio)}</small></td>{fila.entregas.map((entrega) => {
-          const pedido = porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha));
-          const clave = claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id);
-          return <td key={entrega.fecha}><div className="input-suffix input-suffix--compact"><input aria-label={`${nombreEnVenta(producto.sku, producto.nombre, linea)} ${fechaEntregaCorta(entrega.fecha)}`} disabled={semanaCerrada || !pedidoEditable(pedido)} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onChange={(e) => cambiarCantidad(fila.ubicacion.id, entrega.fecha, producto.id, e.target.value)} /><span>{unidadCorta(producto)}</span></div></td>;
-        })}</tr>)}</tbody><tfoot><tr><th>Total</th>{fila.entregas.map((entrega) => <th key={entrega.fecha}>{fila.productos.reduce((suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0), 0).toLocaleString('es-MX')}</th>)}</tr></tfoot></table></div>
+    {cargando ? <Spinner label="Cargando semana…" /> : <div className="weekly-sales-sheets">{fechasVisibles.map((fechaEntrega, fechaIndice) => {
+      const restaurantes = visibles.filter((fila) => fila.entregas.some((entrega) => entrega.fecha === fechaEntrega));
+      const filas = filasFormato.map((formato) => ({
+        formato,
+        productos: restaurantes.map((restaurante) => restaurante.productos.find((producto) => formato.skus.includes(producto.sku))),
+      })).filter((fila) => fila.productos.some(Boolean));
+      const totalRestaurante = (indice: number) => filas.reduce((total, fila) => {
+        const producto = fila.productos[indice];
+        return total + (producto ? Number(cantidades[claveCantidadSemanal(restaurantes[indice].ubicacion.id, fechaEntrega, producto.id)] || 0) : 0);
+      }, 0);
+      const totalDia = restaurantes.reduce((total, _, indice) => total + totalRestaurante(indice), 0);
+      const confirmadas = restaurantes.filter((restaurante) => porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega))?.estado === 'confirmado').length;
+      return <section className="workspace-card weekly-sales-sheet" key={fechaEntrega}>
+        <header><div><span className="eyebrow">Entrega</span><h2>{fechaLarga(fechaEntrega)}</h2></div><div><strong>{fechaHoja(fechaEntrega)}</strong><small>{confirmadas} de {restaurantes.length} confirmadas · Enter ↓ · Shift + Enter ↑</small></div></header>
+        <div className="weekly-sales-matrix-wrap"><table className="weekly-sales-matrix">
+          <thead><tr><th>Total</th><th>Item</th>{restaurantes.map((restaurante) => {
+            const pedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega));
+            return <th key={restaurante.ubicacion.id} title={`${restaurante.ubicacion.nombre} · ${pedido?.estado.replaceAll('_', ' ') ?? 'sin capturar'}`}><strong>{abreviaturaUbicacion(restaurante.ubicacion)}</strong><small>{restaurante.ubicacion.nombre}</small><i className={`matrix-status matrix-status--${pedido?.estado ?? 'pendiente'}`} /></th>;
+          })}</tr></thead>
+          <tbody>{filas.map((fila, filaIndice) => {
+            const totalProducto = fila.productos.reduce((total, producto, indice) => total + (producto ? Number(cantidades[claveCantidadSemanal(restaurantes[indice].ubicacion.id, fechaEntrega, producto.id)] || 0) : 0), 0);
+            return <tr key={fila.formato.nombre}><th>{totalProducto.toLocaleString('es-MX')}</th><th>{fila.formato.nombre}</th>{fila.productos.map((producto, indice) => {
+              const restaurante = restaurantes[indice];
+              const pedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega));
+              if (!producto) return <td key={restaurante.ubicacion.id} className="matrix-cell-empty">—</td>;
+              const clave = claveCantidadSemanal(restaurante.ubicacion.id, fechaEntrega, producto.id);
+              return <td key={restaurante.ubicacion.id} className={!pedidoEditable(pedido) ? 'matrix-cell-locked' : undefined}><input data-weekly-matrix-input data-nav-order={fechaIndice * 10000 + indice * 100 + filaIndice} aria-label={`${fila.formato.nombre} · ${restaurante.ubicacion.nombre} · ${fechaEntregaCorta(fechaEntrega)}`} title={`${restaurante.ubicacion.nombre} · ${fila.formato.nombre}`} disabled={semanaCerrada || !pedidoEditable(pedido)} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onKeyDown={navegarConEnter} onChange={(e) => cambiarCantidad(restaurante.ubicacion.id, fechaEntrega, producto.id, e.target.value)} /></td>;
+            })}</tr>;
+          })}</tbody>
+          <tfoot><tr><th>{totalDia.toLocaleString('es-MX')}</th><th>Total</th>{restaurantes.map((restaurante, indice) => <th key={restaurante.ubicacion.id}>{totalRestaurante(indice).toLocaleString('es-MX')}</th>)}</tr></tfoot>
+        </table></div>
       </section>;
     })}</div>}
     {!cargando && !visibles.length && <div className="empty-state"><strong>No hay restaurantes programados</strong><span>Revisa la línea seleccionada, la búsqueda o la configuración de rutas.</span></div>}

@@ -55,7 +55,7 @@ export default function SemanaOperacion() {
 
   const procesoVisible = proceso
     .filter((p) => p.clave !== 'reparto' || repartoHabilitado)
-    .map((p, i) => ({ ...p, numero: i + capturas.length + 1 }));
+    .map((p, i) => ({ ...p, label: usuario.rol === 'admin' && p.clave === 'recepcion' ? 'Auditoría' : p.label, numero: i + capturas.length + 1 }));
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;

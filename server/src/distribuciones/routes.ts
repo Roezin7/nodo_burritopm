@@ -56,6 +56,31 @@ distribucionesRouter.get(
   }),
 );
 
+/** GET /distribuciones/recepciones/auditoria — panorama semanal de todas las sucursales. */
+distribucionesRouter.get(
+  '/recepciones/auditoria',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const q = z.object({ desde: fechaParam, hasta: fechaParam })
+      .refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.query);
+    res.json(await svc.auditoriaRecepciones(req.auth!.negocioId, q.desde, q.hasta));
+  }),
+);
+
+/** POST /distribuciones/recepciones/:id/auditar — registra faltantes detectados por el admin. */
+distribucionesRouter.post(
+  '/recepciones/:id/auditar',
+  soloAdmin,
+  asyncHandler(async (req, res) => {
+    const distribucionId = BigInt(idParam.parse(req.params.id));
+    const b = z.object({
+      ubicacion_id: z.coerce.number().int().positive(),
+      faltantes: z.array(z.object({ linea_id: z.coerce.number().int().positive(), cantidad: z.coerce.number().nonnegative() })).min(1),
+    }).parse(req.body);
+    res.json(await svc.auditarFaltantesRecepcion(req.auth!.negocioId, distribucionId, BigInt(b.ubicacion_id), req.auth!.usuarioId, b.faltantes));
+  }),
+);
+
 /** POST /distribuciones/:id/recibir { ubicacion_id, items } — recepción en sucursal. */
 distribucionesRouter.post(
   '/:id/recibir',

@@ -102,6 +102,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const destino = (i: Item) => i.ruta.startsWith('/semana/') && inicioSemana
     ? `${i.ruta}?semana=${inicioSemana}`
     : i.ruta;
+  const etiquetaItem = (i: Item) => usuario?.rol === 'admin' && i.ruta === '/semana/recepcion' ? 'Auditoría' : i.label;
   const enMas = extras.some(itemActivo);
 
   const syncChip = !online ? (
@@ -139,7 +140,7 @@ export default function Shell({ children }: { children: ReactNode }) {
                   className={itemActivo(i) ? 'nav-link nav-link--on' : 'nav-link'}
                 >
                   <Icono name={i.icono} size={19} />
-                  <span>{i.label}</span>
+                  <span>{etiquetaItem(i)}</span>
                 </NavLink>
               ))}
             </div>;
@@ -189,7 +190,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             className={itemActivo(i) ? 'bottom-link bottom-link--on' : 'bottom-link'}
           >
             <Icono name={i.icono} size={22} />
-            <span>{i.label}</span>
+            <span>{etiquetaItem(i)}</span>
           </NavLink>
         ))}
         <button
@@ -220,7 +221,7 @@ export default function Shell({ children }: { children: ReactNode }) {
                     className={itemActivo(i) ? 'mas-item mas-item--on' : 'mas-item'}
                   >
                     <Icono name={i.icono} size={24} />
-                    <span>{i.label}</span>
+                    <span>{etiquetaItem(i)}</span>
                   </NavLink>
                 ))}
               </div>

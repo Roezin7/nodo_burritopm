@@ -3,6 +3,7 @@ import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { EstadoDistChip, FlujoStepper } from '../../flujo';
 import UbicacionPicker from '../../components/UbicacionPicker';
+import Spinner from '../../components/Spinner';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 
@@ -17,6 +18,12 @@ interface LineaRec {
 }
 interface DistRec { id: number; estado: string; fecha_entrega: string | null; creado_at: string; lineas: LineaRec[] }
 interface DistHist { id: number; estado: string; fecha_entrega: string | null; recibido_at: string; con_incidencia: boolean; total_lineas: number; lineas: LineaRec[] }
+interface AuditoriaRec {
+  distribucion_id: number; estado_distribucion: string; fecha_entrega: string | null;
+  ubicacion: { id: number; nombre: string; codigo: string; orden: number };
+  estado: 'pendiente' | 'sin_faltantes' | 'con_faltantes'; total_faltante: number;
+  lineas: (LineaRec & { faltante: number })[];
+}
 
 export default function Recepcion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
@@ -37,16 +44,10 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
 
   useEffect(() => {
     async function cargarUbic() {
-      if (esAdmin) {
-        const us = await api<{ id: number; nombre: string; tipo: 'bodega' | 'sucursal'; activo: boolean }[]>('/ubicaciones');
-        const suc = us.filter((u) => u.activo && u.tipo === 'sucursal').map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo, activo: u.activo }));
-        setUbicaciones(suc);
-        if (suc[0]) setUbicId(String(suc[0].id));
-      } else {
-        const suc = (usuario?.ubicaciones ?? []).filter((u) => u.tipo === 'sucursal');
-        setUbicaciones(suc);
-        if (suc[0]) setUbicId(String(suc[0].id));
-      }
+      if (esAdmin) { setUbicaciones([]); setUbicId(''); return; }
+      const suc = (usuario?.ubicaciones ?? []).filter((u) => u.tipo === 'sucursal');
+      setUbicaciones(suc);
+      if (suc[0]) setUbicId(String(suc[0].id));
     }
     void cargarUbic();
   }, [esAdmin, usuario]);
@@ -88,13 +89,15 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
   }
   const toggleProblema = (id: number) => setProblema((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
+  if (esAdmin) return <AuditoriaRecepcion integrado={integrado} semana={semana} repartoHabilitado={repartoHabilitado} />;
+
   return (
     <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
       {!integrado && <header className="page-head">
-        <div><h1>Recepción</h1><p className="page-sub">{repartoHabilitado ? 'Confirma lo que llega del camión.' : 'Valida lo despachado o reporta faltantes.'}</p></div>
+        <div><h1>Confirmar recepción</h1><p className="page-sub">{repartoHabilitado ? 'Confirma lo que llegó del camión o indica una diferencia.' : 'Confirma lo despachado o reporta faltantes.'}</p></div>
       </header>}
       {!integrado && <FlujoStepper activo="recepcion" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Recepción</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Confirmar recepción</h2></div></header>}
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes una sucursal asignada.</p>
@@ -182,4 +185,72 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
       )}
     </div>
   );
+}
+
+function AuditoriaRecepcion({ integrado, semana, repartoHabilitado }: { integrado: boolean; semana: SemanaSeleccionada; repartoHabilitado: boolean }) {
+  const [registros, setRegistros] = useState<AuditoriaRec[]>([]);
+  const [filtro, setFiltro] = useState<'todos' | AuditoriaRec['estado']>('todos');
+  const [buscar, setBuscar] = useState('');
+  const [editando, setEditando] = useState('');
+  const [faltantes, setFaltantes] = useState<Record<number, string>>({});
+  const [cargando, setCargando] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
+
+  async function cargarAuditoria() {
+    setCargando(true); setError('');
+    try { setRegistros(await api<AuditoriaRec[]>(`/distribuciones/recepciones/auditoria?desde=${semana.inicio}&hasta=${semana.fin}`)); }
+    catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo cargar la auditoría de recepción.'); }
+    finally { setCargando(false); }
+  }
+  useEffect(() => { setEditando(''); setFaltantes({}); setOk(''); void cargarAuditoria(); }, [semana.inicio, semana.fin]);
+
+  function abrir(registro: AuditoriaRec) {
+    setEditando(`${registro.distribucion_id}:${registro.ubicacion.id}`);
+    setFaltantes(Object.fromEntries(registro.lineas.map((linea) => [linea.linea_id, linea.faltante > 0 ? String(linea.faltante) : ''])));
+    setError(''); setOk('');
+  }
+  async function guardar(registro: AuditoriaRec) {
+    const items = registro.lineas.map((linea) => ({ linea_id: linea.linea_id, cantidad: Number(faltantes[linea.linea_id] || 0) }));
+    if (!items.some((item) => item.cantidad > 0) && registro.estado !== 'con_faltantes') { setError('Indica al menos un artículo faltante.'); return; }
+    setBusy(true); setError(''); setOk('');
+    try {
+      await api(`/distribuciones/recepciones/${registro.distribucion_id}/auditar`, {
+        method: 'POST', body: { ubicacion_id: registro.ubicacion.id, faltantes: items },
+      });
+      setEditando(''); setFaltantes({}); setOk(`Faltantes registrados para ${registro.ubicacion.nombre}.`);
+      await cargarAuditoria();
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la auditoría.'); }
+    finally { setBusy(false); }
+  }
+
+  const q = buscar.trim().toLowerCase();
+  const visibles = registros.filter((registro) => (filtro === 'todos' || registro.estado === filtro) && (!q || `${registro.ubicacion.nombre} ${registro.ubicacion.codigo}`.toLowerCase().includes(q)));
+  const fechas = [...new Set(visibles.map((registro) => registro.fecha_entrega ?? 'Sin fecha'))];
+  const pendientes = registros.filter((r) => r.estado === 'pendiente').length;
+  const conFaltantes = registros.filter((r) => r.estado === 'con_faltantes').length;
+  const auditadas = registros.filter((r) => r.estado !== 'pendiente').length;
+  const fechaLabel = (iso: string) => iso === 'Sin fecha' ? iso : new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  return <div className={integrado ? 'embedded-operation reception-audit' : 'page reception-audit'}>
+    {!integrado && <header className="page-head"><div><span className="eyebrow">Control administrativo</span><h1>Auditoría de recepción</h1><p className="page-sub">Revisa todas las sucursales y registra únicamente los artículos que faltaron.</p></div></header>}
+    {!integrado && <FlujoStepper activo="recepcion" />}
+    {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Auditoría de recepción</h2><p>Faltantes por restaurante</p></div></header>}
+
+    <div className="metric-strip metric-strip--four reception-audit-metrics"><div><span>Recepciones</span><strong>{registros.length}</strong></div><div><span>Pendientes del restaurante</span><strong>{pendientes}</strong></div><div><span>Auditadas</span><strong>{auditadas}</strong></div><div><span>Con faltantes</span><strong>{conFaltantes}</strong></div></div>
+    <section className="workspace-card reception-audit-toolbar"><div className="segmented segmented--small"><button className={filtro === 'todos' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('todos')}>Todas</button><button className={filtro === 'pendiente' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('pendiente')}>Pendientes</button><button className={filtro === 'con_faltantes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('con_faltantes')}>Con faltantes</button><button className={filtro === 'sin_faltantes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setFiltro('sin_faltantes')}>Sin faltantes</button></div><input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar restaurante" /></section>
+    {error && <p className="error-msg">{error}</p>}
+    {ok && <p className="ok-msg">{ok}</p>}
+    {cargando ? <Spinner label="Cargando auditoría…" /> : <div className="reception-audit-days">{fechas.map((fecha) => <section key={fecha}><div className="section-heading"><div><span className="eyebrow">Entrega</span><h2>{fechaLabel(fecha)}</h2></div><span>{visibles.filter((r) => (r.fecha_entrega ?? 'Sin fecha') === fecha).length} restaurantes</span></div><div className="reception-audit-grid">{visibles.filter((r) => (r.fecha_entrega ?? 'Sin fecha') === fecha).map((registro) => {
+      const clave = `${registro.distribucion_id}:${registro.ubicacion.id}`;
+      const abierto = editando === clave;
+      return <article className={`workspace-card reception-audit-card reception-audit-card--${registro.estado}`} key={clave}>
+        <header><div><strong>{registro.ubicacion.nombre}</strong><small>{registro.ubicacion.codigo} · preparación #{registro.distribucion_id}</small></div><span className={`chip ${registro.estado === 'con_faltantes' ? 'chip--warn' : registro.estado === 'sin_faltantes' ? 'chip--ok' : 'chip--info'}`}>{registro.estado === 'con_faltantes' ? `${registro.total_faltante} faltantes` : registro.estado === 'sin_faltantes' ? 'Sin faltantes' : 'Por confirmar'}</span></header>
+        <div className="reception-audit-lines"><div className="reception-audit-line reception-audit-line--head"><span>Artículo</span><span>Enviado</span><span>{abierto ? 'Faltó' : 'Recibido'}</span></div>{registro.lineas.map((linea) => <div className={`reception-audit-line ${linea.faltante > 0 ? 'has-shortage' : ''}`} key={linea.linea_id}><span><strong>{linea.nombre}</strong><small>{linea.unidad}</small></span><span>{linea.esperado.toLocaleString('es-MX')}</span>{abierto ? <input type="number" min="0" max={linea.esperado} step="0.5" inputMode="decimal" aria-label={`Faltante de ${linea.nombre} en ${registro.ubicacion.nombre}`} value={faltantes[linea.linea_id] ?? ''} placeholder="0" onChange={(e) => setFaltantes({ ...faltantes, [linea.linea_id]: e.target.value })} /> : <span>{linea.recibida == null ? 'Pendiente' : linea.recibida.toLocaleString('es-MX')}{linea.faltante > 0 && <small>Faltó {linea.faltante}</small>}</span>}</div>)}</div>
+        <footer>{abierto ? <><button className="btn btn-secondary" disabled={busy} onClick={() => { setEditando(''); setFaltantes({}); }}>Cancelar</button><button className="btn btn-primary" disabled={busy || (registro.estado !== 'con_faltantes' && !registro.lineas.some((linea) => Number(faltantes[linea.linea_id] || 0) > 0))} onClick={() => void guardar(registro)}>{busy ? 'Guardando…' : registro.estado === 'con_faltantes' ? 'Guardar corrección' : 'Guardar faltantes'}</button></> : <><span>{registro.estado === 'pendiente' ? 'Esperando confirmación del restaurante.' : registro.estado === 'con_faltantes' ? 'Incidencia registrada.' : 'Sin faltantes registrados.'}</span><button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => abrir(registro)}>{registro.estado === 'con_faltantes' ? 'Corregir auditoría' : 'Registrar faltante'}</button></>}</footer>
+      </article>;
+    })}</div></section>)}</div>}
+    {!cargando && !visibles.length && <div className="empty-state"><strong>No hay recepciones en este filtro</strong><span>Cambia el estado, la búsqueda o la semana.</span></div>}
+  </div>;
 }

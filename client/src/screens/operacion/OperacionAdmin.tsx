@@ -44,6 +44,7 @@ const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Ch
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const MARKUP_PROTEINA = 15;
 const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const diasLargos = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripcion: string }> = {
   compras: { eyebrow: 'Paso 1', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
@@ -204,10 +205,22 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const crearBorrador = (materia = String(materias[0]?.id ?? '')): ProduccionBorrador => ({ id: siguienteId.current++, materia, entrada: '', salidas: {} });
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
   const [borradores, setBorradores] = useState<ProduccionBorrador[]>(() => [{ id: 1, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+  const [produccionesAbiertas, setProduccionesAbiertas] = useState<Set<number>>(() => new Set());
+  const fechasProduccion = useMemo(() => {
+    const opciones: { fecha: string; dia: string; numero: number; mes: string }[] = [];
+    for (let iso = semana.inicio; iso <= semana.fin;) {
+      const actual = new Date(`${iso}T12:00:00`);
+      opciones.push({ fecha: iso, dia: diasLargos[actual.getDay()], numero: actual.getDate(), mes: actual.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '') });
+      actual.setDate(actual.getDate() + 1);
+      iso = `${actual.getFullYear()}-${String(actual.getMonth() + 1).padStart(2, '0')}-${String(actual.getDate()).padStart(2, '0')}`;
+    }
+    return opciones;
+  }, [semana.inicio, semana.fin]);
 
   useEffect(() => {
     setFecha(fechaDentroDeSemana(semana));
     setBorradores([{ id: siguienteId.current++, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+    setProduccionesAbiertas(new Set());
   }, [semana.inicio, semana.fin]);
 
   function actualizar(idBorrador: number, cambio: Partial<ProduccionBorrador>) {
@@ -282,9 +295,17 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la producción.'); }
     finally { setBusy(false); }
   }
+  function alternarProduccion(id: number) {
+    setProduccionesAbiertas((actuales) => {
+      const siguientes = new Set(actuales);
+      if (siguientes.has(id)) siguientes.delete(id); else siguientes.add(id);
+      return siguientes;
+    });
+  }
+  const todasProduccionesAbiertas = resumen.producciones.length > 0 && resumen.producciones.every((p) => produccionesAbiertas.has(p.id));
   return <div className="operation-stack">
     <section className="workspace-card production-capture">
-      <div className="workspace-card-head production-capture-head"><div><h2>Nueva producción</h2><p>Agrega todos los productos elaborados el mismo día y guárdalos juntos.</p></div><label className="field"><span>Fecha · semana {semana.numero}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label></div>
+      <div className="workspace-card-head production-capture-head"><div><h2>Nueva producción</h2><p>Agrega todos los productos elaborados el mismo día y guárdalos juntos.</p></div><div className="production-day-picker"><span>Día de producción · semana {semana.numero}</span><div role="group" aria-label={`Día de producción de la semana ${semana.numero}`}>{fechasProduccion.map((opcion) => <button type="button" key={opcion.fecha} className={fecha === opcion.fecha ? 'is-active' : ''} aria-pressed={fecha === opcion.fecha} onClick={() => setFecha(opcion.fecha)}><strong>{opcion.dia}</strong><small>{opcion.numero} {opcion.mes}</small></button>)}</div></div></div>
       <div className="production-drafts">
         {calculos.map((calculo, indice) => {
           const { borrador, materia, terminados, cajasFrescas, cajasCongeladas, consumo, pesoSalida, insuficiente, pesoExcedido } = calculo;
@@ -323,8 +344,15 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       </div>}
     </section>
 
-    <section className="workspace-card"><div className="workspace-card-head"><h2>Producción registrada</h2><span>{resumen.producciones.length}</span></div>
-      <div className="batch-list">{resumen.producciones.map((p) => <article className="batch-card" key={p.id}><header><div><strong>{p.materia_prima}</strong><span>{p.fecha}</span></div><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / carnitas</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo total del batch</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => { const esProteina = s.sku !== 'MEAT-CARNITAS'; const precioCaja = esProteina ? s.costo_caja + MARKUP_PROTEINA : s.precio; return <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span className="batch-output-prices"><small>Costo por {s.unidad.toLowerCase()}</small><strong>{usd(s.costo_caja)}</strong><small>Venta por {s.unidad.toLowerCase()}</small><strong>{usd(precioCaja)}</strong>{esProteina && <em>+{usd(MARKUP_PROTEINA)} por caja</em>}</span></div>; })}</div></article>)}</div>
+    <section className="workspace-card"><div className="workspace-card-head batch-list-heading"><div><h2>Producción registrada</h2><p>{resumen.producciones.length} batch{resumen.producciones.length === 1 ? '' : 'es'} esta semana</p></div>{resumen.producciones.length > 0 && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProduccionesAbiertas(todasProduccionesAbiertas ? new Set() : new Set(resumen.producciones.map((p) => p.id)))}>{todasProduccionesAbiertas ? 'Colapsar todo' : 'Expandir todo'}</button>}</div>
+      <div className="batch-list">{resumen.producciones.map((p) => {
+        const abierta = produccionesAbiertas.has(p.id);
+        const resumenSalidas = p.salidas.map((s) => `${s.producto}: ${s.cajas}`).join(' · ');
+        return <article className={`batch-card ${abierta ? 'is-open' : 'is-collapsed'}`} key={p.id}>
+          <header><button type="button" className="batch-collapse-button" aria-expanded={abierta} aria-controls={`batch-${p.id}`} onClick={() => alternarProduccion(p.id)}><span><strong>{p.materia_prima}</strong><small>{p.fecha}{resumenSalidas ? ` · ${resumenSalidas}` : ''}</small></span><i aria-hidden="true">⌄</i></button><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header>
+          {abierta && <div id={`batch-${p.id}`} className="batch-card-detail"><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / carnitas</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo total del batch</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => { const esProteina = s.sku !== 'MEAT-CARNITAS'; const precioCaja = esProteina ? s.costo_caja + MARKUP_PROTEINA : s.precio; return <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span className="batch-output-prices"><small>Costo por {s.unidad.toLowerCase()}</small><strong>{usd(s.costo_caja)}</strong><small>Venta por {s.unidad.toLowerCase()}</small><strong>{usd(precioCaja)}</strong>{esProteina && <em>+{usd(MARKUP_PROTEINA)} por caja</em>}</span></div>; })}</div></div>}
+        </article>;
+      })}</div>
     </section>
   </div>;
 }

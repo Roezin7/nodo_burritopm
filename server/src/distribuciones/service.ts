@@ -832,6 +832,70 @@ export async function recepcionesHistorial(negocioId: bigint, ubicacionId: bigin
   });
 }
 
+/** Vista administrativa de todas las recepciones de la semana, agrupadas por restaurante. */
+export async function auditoriaRecepciones(negocioId: bigint, desde: string, hasta: string) {
+  const dists = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      estado: { in: ['en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias'] },
+      fecha_entrega: { gte: new Date(`${desde}T00:00:00.000Z`), lte: new Date(`${hasta}T00:00:00.000Z`) },
+      lineas: { some: { OR: [{ cantidad_cargada: { gt: 0 } }, { cantidad_recibida: { not: null } }] } },
+    },
+    include: {
+      lineas: {
+        where: { OR: [{ cantidad_cargada: { gt: 0 } }, { cantidad_recibida: { not: null } }] },
+        include: {
+          ubicaciones: { select: { id: true, nombre: true, codigo: true, orden_operativo: true } },
+          products: { include: { unidad_distribucion: true } },
+        },
+      },
+    },
+    orderBy: [{ fecha_entrega: 'asc' }, { id: 'asc' }],
+  });
+
+  const resultado: {
+    distribucion_id: number; estado_distribucion: string; fecha_entrega: string | null;
+    ubicacion: { id: number; nombre: string; codigo: string; orden: number };
+    estado: 'pendiente' | 'sin_faltantes' | 'con_faltantes'; total_faltante: number;
+    lineas: { linea_id: number; product_id: number; nombre: string; unidad: string; esperado: number; recibida: number | null; faltante: number; estado_linea: string | null }[];
+  }[] = [];
+
+  for (const dist of dists) {
+    const grupos = new Map<string, typeof dist.lineas>();
+    for (const linea of dist.lineas) {
+      const clave = linea.ubicacion_destino_id.toString();
+      const grupo = grupos.get(clave) ?? [];
+      grupo.push(linea);
+      grupos.set(clave, grupo);
+    }
+    for (const lineas of grupos.values()) {
+      const primera = lineas[0];
+      if (!primera) continue;
+      const ubicacion = primera.ubicaciones;
+      const mapeadas = [...lineas].sort((a, b) => a.products.orden_operativo - b.products.orden_operativo || a.products.nombre.localeCompare(b.products.nombre, 'es')).map((l) => {
+        const esperado = num(l.cantidad_cargada) ?? 0;
+        const recibida = num(l.cantidad_recibida);
+        return {
+          linea_id: Number(l.id), product_id: Number(l.product_id), nombre: l.products.nombre,
+          unidad: l.products.unidad_distribucion.nombre, esperado, recibida,
+          faltante: recibida == null ? 0 : redondear3(Math.max(0, esperado - recibida)), estado_linea: l.estado_linea,
+        };
+      });
+      const pendiente = mapeadas.some((l) => l.recibida == null);
+      const totalFaltante = redondear3(mapeadas.reduce((total, l) => total + l.faltante, 0));
+      resultado.push({
+        distribucion_id: Number(dist.id), estado_distribucion: dist.estado,
+        fecha_entrega: dist.fecha_entrega?.toISOString().slice(0, 10) ?? null,
+        ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre, codigo: ubicacion.codigo, orden: ubicacion.orden_operativo },
+        estado: pendiente ? 'pendiente' : totalFaltante > 0 ? 'con_faltantes' : 'sin_faltantes',
+        total_faltante: totalFaltante,
+        lineas: mapeadas,
+      });
+    }
+  }
+  return resultado.sort((a, b) => (a.fecha_entrega ?? '').localeCompare(b.fecha_entrega ?? '') || a.ubicacion.orden - b.ubicacion.orden || a.ubicacion.nombre.localeCompare(b.ubicacion.nombre, 'es'));
+}
+
 /**
  * Recepción en sucursal: por cada línea suma lo recibido a las existencias de la sucursal,
  * descuenta lo enviado del tránsito de bodega y genera una incidencia si hay diferencia.
@@ -929,6 +993,111 @@ export async function recibirDistribucion(
     await tx.distribuciones.update({ where: { id }, data: { estado: nuevoEstado } });
     // Sella la parada de esta sucursal en la ruta (si existe).
     await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal);
+  }, { isolationLevel: 'Serializable' });
+  return { ok: true };
+}
+
+/**
+ * Auditoría administrativa: fija el faltante final de una recepción. Sirve tanto antes de que
+ * la sucursal confirme como para corregir una confirmación equivocada dentro de la semana abierta.
+ */
+export async function auditarFaltantesRecepcion(
+  negocioId: bigint,
+  id: bigint,
+  ubicacionId: bigint,
+  usuarioId: bigint,
+  faltantes: { linea_id: number; cantidad: number }[],
+) {
+  const dist = await cargarDistribucion(negocioId, id);
+  if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
+  if (!['en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias'].includes(dist.estado)) {
+    throw new HttpError(409, 'Esta distribución todavía no está disponible para auditoría');
+  }
+  if (!faltantes.length) throw new HttpError(400, 'Incluye las líneas de la recepción');
+  const ids = [...new Set(faltantes.map((f) => f.linea_id))];
+  if (ids.length !== faltantes.length) throw new HttpError(400, 'La misma línea aparece más de una vez');
+  if (faltantes.some((f) => !Number.isFinite(f.cantidad) || f.cantidad < 0)) throw new HttpError(400, 'Los faltantes no pueden ser negativos');
+
+  const lineas = await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: id, ubicacion_destino_id: ubicacionId, cantidad_cargada: { gt: 0 } },
+  });
+  if (!lineas.length) throw new HttpError(404, 'No hay una recepción para este restaurante');
+  if (!faltantes.some((f) => f.cantidad > 0) && !lineas.some((l) => l.incidencia_id != null)) throw new HttpError(400, 'Registra al menos un faltante');
+  const validas = new Set(lineas.map((l) => Number(l.id)));
+  if (ids.some((lineaId) => !validas.has(lineaId))) throw new HttpError(400, 'Una o más líneas no pertenecen a esta recepción');
+  const faltanteDe = new Map(faltantes.map((f) => [f.linea_id, redondear3(f.cantidad)]));
+  for (const linea of lineas) {
+    const enviado = num(linea.cantidad_cargada) ?? 0;
+    if ((faltanteDe.get(Number(linea.id)) ?? 0) > enviado + 0.0001) throw new HttpError(400, 'Un faltante no puede superar lo enviado');
+  }
+  const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
+
+  await prisma.$transaction(async (tx) => {
+    // Releer dentro de la transacción evita duplicar o desfasar inventario si la sucursal
+    // confirma al mismo tiempo que el administrador guarda su auditoría.
+    const lineasActuales = await tx.distribucion_lineas.findMany({
+      where: { distribucion_id: id, ubicacion_destino_id: ubicacionId, cantidad_cargada: { gt: 0 } },
+    });
+    for (const linea of lineasActuales) {
+      const enviada = num(linea.cantidad_cargada) ?? 0;
+      const faltante = faltanteDe.get(Number(linea.id)) ?? 0;
+      const nuevaRecibida = redondear3(enviada - faltante);
+      const anterior = num(linea.cantidad_recibida);
+      if (anterior != null && Math.abs(anterior - nuevaRecibida) < 0.0001 && ((faltante > 0) === (linea.incidencia_id != null))) continue;
+
+      if (linea.incidencia_id) {
+        await tx.incidencias.updateMany({
+          where: { id: linea.incidencia_id, estado: 'abierta' },
+          data: { estado: 'resuelta', resuelto_at: new Date(), resuelto_por: usuarioId },
+        });
+      }
+      const incidencia = faltante > 0 ? await tx.incidencias.create({
+        data: {
+          negocio_id: negocioId, tipo: 'faltante_recepcion_auditoria', prioridad: 'media', ubicacion_id: ubicacionId,
+          documento_tipo: 'distribucion', documento_id: id, distribucion_linea_id: linea.id, product_id: linea.product_id,
+          responsable_id: usuarioId, comentarios: `Auditoría: enviado ${enviada}, recibido ${nuevaRecibida}, faltante ${faltante}.`,
+        },
+      }) : null;
+      const costo = num(linea.costo_unitario);
+      if (anterior == null) {
+        const bodega = bodegas.get(linea.product_id.toString());
+        if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
+        await aplicarMovimiento(tx, {
+          negocioId, productId: linea.product_id, tipo: 'recepcion_parcial', cantidad: nuevaRecibida, usuarioId,
+          origenId: bodega.id, destinoId: ubicacionId, costoUnitario: costo, documentoTipo: 'distribucion', documentoId: id,
+          comentario: 'Recepción fijada por auditoría administrativa', idempotencyKey: `recepcion:${linea.id}`,
+          deltas: [
+            { ubicacionId, productId: linea.product_id, disponible: nuevaRecibida, costoUnitario: costo },
+            { ubicacionId: bodega.id, productId: linea.product_id, transito: -enviada },
+          ],
+        });
+      } else {
+        const delta = redondear3(nuevaRecibida - anterior);
+        if (Math.abs(delta) > 0.0001) {
+          await aplicarMovimiento(tx, {
+            negocioId, productId: linea.product_id, tipo: 'correccion', cantidad: Math.abs(delta), usuarioId,
+            origenId: delta < 0 ? ubicacionId : null, destinoId: delta > 0 ? ubicacionId : null,
+            costoUnitario: costo, documentoTipo: 'distribucion', documentoId: id,
+            comentario: `Corrección por auditoría: ${anterior} → ${nuevaRecibida}`,
+            idempotencyKey: `auditoria-recepcion:${linea.id}:${linea.incidencia_id ?? 0}:${incidencia?.id ?? 0}:${nuevaRecibida}`,
+            deltas: [{ ubicacionId, productId: linea.product_id, disponible: delta, costoUnitario: costo }],
+            permitirDisponibleNegativo: true,
+          });
+        }
+      }
+      await tx.distribucion_lineas.update({
+        where: { id: linea.id },
+        data: { cantidad_recibida: nuevaRecibida, estado_linea: faltante > 0 ? (nuevaRecibida === 0 ? 'no_recibido' : 'incidencia') : 'recibido', incidencia_id: incidencia?.id ?? null },
+      });
+    }
+
+    const pendientes = await tx.distribucion_lineas.count({ where: { distribucion_id: id, cantidad_recibida: null } });
+    const conIncidencia = await tx.distribucion_lineas.count({ where: { distribucion_id: id, incidencia_id: { not: null } } });
+    await tx.distribuciones.update({
+      where: { id }, data: { estado: pendientes > 0 ? 'parcialmente_entregada' : conIncidencia > 0 ? 'cerrada_con_incidencias' : 'cerrada' },
+    });
+    const incidenciaEnSucursal = await tx.distribucion_lineas.count({ where: { distribucion_id: id, ubicacion_destino_id: ubicacionId, incidencia_id: { not: null } } });
+    await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal > 0);
   }, { isolationLevel: 'Serializable' });
   return { ok: true };
 }
