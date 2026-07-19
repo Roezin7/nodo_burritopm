@@ -212,7 +212,7 @@ export async function listarPedidos(
     include: {
       empresa: { select: { id: true, nombre: true, codigo: true } },
       ubicacion: { select: { id: true, nombre: true, entrega_en: { select: { id: true, nombre: true } } } },
-      lineas: { include: { producto: { select: { id: true, nombre: true, sku: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } },
+      lineas: { include: { producto: { select: { id: true, nombre: true, sku: true, linea_operacion: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } },
     },
     orderBy: [{ fecha_entrega: 'desc' }, { ubicacion: { orden_operativo: 'asc' } }],
   });
@@ -222,7 +222,11 @@ export async function listarPedidos(
     empresa: { ...p.empresa, id: Number(p.empresa.id) },
     ubicacion: { id: Number(p.ubicacion.id), nombre: p.ubicacion.nombre, entrega_en: p.ubicacion.entrega_en ? { id: Number(p.ubicacion.entrega_en.id), nombre: p.ubicacion.entrega_en.nombre } : null },
     notas: p.notas,
-    lineas: p.lineas.map((l) => ({ id: Number(l.id), product_id: Number(l.product_id), nombre: l.producto.nombre, sku: l.producto.sku, cantidad: num0(l.cantidad), precio: num(l.precio_unitario) })),
+    lineas: p.lineas.map((l) => ({
+      id: Number(l.id), product_id: Number(l.product_id), nombre: l.producto.nombre, sku: l.producto.sku,
+      linea_producto: l.producto.linea_operacion ?? p.linea_operacion,
+      cantidad: num0(l.cantidad), precio: num(l.precio_unitario),
+    })),
   }));
 }
 
@@ -507,13 +511,24 @@ async function consolidarPedidosSiCompletos(
       data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
     });
   });
-  const negocio = aprobables.length ? await prisma.negocios.findUnique({
+  const negocio = await prisma.negocios.findUnique({
     where: { id: negocioId }, select: { reparto_habilitado: true },
-  }) : null;
+  });
   if (negocio && !negocio.reparto_habilitado) {
     // Sin seguimiento de reparto, la aprobación es el último evento operativo. Se registra
     // aquí, antes de cualquier conteo final, para no depender de un botón de Despacho.
-    for (const distribucion of aprobables) await confirmarCarga(negocioId, distribucion.id, usuarioId);
+    // También recupera una aprobación anterior cuyo último intento se haya interrumpido.
+    const despachables = await prisma.distribuciones.findMany({
+      where: {
+        negocio_id: negocioId,
+        linea_operacion: linea,
+        fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+        estado: { in: ['aprobada', 'verificada'] },
+      },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    for (const distribucion of despachables) await confirmarCarga(negocioId, distribucion.id, usuarioId);
   }
   preparaciones = {
     creadas: generadas.creadas.length,
@@ -598,6 +613,7 @@ export async function crearDistribucionOperativa(
   usuarioId: bigint,
   linea: LineaOperacion,
   fechaEntrega: string,
+  permitirComplemento = false,
 ) {
   await asegurarSemanaEditable(negocioId, fechaEntrega);
   await repararPedidosHuerfanos(negocioId);
@@ -608,7 +624,7 @@ export async function crearDistribucionOperativa(
   });
   if (!pedidos.length) throw new HttpError(400, 'No hay pedidos confirmados para esa fecha');
   const ya = await prisma.distribuciones.findFirst({ where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: { not: 'cancelada' } } });
-  if (ya) throw new HttpError(409, 'Ya existe una distribución para esa línea y fecha');
+  if (ya && !permitirComplemento) throw new HttpError(409, 'Ya existe una distribución para esa línea y fecha');
   const dias = entrega.getUTCDay();
   const plantillas = await prisma.plantillas_ruta.findMany({
     where: { negocio_id: negocioId, linea_operacion: linea, dia_semana: dias, activo: true },
@@ -619,7 +635,10 @@ export async function crearDistribucionOperativa(
 
   const resultado = await prisma.$transaction(async (tx) => {
     const d = await tx.distribuciones.create({
-      data: { negocio_id: negocioId, creado_por: usuarioId, estado: 'calculada', linea_operacion: linea, fecha_entrega: entrega, nombre: `${linea === 'carne' ? 'Carne' : 'Desechables'} · ${fechaEntrega}` },
+      data: {
+        negocio_id: negocioId, creado_por: usuarioId, estado: 'calculada', linea_operacion: linea, fecha_entrega: entrega,
+        nombre: `${linea === 'carne' ? 'Carne' : 'Desechables'} · ${fechaEntrega}${ya ? ' · Complemento' : ''}`,
+      },
     });
     const lineas = pedidos.flatMap((p) => p.lineas.map((l) => ({
       distribucion_id: d.id, ubicacion_destino_id: p.ubicacion_id, product_id: l.product_id,
@@ -690,11 +709,13 @@ export async function crearPreparacionesEnRango(
       },
       select: { id: true },
     });
-    if (ya) {
-      existentes += 1;
-      continue;
-    }
-    const creada = await crearDistribucionOperativa(negocioId, usuarioId, grupo.linea_operacion, iso(grupo.fecha_entrega));
+    // Puede haber ventas confirmadas después de que el despacho original ya quedó cerrado
+    // (captura tardía, importación histórica o corrección). No se reabre ni se duplica el
+    // despacho anterior: se crea un complemento únicamente con esas ventas pendientes.
+    if (ya) existentes += 1;
+    const creada = await crearDistribucionOperativa(
+      negocioId, usuarioId, grupo.linea_operacion, iso(grupo.fecha_entrega), Boolean(ya),
+    );
     creadas.push({ ...creada, linea: grupo.linea_operacion, fecha: iso(grupo.fecha_entrega) });
   }
   return { creadas, existentes, borradores_omitidos };

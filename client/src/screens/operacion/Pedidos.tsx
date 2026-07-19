@@ -21,8 +21,10 @@ interface Pedido {
   id: number; linea: Linea; fecha_entrega: string; estado: string; actualizado_at: string; notas?: string | null;
   empresa: { id: number; nombre: string; codigo: string };
   ubicacion: { id: number; nombre: string; entrega_en: { id: number; nombre: string } | null };
-  lineas: { id: number; product_id: number; nombre: string; sku: string; cantidad: number; precio: number | null }[];
+  lineas: { id: number; product_id: number; nombre: string; sku: string; linea_producto?: Linea; cantidad: number; precio: number | null }[];
 }
+
+const lineasDeVenta = (pedido: Pedido, linea: Linea) => pedido.lineas.filter((detalle) => (detalle.linea_producto ?? pedido.linea) === linea);
 
 function hoy() { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' }); }
 const usd = (n: number | null) => n == null ? 'Precio pendiente' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -79,6 +81,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [version, setVersion] = useState<string | null>(null);
   const [cantidadesGuardadas, setCantidadesGuardadas] = useState<Record<number, string>>({});
   const [notasGuardadas, setNotasGuardadas] = useState('');
+  const [preciosPedido, setPreciosPedido] = useState<Record<number, number | null>>({});
   const restauradoRef = useRef<string | null>(null);
   const [clavePedidoHidratado, setClavePedidoHidratado] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -154,7 +157,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   useEffect(() => {
     if (vista !== 'captura' || (admin && modoCaptura === 'semana') || !ubicacionId || !fecha) {
       setEstado(null); setVersion(null); setNotas(''); setCantidades({});
-      setCantidadesGuardadas({}); setNotasGuardadas(''); setCargandoPedido(false);
+      setCantidadesGuardadas({}); setNotasGuardadas(''); setPreciosPedido({}); setCargandoPedido(false);
       setClavePedidoHidratado(null);
       return;
     }
@@ -170,6 +173,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         const p = rows[0];
         setEstado(p?.estado ?? null);
         setVersion(p?.actualizado_at ?? null);
+        setPreciosPedido(Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, l.precio])));
         const cargadas = Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, String(l.cantidad)]));
         const pastorBpm = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-BPM');
         const pastorTap = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-TAP');
@@ -203,7 +207,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   useEffect(() => {
     if (!admin || vista !== 'historial') return;
     setCargandoHistorial(true); setError('');
-    api<Pedido[]>(`/operacion/pedidos?linea=${linea}&desde=${semana.inicio}&hasta=${semana.fin}`)
+    api<Pedido[]>(`/operacion/pedidos?desde=${semana.inicio}&hasta=${semana.fin}`)
       .then(setHistorial)
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el historial.'))
       .finally(() => setCargandoHistorial(false));
@@ -225,6 +229,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       setVersion(r.actualizado_at);
       setCantidadesGuardadas(cantidades);
       setNotasGuardadas(notas);
+      setPreciosPedido(Object.fromEntries(productos.map((p) => [p.id, p.precio])));
       if (claveBorradorIndividual) guardarBorradorLocal(claveBorradorIndividual, null);
       toast.ok(confirmar ? 'Pedido confirmado.' : 'Avance guardado.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar.'); }
@@ -261,9 +266,11 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
 
   if (!catalogo) return <div className="page"><Spinner /><p className="error-msg">{error}</p></div>;
   const ubic = ubicacionSeleccionada;
-  const total = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0) * (p.precio ?? 0), 0);
-  const unidades = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
-  const conCantidad = productos.filter((p) => Number(cantidades[p.id] || 0) > 0).length;
+  const productosDeVenta = productos.filter((p) => p.linea === linea);
+  const total = productosDeVenta.reduce((a, p) => a + Number(cantidades[p.id] || 0) * (preciosPedido[p.id] ?? p.precio ?? 0), 0);
+  const unidades = productosDeVenta.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
+  const unidadesOrden = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
+  const conCantidad = productosDeVenta.filter((p) => Number(cantidades[p.id] || 0) > 0).length;
   const semanaCerrada = catalogo.semanas.some((s) => s.anio === semana.anio && s.semana === semana.numero && s.estado === 'cerrada');
   const editable = !semanaCerrada && (!estado || ['borrador', 'confirmado'].includes(estado));
   const q = buscar.trim().toLowerCase();
@@ -297,7 +304,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
           <CollapsibleSection title="Productos" count={productos.length} className="product-picker">
             <div className="workspace-card-head"><div /><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" /></div>
             <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
-              <span><strong>{nombreEnVenta(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {p.precio_pendiente ? 'Costo semanal + $15 al capturar producción' : usd(p.precio)}</small></span>
+              <span><strong>{nombreEnVenta(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {p.precio_pendiente && preciosPedido[p.id] == null ? 'Costo semanal + $15 al capturar producción' : usd(preciosPedido[p.id] ?? p.precio)}</small></span>
               <div className="input-suffix input-suffix--compact"><input disabled={cargandoPedido || !editable} inputMode="decimal" type="number" min="0" step={esPieza(p) ? '1' : '0.5'} value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>{unidadCorta(p)}</span></div>
             </label>)}</div>
           </CollapsibleSection>
@@ -305,8 +312,8 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         </section>
         <aside className="order-summary">
           <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha ? `Semana ${semana.numero} · ${fechaLarga(fecha)}` : 'Sin entrega programada'} · {linea}</p>
-          <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total</dt><dd>{usd(total)}</dd></div></dl>
-          <div className="order-actions"><button className="btn btn-secondary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha || unidades <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : cargandoPedido ? 'Cargando…' : 'Confirmar'}</button></div>
+          <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total {linea}</dt><dd>{usd(total)}</dd></div></dl>
+          <div className="order-actions"><button className="btn btn-secondary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha || unidadesOrden <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : cargandoPedido ? 'Cargando…' : 'Confirmar'}</button></div>
           {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={semanaCerrada || busy || !fecha} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
           {admin && <div className="order-print-actions"><span>Orden de semana {semana.numero}</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne')}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables')}>Imprimir desechables</button></div>}
         </aside>
@@ -335,6 +342,7 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
 }) {
   const toast = useToast();
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [pedidosSemana, setPedidosSemana] = useState<Pedido[]>([]);
   const [cantidades, setCantidades] = useState<Record<string, string>>({});
   const [cantidadesGuardadas, setCantidadesGuardadas] = useState<Record<string, string>>({});
   const [cambios, setCambios] = useState<string[]>([]);
@@ -361,11 +369,12 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
   useEffect(() => {
     let vigente = true;
     setCargando(true); setError('');
-    api<Pedido[]>(`/operacion/pedidos?linea=${linea}&desde=${semana.inicio}&hasta=${semana.fin}`)
+    api<Pedido[]>(`/operacion/pedidos?desde=${semana.inicio}&hasta=${semana.fin}`)
       .then((rows) => {
         if (!vigente) return;
+        const pedidosDeCaptura = rows.filter((pedido) => pedido.linea === linea);
         const valores: Record<string, string> = {};
-        for (const pedido of rows) {
+        for (const pedido of pedidosDeCaptura) {
           const fila = programadas.find((x) => x.ubicacion.id === pedido.ubicacion.id);
           if (!fila) continue;
           const porSku = new Map(fila.productos.map((p) => [p.sku, p.id]));
@@ -376,7 +385,8 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
             valores[claveCantidadSemanal(pedido.ubicacion.id, pedido.fecha_entrega, productId)] = String(detalle.cantidad);
           }
         }
-        setPedidos(rows);
+        setPedidos(pedidosDeCaptura);
+        setPedidosSemana(rows);
         setCantidadesGuardadas(valores);
         const borrador = leerBorradorLocal<{ cantidades: Record<string, string>; cambios: string[] }>(claveBorrador);
         if (borrador?.valor.cambios.length && restauradoRef.current !== claveBorrador) {
@@ -400,15 +410,26 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
   }, [claveBorrador, cantidades, cambios, cargando]);
 
   const porClave = useMemo(() => new Map(pedidos.map((p) => [clavePedidoSemanal(p.ubicacion.id, p.fecha_entrega), p])), [pedidos]);
+  const preciosCatalogo = useMemo(() => new Map(catalogo.productos.map((producto) => [producto.id, producto.precio])), [catalogo.productos]);
+  const preciosGuardados = useMemo(() => new Map(pedidos.flatMap((pedido) => pedido.lineas.map((detalle) => [
+    claveCantidadSemanal(pedido.ubicacion.id, pedido.fecha_entrega, detalle.product_id), detalle.precio,
+  ] as const))), [pedidos]);
   const filtro = buscar.trim().toLowerCase();
   const visibles = programadas.filter(({ ubicacion }) => !filtro || `${ubicacion.nombre} ${ubicacion.empresa?.nombre ?? ''}`.toLowerCase().includes(filtro));
-  const unidades = programadas.reduce((total, fila) => total + fila.entregas.reduce((subtotal, entrega) => subtotal + fila.productos.reduce(
-    (suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0), 0,
+  const unidadesCaptura = programadas.reduce((total, fila) => total + fila.entregas.reduce((subtotal, entrega) => subtotal + fila.productos.reduce(
+    (suma, producto) => suma + (producto.linea === linea ? Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0) : 0), 0,
   ), 0), 0);
-  const importe = programadas.reduce((total, fila) => total + fila.entregas.reduce((subtotal, entrega) => subtotal + fila.productos.reduce(
-    (suma, producto) => suma + Number(cantidades[claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id)] || 0) * (producto.precio ?? 0), 0,
+  const importeCaptura = programadas.reduce((total, fila) => total + fila.entregas.reduce((subtotal, entrega) => subtotal + fila.productos.reduce(
+    (suma, producto) => {
+      const clave = claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id);
+      const precio = preciosGuardados.get(clave) ?? producto.precio ?? 0;
+      return suma + (producto.linea === linea ? Number(cantidades[clave] || 0) * precio : 0);
+    }, 0,
   ), 0), 0);
-  const ventasCapturadas = programadas.flatMap((fila) => fila.entregas.map((entrega) => porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha)))).filter((p) => p?.lineas.length).length;
+  const lineasExternas = pedidosSemana.filter((pedido) => pedido.linea !== linea && pedido.estado !== 'cancelado').flatMap((pedido) => lineasDeVenta(pedido, linea));
+  const unidades = unidadesCaptura + lineasExternas.reduce((total, detalle) => total + detalle.cantidad, 0);
+  const importe = importeCaptura + lineasExternas.reduce((total, detalle) => total + detalle.cantidad * (detalle.precio ?? preciosCatalogo.get(detalle.product_id) ?? 0), 0);
+  const ventasCapturadas = pedidosSemana.filter((pedido) => pedido.estado !== 'cancelado' && lineasDeVenta(pedido, linea).some((detalle) => detalle.cantidad > 0)).length;
   const fechasVisibles = [...new Set(visibles.flatMap((fila) => fila.entregas.map((entrega) => entrega.fecha)))].sort();
   const filasFormato = filasOrden(linea, catalogo.productos);
 
@@ -634,7 +655,7 @@ function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCer
     </section>}
     {error && <p className="error-msg">{error}</p>}
     {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
-    <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(importe)}</strong></div></div>
+    <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de {linea}</span><strong>{usd(importe)}</strong></div></div>
     {cargando ? <Spinner label="Cargando semana…" /> : <div className="weekly-sales-sheets">{fechasVisibles.map((fechaEntrega, fechaIndice) => {
       const restaurantes = visibles.filter((fila) => fila.entregas.some((entrega) => entrega.fecha === fechaEntrega));
       const filas = filasFormato.map((formato) => ({
@@ -677,27 +698,28 @@ function HistorialPedidos({ pedidos, cargando, linea, semana, ubicacion, setUbic
   pedidos: Pedido[]; cargando: boolean; linea: Linea; semana: SemanaSeleccionada; ubicacion: string; setUbicacion: (v: string) => void;
   ubicaciones: Catalogo['ubicaciones']; onPrint: () => void; onConfirmar: () => void; confirmando: boolean;
 }) {
-  const filtrados = pedidos.filter((p) => ubicacion === 'todas' || String(p.ubicacion.id) === ubicacion);
+  const filtrados = pedidos.filter((p) => lineasDeVenta(p, linea).length > 0 && (ubicacion === 'todas' || String(p.ubicacion.id) === ubicacion));
   const fechas = [...new Set(filtrados.map((p) => p.fecha_entrega))].sort();
-  const unidades = filtrados.flatMap((p) => p.lineas).reduce((a, l) => a + l.cantidad, 0);
-  const total = filtrados.flatMap((p) => p.lineas).reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
+  const unidades = filtrados.flatMap((p) => lineasDeVenta(p, linea)).reduce((a, l) => a + l.cantidad, 0);
+  const total = filtrados.flatMap((p) => lineasDeVenta(p, linea)).reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
   return <div className="order-history">
     <section className="workspace-card history-toolbar history-toolbar--global">
       <div><span className="eyebrow">Periodo general</span><h2>Semana {semana.numero}</h2><p>{etiquetaRango(semana)}</p></div>
       <label className="field"><span>Sucursal</span><select value={ubicacion} onChange={(e) => setUbicacion(e.target.value)}><option value="todas">Todas las sucursales</option>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}</select></label>
-      <div className="history-primary-actions"><button className="btn btn-secondary" disabled={cargando || confirmando} onClick={onConfirmar}>{confirmando ? 'Confirmando…' : 'Confirmar todos'}</button><button className="btn btn-primary" disabled={cargando || !pedidos.length} onClick={onPrint}>Imprimir por ruta</button></div>
+      <div className="history-primary-actions"><button className="btn btn-secondary" disabled={cargando || confirmando} onClick={onConfirmar}>{confirmando ? 'Confirmando…' : 'Confirmar todos'}</button><button className="btn btn-primary" disabled={cargando || !filtrados.length} onClick={onPrint}>Imprimir por ruta</button></div>
     </section>
     {cargando ? <Spinner label="Cargando pedidos…" /> : <>
-      <div className="metric-strip metric-strip--four"><div><span>Sucursales</span><strong>{new Set(filtrados.map((p) => p.ubicacion.id)).size}</strong></div><div><span>Ventas</span><strong>{filtrados.length}</strong></div><div><span>Unidades</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe</span><strong>{usd(total)}</strong></div></div>
-      {fechas.map((dia) => <CollapsibleSection title={fechaLarga(dia)} count={`${filtrados.filter((p) => p.fecha_entrega === dia).length} sucursales`} className="history-day" key={dia}><div className="history-location-grid">{filtrados.filter((p) => p.fecha_entrega === dia).map((p) => <PedidoHistorico key={p.id} pedido={p} />)}</div></CollapsibleSection>)}
+      <div className="metric-strip metric-strip--four"><div><span>Sucursales</span><strong>{new Set(filtrados.map((p) => p.ubicacion.id)).size}</strong></div><div><span>Ventas</span><strong>{filtrados.length}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de {linea}</span><strong>{usd(total)}</strong></div></div>
+      {fechas.map((dia) => <CollapsibleSection title={fechaLarga(dia)} count={`${filtrados.filter((p) => p.fecha_entrega === dia).length} sucursales`} className="history-day" key={dia}><div className="history-location-grid">{filtrados.filter((p) => p.fecha_entrega === dia).map((p) => <PedidoHistorico key={p.id} pedido={p} linea={linea} />)}</div></CollapsibleSection>)}
       {!filtrados.length && <div className="empty-state"><strong>No hay pedidos de {linea} esta semana</strong><span>Cambia la semana, la línea o la sucursal.</span></div>}
     </>}
   </div>;
 }
 
-function PedidoHistorico({ pedido }: { pedido: Pedido }) {
-  const total = pedido.lineas.reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
-  return <article className="history-order-card"><header><div><strong>{pedido.ubicacion.nombre}</strong><small>{pedido.empresa.nombre}</small></div><span className={`order-status order-status--${pedido.estado}`}>{pedido.estado.replaceAll('_', ' ')}</span></header><div>{pedido.lineas.map((l) => <div className="history-order-line" key={l.id}><span><strong>{nombreEnVenta(l.sku, l.nombre, pedido.linea)}</strong><small>{l.sku}</small></span><span>{l.cantidad.toLocaleString('es-MX')} × {usd(l.precio)}</span><strong>{usd(l.cantidad * (l.precio ?? 0))}</strong></div>)}</div><footer><span>{pedido.notas ?? ''}</span><strong>{usd(total)}</strong></footer></article>;
+function PedidoHistorico({ pedido, linea }: { pedido: Pedido; linea: Linea }) {
+  const detalles = lineasDeVenta(pedido, linea);
+  const total = detalles.reduce((a, l) => a + l.cantidad * (l.precio ?? 0), 0);
+  return <article className="history-order-card"><header><div><strong>{pedido.ubicacion.nombre}</strong><small>{pedido.empresa.nombre}</small></div><span className={`order-status order-status--${pedido.estado}`}>{pedido.estado.replaceAll('_', ' ')}</span></header><div>{detalles.map((l) => <div className="history-order-line" key={l.id}><span><strong>{nombreEnVenta(l.sku, l.nombre, linea)}</strong><small>{l.sku}</small></span><span>{l.cantidad.toLocaleString('es-MX')} × {usd(l.precio)}</span><strong>{usd(l.cantidad * (l.precio ?? 0))}</strong></div>)}</div><footer><span>{pedido.notas ?? ''}</span><strong>{usd(total)}</strong></footer></article>;
 }
 
 interface HojaRuta {

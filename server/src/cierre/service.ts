@@ -2,7 +2,7 @@ import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { coberturaPedidosBpm, preciosVentaSemana } from '../operacion/service.js';
+import { coberturaPedidosBpm, preciosVentaSemana, sincronizarDespachosConfirmados } from '../operacion/service.js';
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { eliminarConteoEnTx } from '../conteos/service.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
@@ -183,7 +183,9 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
     throw new HttpError(409, `Faltan pedidos BPM para cerrar: ${coberturaPendiente.slice(0, 6).join(', ')}${coberturaPendiente.length > 6 ? ` y ${coberturaPendiente.length - 6} más` : ''}.`);
   }
   if (pedidosSinPreparar) {
-    throw new HttpError(409, `Faltan ${pedidosSinPreparar} venta(s) por preparar y entregar antes del cierre.`);
+    throw new HttpError(409, negocio?.reparto_habilitado
+      ? `Faltan ${pedidosSinPreparar} venta(s) por integrar a un despacho antes del cierre.`
+      : `No se pudieron integrar ${pedidosSinPreparar} venta(s) al despacho automático. Vuelve a intentar el cierre; no requieren preparación manual.`);
   }
   if (distribucionesActivas) {
     throw new HttpError(409, `Faltan ${distribucionesActivas} despacho(s) por completar antes del cierre.`);
@@ -191,13 +193,25 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
   return validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
 }
 
-/** Calcula el resultado del cierre sin crear facturas, incidencias ni fotografías. */
-export async function vistaPreviaCierre(negocioId: bigint, fechaCierre: string) {
+/**
+ * Completa despachos automáticos pendientes cuando Reparto está desactivado. Esto permite
+ * cerrar capturas tardías sin revivir el paso eliminado de Preparación y conserva el ledger.
+ */
+async function sincronizarVentasParaCierre(negocioId: bigint, usuarioId: bigint, semana: SemanaCierre) {
+  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
+  if (!negocio?.reparto_habilitado) {
+    await sincronizarDespachosConfirmados(negocioId, usuarioId, iso(semana.inicia_at), iso(semana.termina_at));
+  }
+}
+
+/** Calcula el resultado del cierre sin crear facturas, incidencias ni fotografías de cierre. */
+export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fechaCierre: string) {
   const periodo = semanaDeFecha(fecha(fechaCierre));
   if (iso(periodo.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
 
+  await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
   const { grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
   const facturas = [...grupos.values()].flatMap((g) => {
@@ -260,6 +274,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
 
+  await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
