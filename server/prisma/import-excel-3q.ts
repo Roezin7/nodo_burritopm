@@ -137,11 +137,26 @@ async function main() {
       const ubic = porCodigo.get(codigo);
       if (!ubic?.empresa_cliente_id) continue;
       const lineas: LineaImportada[] = [];
+      // En LBTP la hoja Disposables contiene el total semanal de consumibles, aunque
+      // parte se haya capturado en Weekly Order junto con carne. Solo importamos la
+      // diferencia para conservar el total contable sin duplicar la misma venta.
+      const consumiblesYaEnCarne = new Map<string, number>();
+      if (codigo.startsWith('T')) {
+        for (const pedido of pedidos.filter((p) => p.semana === sem.numero && p.ubicacionId === ubic.id && p.linea === 'carne')) {
+          for (const linea of pedido.lineas) {
+            const clave = linea.productId.toString();
+            consumiblesYaEnCarne.set(clave, (consumiblesYaEnCarne.get(clave) ?? 0) + linea.cantidad);
+          }
+        }
+      }
       for (let row = 2; row <= 53; row += 1) {
         const nombre = text(dw.getCell(row, 1).value).toUpperCase();
         const cantidad = n(dw.getCell(row, col).value);
         const p = porNombre.get(nombre);
-        if (p && cantidad > 0) lineas.push({ productId: p.id, cantidad, precio: new Prisma.Decimal(n(dw.getCell(row, 7).value)) });
+        const cantidadPendiente = p ? Math.max(0, cantidad - (consumiblesYaEnCarne.get(p.id.toString()) ?? 0)) : 0;
+        if (p && cantidadPendiente > 0) {
+          lineas.push({ productId: p.id, cantidad: cantidadPendiente, precio: new Prisma.Decimal(n(dw.getCell(row, 7).value)) });
+        }
       }
       if (lineas.length) pedidos.push({ ubicacionId: ubic.id, empresaId: ubic.empresa_cliente_id, linea: 'desechables', entrega: date(sem.miercoles), lineas, semana: sem.numero, cerrada: sem.cerrada });
     }

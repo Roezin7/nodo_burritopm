@@ -71,7 +71,7 @@ const rutas: { codigo: string; nombre: string; linea: LineaOperacion; dia: numbe
   { codigo: 'TAP-LUN', nombre: 'Tapatíos · lunes', linea: 'carne', dia: 1, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST'] },
   { codigo: 'TAP-JUE', nombre: 'Tapatíos · jueves', linea: 'carne', dia: 4, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST'] },
   { codigo: 'DES-NOR-MIE', nombre: 'Desechables Norte · miércoles', linea: 'desechables', dia: 3, conductor: 'MH', paradas: ['SCHAU', 'ROLLI'] },
-  { codigo: 'DES-SUR-MIE', nombre: 'Desechables Sur · miércoles', linea: 'desechables', dia: 3, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'ALGON', 'TNA'] },
+  { codigo: 'DES-SUR-MIE', nombre: 'Desechables Sur · miércoles', linea: 'desechables', dia: 3, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'ALGON', 'TGE', 'TST', 'TLO', 'TNA'] },
 ];
 
 async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: bigint) {

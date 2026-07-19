@@ -35,10 +35,12 @@ export const FILAS_CARNE: readonly FilaOrden[] = [
   { nombre: 'TAPATIOS TACO M', skus: ['MEAT-TAPATIOS-TACO'] },
 ] as const;
 
-// Foto/hoja de Disposables: BPM-0003 (Dinner Napkin) a BPM-0046 (Jamaica).
-export const FILAS_DESECHABLES: readonly FilaOrden[] = Array.from({ length: 44 }, (_, i) => ({
+// El formato completo de Disposables contiene los 52 productos de la hoja semanal.
+// Se reutilizan los mismos SKU de los consumibles que también aparecen en carne;
+// nunca se crean productos duplicados en el catálogo.
+export const FILAS_DESECHABLES: readonly FilaOrden[] = Array.from({ length: 52 }, (_, i) => ({
   nombre: '',
-  skus: [`BPM-${String(i + 3).padStart(4, '0')}`],
+  skus: [`BPM-${String(i + 1).padStart(4, '0')}`],
 }));
 
 export function filasOrden(linea: LineaOperacion, productos: ProductoOrdenable[]): FilaOrden[] {
