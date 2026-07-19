@@ -17,6 +17,77 @@ const hoyChicago = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
 
+export interface DocumentoCarteraCliente {
+  id: string;
+  ubicacion_id: string;
+  semana_id: string;
+  emitida_at: Date;
+  total: number;
+  pagado: number;
+}
+
+/**
+ * Los créditos pertenecen a la cuenta de una ubicación, no a una factura aislada.
+ * Primero reducen documentos de la misma semana y después los más antiguos de Lisle.
+ * Nunca pueden compensar la deuda de otro restaurante.
+ */
+export function distribuirCreditosCliente(documentos: DocumentoCarteraCliente[]) {
+  const saldos = new Map<string, number>();
+  const creditoAplicado = new Map<string, number>();
+  const creditoDisponiblePorUbicacion = new Map<string, number>();
+  const positivos = documentos.filter((d) => r2(d.total - d.pagado) > 0);
+  for (const documento of positivos) saldos.set(documento.id, r2(documento.total - documento.pagado));
+
+  const creditos = documentos
+    .filter((d) => r2(d.total - d.pagado) < 0)
+    .sort((a, b) => a.emitida_at.getTime() - b.emitida_at.getTime() || a.id.localeCompare(b.id));
+  for (const credito of creditos) {
+    let disponible = r2(-(credito.total - credito.pagado));
+    const candidatos = positivos
+      .filter((d) => d.ubicacion_id === credito.ubicacion_id && (saldos.get(d.id) ?? 0) > 0)
+      .sort((a, b) => Number(b.semana_id === credito.semana_id) - Number(a.semana_id === credito.semana_id)
+        || a.emitida_at.getTime() - b.emitida_at.getTime() || a.id.localeCompare(b.id));
+    for (const factura of candidatos) {
+      if (disponible <= 0) break;
+      const saldo = saldos.get(factura.id) ?? 0;
+      const aplicado = r2(Math.min(saldo, disponible));
+      saldos.set(factura.id, r2(saldo - aplicado));
+      creditoAplicado.set(factura.id, r2((creditoAplicado.get(factura.id) ?? 0) + aplicado));
+      disponible = r2(disponible - aplicado);
+    }
+    if (disponible > 0) creditoDisponiblePorUbicacion.set(
+      credito.ubicacion_id,
+      r2((creditoDisponiblePorUbicacion.get(credito.ubicacion_id) ?? 0) + disponible),
+    );
+  }
+  return {
+    saldos,
+    creditoAplicado,
+    creditoDisponiblePorUbicacion,
+    creditoDisponible: r2([...creditoDisponiblePorUbicacion.values()].reduce((total, monto) => total + monto, 0)),
+  };
+}
+
+function saldosFacturas(facturas: {
+  id: bigint;
+  ubicacion_id: bigint;
+  semana_id: bigint;
+  emitida_at: Date;
+  total: Prisma.Decimal;
+  pagos: { monto: Prisma.Decimal; pagado_at: Date }[];
+}[], pagosHasta?: Date) {
+  return distribuirCreditosCliente(facturas.map((factura) => ({
+    id: factura.id.toString(),
+    ubicacion_id: factura.ubicacion_id.toString(),
+    semana_id: factura.semana_id.toString(),
+    emitida_at: factura.emitida_at,
+    total: num0(factura.total),
+    pagado: r2(factura.pagos
+      .filter((pago) => !pagosHasta || pago.pagado_at <= pagosHasta)
+      .reduce((total, pago) => total + num0(pago.monto), 0)),
+  })));
+}
+
 /** Semana operativa domingo-sábado, numerada con la semana ISO del lunes siguiente. */
 export function semanaDeFecha(d: Date) {
   const domingo = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -161,8 +232,8 @@ async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: D
   });
   // El balance de una semana es una fotografía al sábado. Un cobro o pago registrado
   // después no debe reescribir retroactivamente lo que seguía abierto en ese cierre.
-  const cobrar = r2(facturas.reduce((a, f) => a + Math.max(0, num0(f.total)
-    - f.pagos.filter((p) => p.pagado_at <= terminaAt).reduce((x, p) => x + num0(p.monto), 0)), 0));
+  const cartera = saldosFacturas(facturas, terminaAt);
+  const cobrar = r2([...cartera.saldos.values()].reduce((total, saldo) => total + saldo, 0));
   const compras = await db.compras.findMany({
     where: {
       negocio_id: negocioId,
@@ -510,7 +581,7 @@ export async function listarCierres(negocioId: bigint) {
 
 /** Cartera completa para Control: facturas emitidas y facturas recibidas de proveedores. */
 export async function listarCartera(negocioId: bigint) {
-  const [facturas, compras] = await Promise.all([
+  const [facturas, compras, ajustes] = await Promise.all([
     prisma.facturas.findMany({
       where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } },
       include: {
@@ -531,9 +602,19 @@ export async function listarCartera(negocioId: bigint) {
       },
       orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
     }),
+    prisma.ajustes_facturacion.findMany({
+      where: { negocio_id: negocioId, tipo: 'credito' },
+      include: {
+        semana: { select: { anio: true, semana: true, estado: true } },
+        ubicacion: { select: { nombre: true } },
+        factura: { select: { numero: true } },
+      },
+      orderBy: [{ semana: { inicia_at: 'desc' } }, { id: 'desc' }],
+    }),
   ]);
 
-  const emitidas = facturas.map((f) => {
+  const cartera = saldosFacturas(facturas);
+  const emitidas = facturas.filter((f) => num0(f.total) >= 0).map((f) => {
     const pagado = r2(f.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
     return {
       id: Number(f.id),
@@ -549,7 +630,8 @@ export async function listarCartera(negocioId: bigint) {
       estado: f.estado,
       total: num0(f.total),
       pagado,
-      saldo: r2(Math.max(0, num0(f.total) - pagado)),
+      credito_aplicado: cartera.creditoAplicado.get(f.id.toString()) ?? 0,
+      saldo: cartera.saldos.get(f.id.toString()) ?? 0,
       pagado_at: f.pagos[0] ? iso(f.pagos[0].pagado_at) : null,
       lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })),
     };
@@ -567,7 +649,7 @@ export async function listarCartera(negocioId: bigint) {
     pagado_at: c.pagado_at ? iso(c.pagado_at) : null,
     lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cantidad: num0(l.cajas), unidad: l.producto.unidad_distribucion.nombre, peso_lb: num0(l.peso_total_lb), importe: num0(l.costo_total) })),
   }));
-  const pendientesEmitidas = emitidas.filter((f) => f.estado === 'emitida');
+  const pendientesEmitidas = emitidas.filter((f) => f.estado === 'emitida' && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
   const hoy = hoyChicago();
 
@@ -579,22 +661,104 @@ export async function listarCartera(negocioId: bigint) {
       por_pagar: r2(pendientesRecibidas.reduce((total, f) => total + f.saldo, 0)),
       vencido_pagar: r2(pendientesRecibidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
       facturas_por_pagar: pendientesRecibidas.length,
+      credito_lisle_disponible: cartera.creditoDisponible,
     },
     emitidas,
     recibidas,
+    creditos: ajustes.map((ajuste) => ({
+      id: Number(ajuste.id),
+      anio: ajuste.semana.anio,
+      semana: ajuste.semana.semana,
+      semana_estado: ajuste.semana.estado,
+      ubicacion: ajuste.ubicacion.nombre,
+      descripcion: ajuste.descripcion,
+      monto: num0(ajuste.monto),
+      estado: ajuste.estado,
+      factura: ajuste.factura?.numero ?? null,
+      creado_at: ajuste.creado_at.toISOString(),
+    })),
   };
 }
 
+export async function registrarCreditoLisle(
+  negocioId: bigint,
+  usuarioId: bigint,
+  entrada: { fecha_semana: string; monto: number; descripcion: string; idempotency_key: string },
+) {
+  const semana = await asegurarSemana(negocioId, entrada.fecha_semana);
+  if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana está cerrada. Reábrela antes de agregar el crédito de Lisle.');
+  const lisle = await prisma.ubicaciones.findFirst({
+    where: { negocio_id: negocioId, activo: true, empresa_cliente_id: { not: null }, OR: [{ codigo: 'LISLE' }, { nombre: { equals: 'Lisle', mode: 'insensitive' } }] },
+    select: { id: true, empresa_cliente_id: true },
+  });
+  if (!lisle?.empresa_cliente_id) throw new HttpError(409, 'No se encontró la ubicación activa de Lisle con empresa asignada.');
+
+  return transaccionSerializable(async (tx) => {
+    const existente = await tx.ajustes_facturacion.findFirst({
+      where: { negocio_id: negocioId, idempotency_key: entrada.idempotency_key },
+    });
+    if (existente) return { ok: true, id: Number(existente.id), semana: semana.semana };
+    const ajuste = await tx.ajustes_facturacion.create({
+      data: {
+        negocio_id: negocioId,
+        semana_id: semana.id,
+        empresa_cliente_id: lisle.empresa_cliente_id!,
+        ubicacion_id: lisle.id,
+        linea_operacion: 'carne',
+        tipo: 'credito',
+        descripcion: entrada.descripcion,
+        monto: entrada.monto,
+        creado_por: usuarioId,
+        idempotency_key: entrada.idempotency_key,
+      },
+    });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: 'crear_credito_lisle',
+        entidad: 'ajuste_facturacion', entidad_id: ajuste.id,
+        datos: { semana: semana.semana, anio: semana.anio, monto: entrada.monto, descripcion: entrada.descripcion },
+      },
+    });
+    return { ok: true, id: Number(ajuste.id), semana: semana.semana };
+  }, { reintentarUnico: true });
+}
+
+export async function eliminarCreditoLisle(negocioId: bigint, ajusteId: bigint, usuarioId: bigint) {
+  return transaccionSerializable(async (tx) => {
+    const ajuste = await tx.ajustes_facturacion.findFirst({
+      where: { id: ajusteId, negocio_id: negocioId, tipo: 'credito' },
+      include: { ubicacion: { select: { codigo: true } } },
+    });
+    if (!ajuste || ajuste.ubicacion.codigo !== 'LISLE') throw new HttpError(404, 'Crédito de Lisle no encontrado');
+    if (ajuste.estado !== 'abierto') throw new HttpError(409, 'El crédito ya fue aplicado. Reabre la semana para corregirlo.');
+    await tx.ajustes_facturacion.delete({ where: { id: ajuste.id } });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar_credito_lisle',
+        entidad: 'ajuste_facturacion', entidad_id: ajuste.id,
+        datos: { monto: num0(ajuste.monto), descripcion: ajuste.descripcion },
+      },
+    });
+    return { ok: true };
+  });
+}
+
 export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuarioId: bigint, fechaPago: string) {
-  const f = await prisma.facturas.findFirst({ where: { id: facturaId, negocio_id: negocioId, estado: 'emitida' }, include: { pagos: true } });
-  if (!f) throw new HttpError(404, 'Factura pendiente no encontrada');
-  if (fechaPago < iso(f.emitida_at)) throw new HttpError(400, 'La fecha de cobro no puede ser anterior a la emisión');
   if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
-  const saldo = r2(num0(f.total) - f.pagos.reduce((a, p) => a + num0(p.monto), 0));
-  await prisma.$transaction([
-    prisma.pagos_cliente.create({ data: { factura_id: f.id, monto: saldo, pagado_at: fecha(fechaPago), registrado_por: usuarioId } }),
-    prisma.facturas.update({ where: { id: f.id }, data: { estado: 'pagada' } }),
-  ]);
+  const saldo = await transaccionSerializable(async (tx) => {
+    const f = await tx.facturas.findFirst({ where: { id: facturaId, negocio_id: negocioId, estado: 'emitida', total: { gte: 0 } } });
+    if (!f) throw new HttpError(404, 'Factura pendiente no encontrada');
+    if (fechaPago < iso(f.emitida_at)) throw new HttpError(400, 'La fecha de cobro no puede ser anterior a la emisión');
+    const documentos = await tx.facturas.findMany({
+      where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } },
+      include: { pagos: true },
+    });
+    const monto = saldosFacturas(documentos).saldos.get(f.id.toString()) ?? 0;
+    if (monto <= 0) throw new HttpError(409, 'La factura ya quedó cubierta por un crédito de Lisle. Recarga la cartera.');
+    await tx.pagos_cliente.create({ data: { factura_id: f.id, monto, pagado_at: fecha(fechaPago), registrado_por: usuarioId } });
+    await tx.facturas.update({ where: { id: f.id }, data: { estado: 'pagada' } });
+    return monto;
+  });
   await actualizarUltimoBalance(negocioId);
   return { ok: true, monto: saldo };
 }
@@ -613,14 +777,20 @@ export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[],
   if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
   const resultado = await transaccionSerializable(async (tx) => {
     const facturas = await tx.facturas.findMany({
-      where: { id: { in: facturaIds }, negocio_id: negocioId, estado: 'emitida' },
-      include: { pagos: true },
+      where: { id: { in: facturaIds }, negocio_id: negocioId, estado: 'emitida', total: { gte: 0 } },
     });
     if (facturas.length !== new Set(facturaIds.map(String)).size) throw new HttpError(409, 'Una o más facturas ya no están pendientes. Recarga la cartera.');
     for (const factura of facturas) if (fechaPago < iso(factura.emitida_at)) throw new HttpError(400, `${factura.numero}: la fecha es anterior a la emisión`);
-    const total = r2(facturas.reduce((suma, factura) => suma + num0(factura.total) - factura.pagos.reduce((a, pago) => a + num0(pago.monto), 0), 0));
+    const documentos = await tx.facturas.findMany({
+      where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } },
+      include: { pagos: true },
+    });
+    const cartera = saldosFacturas(documentos);
+    const saldos = new Map(facturas.map((factura) => [factura.id.toString(), cartera.saldos.get(factura.id.toString()) ?? 0]));
+    if ([...saldos.values()].some((saldo) => saldo <= 0)) throw new HttpError(409, 'Una o más facturas ya quedaron cubiertas por créditos. Recarga la cartera.');
+    const total = r2([...saldos.values()].reduce((suma, saldo) => suma + saldo, 0));
     for (const factura of facturas) {
-      const saldo = r2(num0(factura.total) - factura.pagos.reduce((a, pago) => a + num0(pago.monto), 0));
+      const saldo = saldos.get(factura.id.toString())!;
       await tx.pagos_cliente.create({ data: { factura_id: factura.id, monto: saldo, pagado_at: fecha(fechaPago), registrado_por: usuarioId } });
       await tx.facturas.update({ where: { id: factura.id }, data: { estado: 'pagada' } });
     }

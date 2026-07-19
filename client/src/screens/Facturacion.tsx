@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError } from '../api';
+import { api, ApiError, nuevaClaveIdempotencia } from '../api';
 import Spinner from '../components/Spinner';
+import { crearSemana, etiquetaRango, semanasAlrededor } from '../semana';
 import { useToast } from '../toast';
 
 interface FacturaEmitida {
@@ -17,6 +18,7 @@ interface FacturaEmitida {
   estado: 'emitida' | 'pagada';
   total: number;
   pagado: number;
+  credito_aplicado: number;
   saldo: number;
   pagado_at: string | null;
   lineas: { descripcion: string; cantidad: number; precio: number; importe: number }[];
@@ -44,9 +46,22 @@ interface Cartera {
     por_pagar: number;
     vencido_pagar: number;
     facturas_por_pagar: number;
+    credito_lisle_disponible: number;
   };
   emitidas: FacturaEmitida[];
   recibidas: FacturaRecibida[];
+  creditos: {
+    id: number;
+    anio: number;
+    semana: number;
+    semana_estado: string;
+    ubicacion: string;
+    descripcion: string;
+    monto: number;
+    estado: string;
+    factura: string | null;
+    creado_at: string;
+  }[];
 }
 
 type Detalle = { tipo: 'cobrar'; factura: FacturaEmitida } | { tipo: 'pagar'; factura: FacturaRecibida };
@@ -70,6 +85,12 @@ export default function Facturacion() {
   const [error, setError] = useState('');
   const [seleccionCobrar, setSeleccionCobrar] = useState<Set<number>>(() => new Set());
   const [seleccionPagar, setSeleccionPagar] = useState<Set<number>>(() => new Set());
+  const [mostrarCredito, setMostrarCredito] = useState(false);
+  const [fechaCredito, setFechaCredito] = useState(crearSemana().inicio);
+  const [montoCredito, setMontoCredito] = useState('');
+  const [descripcionCredito, setDescripcionCredito] = useState('Producción de tacos dorados, tamales y otros productos');
+  const [claveCredito, setClaveCredito] = useState('');
+  const semanasCredito = useMemo(() => semanasAlrededor(crearSemana(), 12, 12), []);
 
   async function cargar() {
     setError('');
@@ -81,7 +102,7 @@ export default function Facturacion() {
 
   const consulta = texto(busqueda.trim());
   const emitidas = useMemo(() => (datos?.emitidas ?? []).filter((factura) => {
-    const coincideEstado = vista === 'pendientes' ? factura.estado === 'emitida' : factura.estado === 'pagada';
+    const coincideEstado = vista === 'pendientes' ? factura.estado === 'emitida' && factura.saldo > 0 : factura.estado === 'pagada';
     const coincideTexto = !consulta || texto(`${factura.numero} ${factura.empresa} ${factura.ubicacion} ${factura.linea} ${factura.semana}`).includes(consulta);
     return coincideEstado && coincideTexto;
   }), [datos, vista, consulta]);
@@ -137,6 +158,40 @@ export default function Facturacion() {
     setter((actual) => { const siguiente = new Set(actual); if (siguiente.has(id)) siguiente.delete(id); else siguiente.add(id); return siguiente; });
   }
 
+  function abrirCredito() {
+    setFechaCredito(crearSemana().inicio);
+    setMontoCredito('');
+    setDescripcionCredito('Producción de tacos dorados, tamales y otros productos');
+    setClaveCredito(nuevaClaveIdempotencia('credito-lisle'));
+    setMostrarCredito(true);
+  }
+
+  async function registrarCredito() {
+    const monto = Number(montoCredito);
+    if (!fechaCredito || !Number.isFinite(monto) || monto <= 0 || descripcionCredito.trim().length < 3) return;
+    setBusy(true); setError('');
+    try {
+      await api('/cierre/creditos-lisle', {
+        method: 'POST',
+        body: { fecha_semana: fechaCredito, monto, descripcion: descripcionCredito.trim(), idempotency_key: claveCredito },
+      });
+      setMostrarCredito(false);
+      await cargar();
+      toast.ok('Crédito de Lisle guardado para el cierre semanal.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar el crédito de Lisle.'); }
+    finally { setBusy(false); }
+  }
+
+  async function eliminarCredito(id: number) {
+    if (!window.confirm('¿Eliminar este crédito abierto de Lisle?')) return;
+    setBusy(true); setError('');
+    try {
+      await api(`/cierre/creditos-lisle/${id}`, { method: 'DELETE' });
+      await cargar(); toast.ok('Crédito eliminado.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar el crédito.'); }
+    finally { setBusy(false); }
+  }
+
   if (!datos) return <div className="page billing-page"><header className="page-head"><div><span className="eyebrow">Control</span><h1>Facturación</h1></div></header><Spinner label="Cargando cartera…" />{error && <p className="error-msg">{error}</p>}</div>;
 
   return <div className="page billing-page">
@@ -144,10 +199,21 @@ export default function Facturacion() {
     {error && <p className="notice notice--error">{error}</p>}
 
     <section className="billing-kpis" aria-label="Resumen de cartera">
-      <div><span>Por cobrar</span><strong>{usd(datos.resumen.por_cobrar)}</strong><small>{datos.resumen.facturas_por_cobrar} factura{datos.resumen.facturas_por_cobrar === 1 ? '' : 's'} pendiente{datos.resumen.facturas_por_cobrar === 1 ? '' : 's'}</small></div>
-      <div className={datos.resumen.vencido_cobrar > 0 ? 'is-overdue' : ''}><span>Cobro vencido</span><strong>{usd(datos.resumen.vencido_cobrar)}</strong><small>Restaurantes</small></div>
-      <div><span>Por pagar</span><strong>{usd(datos.resumen.por_pagar)}</strong><small>{datos.resumen.facturas_por_pagar} factura{datos.resumen.facturas_por_pagar === 1 ? '' : 's'} pendiente{datos.resumen.facturas_por_pagar === 1 ? '' : 's'}</small></div>
-      <div className={datos.resumen.vencido_pagar > 0 ? 'is-overdue' : ''}><span>Pago vencido</span><strong>{usd(datos.resumen.vencido_pagar)}</strong><small>Proveedores</small></div>
+      <div><span>Total por cobrar</span><strong>{usd(datos.resumen.por_cobrar)}</strong><small>Incluye {usd(datos.resumen.vencido_cobrar)} ya vencidos</small></div>
+      <div className={datos.resumen.vencido_cobrar > 0 ? 'is-overdue' : ''}><span>De ese total, vencido</span><strong>{usd(datos.resumen.vencido_cobrar)}</strong><small>No se suma otra vez · requiere seguimiento</small></div>
+      <div><span>Total por pagar</span><strong>{usd(datos.resumen.por_pagar)}</strong><small>Incluye {usd(datos.resumen.vencido_pagar)} ya vencidos</small></div>
+      <div className={datos.resumen.vencido_pagar > 0 ? 'is-overdue' : ''}><span>De ese total, vencido</span><strong>{usd(datos.resumen.vencido_pagar)}</strong><small>No se suma otra vez · proveedores</small></div>
+    </section>
+
+    <section className="billing-explainer" aria-label="Cómo leer la cartera">
+      <span aria-hidden="true">i</span>
+      <p><strong>Cómo leer estos montos:</strong> “vencido” es solamente la parte del total cuya fecha ya pasó. Los créditos de producción de Lisle se descuentan únicamente de las facturas de Lisle.</p>
+    </section>
+
+    <section className="workspace-card lisle-credit-panel">
+      <div className="workspace-card-head"><div><span className="eyebrow">Saldo a favor</span><h2>Créditos de producción de Lisle</h2><p>Registra aquí lo que BPM debe reconocer a Lisle por producir tacos dorados, tamales u otros productos. Se aplicará al cerrar la semana.</p></div><button className="btn btn-primary" onClick={abrirCredito}>Agregar crédito</button></div>
+      {datos.resumen.credito_lisle_disponible > 0 && <div className="lisle-credit-available"><span>Crédito disponible después de compensar facturas</span><strong>{usd(datos.resumen.credito_lisle_disponible)}</strong></div>}
+      <div className="lisle-credit-list">{datos.creditos.slice(0, 6).map((credito) => <div key={credito.id}><span><strong>{credito.descripcion}</strong><small>Semana {credito.semana} · {credito.anio} · {credito.estado === 'abierto' ? 'se aplicará al cierre' : `aplicado en ${credito.factura ?? 'factura semanal'}`}</small></span><strong>{usd(credito.monto)}</strong>{credito.estado === 'abierto' && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void eliminarCredito(credito.id)}>Eliminar</button>}</div>)}{datos.creditos.length === 0 && <p className="muted">Todavía no hay créditos registrados.</p>}</div>
     </section>
 
     <section className="workspace-card billing-toolbar">
@@ -169,7 +235,7 @@ export default function Facturacion() {
             {factura.estado === 'emitida' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar ${factura.numero}`} checked={seleccionCobrar.has(factura.id)} onChange={() => alternarSeleccion('cobrar', factura.id)} />}
             <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
             <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
-            <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'emitida' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'emitida' ? 'saldo' : 'total'}</small></div>
+            <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'emitida' ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.estado === 'emitida' ? 'saldo' : 'total'}</small></div>
             <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'cobrar', factura })}>Ver</button>{factura.estado === 'emitida' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento('cobrar', factura.id, factura.numero, factura.saldo)}>Registrar cobro</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento('cobrar', factura.id)}>Revertir</button>}</div>
           </article>;
         })}{emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}</div>
@@ -200,6 +266,7 @@ export default function Facturacion() {
         <div className="invoice-detail">{detalle.factura.lineas.map((linea, indice) => <div key={indice}><span><strong>{linea.producto}</strong><small>{linea.cantidad} {linea.unidad.toLowerCase()}{linea.peso_lb > 0 ? ` · ${linea.peso_lb.toLocaleString('es-MX')} lb` : ''}</small></span><strong>{usd(linea.importe)}</strong></div>)}</div>
       </>}
       <div className="invoice-grand-total"><span>{detalle.factura.estado === 'pagada' ? 'Total pagado' : 'Saldo pendiente'}</span><strong>{usd(detalle.factura.estado === 'pagada' ? detalle.factura.total : detalle.factura.saldo)}</strong></div>
+      {detalle.tipo === 'cobrar' && detalle.factura.credito_aplicado > 0 && <p className="billing-credit-note">Este saldo ya descuenta {usd(detalle.factura.credito_aplicado)} del crédito de producción de Lisle.</p>}
       <div className="form-actions">{detalle.tipo === 'cobrar' && <button className="btn btn-secondary" onClick={() => window.print()}>Imprimir / PDF</button>}{((detalle.tipo === 'cobrar' && detalle.factura.estado === 'emitida') || (detalle.tipo === 'pagar' && detalle.factura.estado === 'pendiente')) && <button className="btn btn-primary" onClick={() => prepararMovimiento(detalle.tipo, detalle.factura.id, detalle.tipo === 'cobrar' ? detalle.factura.numero : detalle.factura.referencia || `Compra #${detalle.factura.id}`, detalle.factura.saldo)}>{detalle.tipo === 'cobrar' ? 'Registrar cobro' : 'Registrar pago'}</button>}</div>
     </div></div>}
 
@@ -208,6 +275,15 @@ export default function Facturacion() {
       <div className="payment-dialog-amount"><span>Monto total</span><strong>{usd(movimiento.monto)}</strong></div>
       <label className="field"><span>Fecha del {movimiento.tipo === 'cobrar' ? 'cobro' : 'pago'}</span><input type="date" max={hoy()} value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} /></label>
       <div className="form-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setMovimiento(null)}>Cancelar</button><button className="btn btn-primary" disabled={busy || !fechaPago} onClick={() => void registrarMovimiento()}>{busy ? 'Guardando…' : movimiento.tipo === 'cobrar' ? 'Confirmar cobro' : 'Confirmar pago'}</button></div>
+    </div></div>}
+
+    {mostrarCredito && <div className="modal-backdrop" onClick={() => !busy && setMostrarCredito(false)}><div className="modal-card payment-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="card-head"><div><span className="eyebrow">Ajuste de facturación</span><strong>Nuevo crédito de Lisle</strong></div><button className="icon-btn" aria-label="Cerrar" disabled={busy} onClick={() => setMostrarCredito(false)}>×</button></div>
+      <p className="muted">La ubicación está fija en Lisle. El crédito no modifica ventas ni inventario; reduce su cuenta al cerrar la semana seleccionada.</p>
+      <label className="field"><span>Semana del crédito</span><select value={fechaCredito} onChange={(e) => setFechaCredito(e.target.value)}>{semanasCredito.map((semana) => <option key={semana.inicio} value={semana.inicio}>Semana {semana.numero} · {semana.anio} · {etiquetaRango(semana)}</option>)}</select><small>El crédito se aplicará cuando cierres esta semana.</small></label>
+      <label className="field"><span>Monto del crédito</span><input type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="0.00" value={montoCredito} onChange={(e) => setMontoCredito(e.target.value)} /></label>
+      <label className="field"><span>Concepto</span><input value={descripcionCredito} maxLength={180} onChange={(e) => setDescripcionCredito(e.target.value)} /></label>
+      <div className="form-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setMostrarCredito(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy || !fechaCredito || Number(montoCredito) <= 0 || descripcionCredito.trim().length < 3} onClick={() => void registrarCredito()}>{busy ? 'Guardando…' : 'Guardar crédito'}</button></div>
     </div></div>}
   </div>;
 }

@@ -70,7 +70,7 @@ export default function PanelAdmin() {
 
       <section className="card overview-card">
         <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
-        <div className="cash-grid"><div><small>Por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Cobro vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>requiere seguimiento</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>Pago vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere seguimiento</span></div></div>
+        <div className="cash-grid"><div><small>Total por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas pendientes</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>De ese total, vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>incluido en por cobrar</span></div><div><small>Total por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras pendientes</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>De ese total, vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>incluido en por pagar</span></div></div>
       </section>
 
       <section className="card overview-card">

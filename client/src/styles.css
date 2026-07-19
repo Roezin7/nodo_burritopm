@@ -3824,9 +3824,28 @@ form > .form-actions .btn,
 .billing-kpis > div { display: flex; flex-direction: column; min-width: 0; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--sh-sm); }
 .billing-kpis span { color: var(--ink-3); font-size: 0.72rem; font-weight: 750; }
 .billing-kpis strong { margin: 0.25rem 0 0.15rem; font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -0.025em; }
-.billing-kpis small { overflow: hidden; color: var(--ink-3); font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.billing-kpis small { color: var(--ink-3); font-size: 0.68rem; line-height: 1.35; }
 .billing-kpis > .is-overdue { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); }
 .billing-kpis > .is-overdue strong { color: var(--danger); }
+.billing-explainer { display: flex; align-items: flex-start; gap: 0.7rem; margin: -0.25rem 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
+.billing-explainer > span { display: grid; flex: 0 0 auto; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--brand); color: white; font-size: 0.72rem; font-weight: 850; }
+.billing-explainer p { margin: 0; color: var(--ink-2); font-size: 0.76rem; line-height: 1.45; }
+.lisle-credit-panel { margin-bottom: 1rem; padding: 0; overflow: hidden; }
+.lisle-credit-panel > .workspace-card-head { align-items: center; margin: 0; padding: 1rem 1.1rem; border-bottom: 1px solid var(--border); }
+.lisle-credit-panel > .workspace-card-head h2 { font-size: 1rem; }
+.lisle-credit-panel > .workspace-card-head p { max-width: 760px; font-size: 0.72rem; }
+.lisle-credit-list { display: flex; flex-direction: column; }
+.lisle-credit-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.8rem; padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--border); }
+.lisle-credit-list > div:last-child { border-bottom: 0; }
+.lisle-credit-list > div > span { display: flex; flex-direction: column; min-width: 0; }
+.lisle-credit-list > div > span strong, .lisle-credit-list > div > span small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lisle-credit-list small { color: var(--ink-3); font-size: 0.68rem; }
+.lisle-credit-list > div > strong { font: 800 0.9rem var(--font-mono); }
+.lisle-credit-list > p { margin: 0; padding: 0.9rem 1.1rem; }
+.lisle-credit-available { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--success) 7%, var(--surface)); }
+.lisle-credit-available span { color: var(--ink-2); font-size: 0.75rem; }
+.lisle-credit-available strong { color: var(--success); }
+.billing-credit-note { margin: -0.5rem 0 1rem; padding: 0.65rem 0.75rem; border-radius: 9px; background: color-mix(in srgb, var(--success) 8%, var(--surface)); color: var(--success); font-size: 0.75rem; font-weight: 700; }
 .billing-toolbar { display: grid; grid-template-columns: auto auto minmax(220px, 1fr); align-items: center; gap: 0.7rem; margin-bottom: 1rem; padding: 0.7rem; }
 .billing-toolbar .segmented { width: max-content; }
 .billing-toolbar > input { min-height: 42px; }
@@ -3946,6 +3965,8 @@ form > .form-actions .btn,
   .billing-toolbar .segmented { width: 100%; }
   .billing-toolbar .segmented-btn { flex: 1; }
   .billing-toolbar > input { grid-column: 1 / -1; }
+  .lisle-credit-panel > .workspace-card-head { align-items: stretch; flex-direction: column; }
+  .lisle-credit-panel > .workspace-card-head .btn { width: 100%; }
   .dispatch-page-head { align-items: stretch; flex-direction: column; }
   .dispatch-page-head .page-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .dispatch-summary { grid-template-columns: repeat(3, 1fr); }
@@ -3987,6 +4008,8 @@ form > .form-actions .btn,
   .billing-row-balance { min-width: 92px; }
   .billing-row-actions .btn-primary { flex: 1; }
   .billing-detail-context { grid-template-columns: 1fr; }
+  .lisle-credit-list > div { grid-template-columns: minmax(0, 1fr) auto; }
+  .lisle-credit-list > div .btn { grid-column: 1 / -1; }
   .route-template > header { flex-direction: column; }
   .route-template > header .btn { width: 100%; }
   .route-stop-actions .icon-btn { width: 30px; }

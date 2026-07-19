@@ -17,6 +17,20 @@ cierreRouter.get('/cartera', asyncHandler(async (req, res) => {
   res.json(await svc.listarCartera(req.auth!.negocioId));
 }));
 
+cierreRouter.post('/creditos-lisle', asyncHandler(async (req, res) => {
+  const body = z.object({
+    fecha_semana: fecha,
+    monto: z.coerce.number().positive().max(1_000_000),
+    descripcion: z.string().trim().min(3).max(180),
+    idempotency_key: z.string().trim().min(8).max(160),
+  }).parse(req.body);
+  res.status(201).json(await svc.registrarCreditoLisle(req.auth!.negocioId, req.auth!.usuarioId, body));
+}));
+
+cierreRouter.delete('/creditos-lisle/:id', asyncHandler(async (req, res) => {
+  res.json(await svc.eliminarCreditoLisle(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+}));
+
 cierreRouter.post('/vista-previa', asyncHandler(async (req, res) => {
   const { fecha_cierre } = z.object({ fecha_cierre: fecha }).parse(req.body);
   res.json(await svc.vistaPreviaCierre(req.auth!.negocioId, req.auth!.usuarioId, fecha_cierre));
