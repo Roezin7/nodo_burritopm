@@ -365,10 +365,15 @@ export async function guardarPedido(
   esAdmin: boolean,
 ) {
   const preparado = await prepararPedido(negocioId, input, esAdmin);
-  return prisma.$transaction(
+  const guardado = await prisma.$transaction(
     (tx) => guardarPedidoEnTx(tx, negocioId, usuarioId, preparado),
     { isolationLevel: 'Serializable' },
   );
+  if (input.confirmar && guardado.estado === 'confirmado') {
+    const rango = rangoSemana(input.fecha_entrega);
+    await consolidarPedidosSiCompletos(negocioId, usuarioId, input.linea, rango.desde, rango.hasta);
+  }
+  return guardado;
 }
 
 /**
@@ -391,6 +396,15 @@ export async function guardarPedidosSemana(
     for (const preparado of preparados) guardados.push(await guardarPedidoEnTx(tx, negocioId, usuarioId, preparado));
     return guardados;
   }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 30_000 });
+
+  const rangos = new Map<string, { linea: LineaOperacion; desde: string; hasta: string }>();
+  for (const input of inputs.filter((p) => p.confirmar)) {
+    const semana = rangoSemana(input.fecha_entrega);
+    rangos.set(`${input.linea}:${semana.desde}`, { linea: input.linea, ...semana });
+  }
+  for (const rango of rangos.values()) {
+    await consolidarPedidosSiCompletos(negocioId, usuarioId, rango.linea, rango.desde, rango.hasta);
+  }
 
   return {
     guardados: pedidos.length,
@@ -449,6 +463,70 @@ export async function coberturaPedidosBpm(negocioId: bigint, linea: LineaOperaci
   return calcularCoberturaBpm(fechasEsperadas, sucursales, paradasPorDia, presentes);
 }
 
+/**
+ * Consolida los pedidos confirmados cuando ya existe la cobertura completa de BPM.
+ * Es idempotente: puede ejecutarse después de una confirmación individual o masiva
+ * sin duplicar distribuciones existentes.
+ */
+async function consolidarPedidosSiCompletos(
+  negocioId: bigint,
+  usuarioId: bigint,
+  linea: LineaOperacion,
+  desde: string,
+  hasta: string,
+) {
+  const cobertura = await coberturaPedidosBpm(negocioId, linea, desde, hasta);
+  let preparaciones = { creadas: 0, existentes: 0, aprobadas: 0 };
+  if (!cobertura.every((c) => c.pendientes.length === 0)) return { cobertura, preparaciones };
+
+  const generadas = await crearPreparacionesEnRango(negocioId, usuarioId, desde, hasta, linea);
+  const aprobables = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      linea_operacion: linea,
+      fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+      estado: { in: ['calculada', 'en_revision'] },
+    },
+    select: { id: true },
+  });
+  if (aprobables.length) await prisma.$transaction(async (tx) => {
+    const lineasSinAprobar = await tx.distribucion_lineas.findMany({
+      where: { distribucion_id: { in: aprobables.map((d) => d.id) }, cantidad_aprobada: null },
+    });
+    for (const l of lineasSinAprobar) await tx.distribucion_lineas.update({
+      where: { id: l.id },
+      data: {
+        cantidad_aprobada: l.cantidad_sugerida,
+        costo_total: r2(num0(l.cantidad_sugerida) * (num(l.costo_unitario) ?? 0)),
+      },
+    });
+    await tx.distribuciones.updateMany({
+      where: { id: { in: aprobables.map((d) => d.id) } },
+      data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
+    });
+  });
+  preparaciones = {
+    creadas: generadas.creadas.length,
+    existentes: generadas.existentes,
+    aprobadas: aprobables.length,
+  };
+  return { cobertura, preparaciones };
+}
+
+/** Recupera despachos faltantes de pedidos que ya estaban confirmados antes de la automatización. */
+export async function sincronizarDespachosConfirmados(
+  negocioId: bigint,
+  usuarioId: bigint,
+  desde: string,
+  hasta: string,
+) {
+  const resultados = [];
+  for (const linea of ['carne', 'desechables'] as const) {
+    resultados.push({ linea, ...(await consolidarPedidosSiCompletos(negocioId, usuarioId, linea, desde, hasta)) });
+  }
+  return resultados;
+}
+
 /** Confirma todos los borradores con cantidades; los vacíos nunca pasan a preparación. */
 export async function confirmarPedidosEnRango(
   negocioId: bigint,
@@ -471,40 +549,8 @@ export async function confirmarPedidosEnRango(
     });
   }
 
-  const cobertura_bpm = await coberturaPedidosBpm(negocioId, linea, desde, hasta);
-
-  // "Confirmar todos" es el punto en que el admin declara terminada la captura. Si la
-  // cobertura BPM está completa, el sistema consolida y aprueba las preparaciones solo;
-  // el paso Preparación queda para revisar/imprimir y no para repetir la captura.
-  let preparaciones = { creadas: 0, existentes: 0, aprobadas: 0 };
-  if (cobertura_bpm.every((c) => c.pendientes.length === 0)) {
-    const generadas = await crearPreparacionesEnRango(negocioId, usuarioId, desde, hasta, linea);
-    const aprobables = await prisma.distribuciones.findMany({
-      where: {
-        negocio_id: negocioId, linea_operacion: linea,
-        fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
-        estado: { in: ['calculada', 'en_revision'] },
-      },
-      select: { id: true },
-    });
-    if (aprobables.length) await prisma.$transaction(async (tx) => {
-      const lineasSinAprobar = await tx.distribucion_lineas.findMany({
-        where: { distribucion_id: { in: aprobables.map((d) => d.id) }, cantidad_aprobada: null },
-      });
-      for (const l of lineasSinAprobar) await tx.distribucion_lineas.update({
-        where: { id: l.id },
-        data: {
-          cantidad_aprobada: l.cantidad_sugerida,
-          costo_total: r2(num0(l.cantidad_sugerida) * (num(l.costo_unitario) ?? 0)),
-        },
-      });
-      await tx.distribuciones.updateMany({
-        where: { id: { in: aprobables.map((d) => d.id) } },
-        data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
-      });
-    });
-    preparaciones = { creadas: generadas.creadas.length, existentes: generadas.existentes, aprobadas: aprobables.length };
-  }
+  const { cobertura: cobertura_bpm, preparaciones } =
+    await consolidarPedidosSiCompletos(negocioId, usuarioId, linea, desde, hasta);
 
   return {
     confirmados: conPedido.length,

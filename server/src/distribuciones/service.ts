@@ -1278,8 +1278,10 @@ export async function operacionDetalle(negocioId: bigint, id: bigint) {
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   return {
     id: Number(dist.id),
+    nombre: dist.nombre,
     estado: dist.estado,
     linea: dist.linea_operacion,
+    fecha_entrega: dist.fecha_entrega?.toISOString().slice(0, 10) ?? null,
     preparado_por: dist.preparado_por ? Number(dist.preparado_por) : null,
     verificado_por: dist.verificado_por ? Number(dist.verificado_por) : null,
     total_carga: totalCarga,

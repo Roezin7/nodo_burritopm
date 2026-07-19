@@ -74,6 +74,12 @@ operacionRouter.post('/distribuciones/crear-todas', soloAdmin, asyncHandler(asyn
   res.status(201).json(await svc.crearPreparacionesEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta, b.linea));
 }));
 
+/** Completa de forma idempotente los despachos de pedidos que ya estaban confirmados. */
+operacionRouter.post('/distribuciones/sincronizar', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
+  res.json(await svc.sincronizarDespachosConfirmados(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta));
+}));
+
 operacionRouter.patch('/plantillas/:id', soloAdmin, asyncHandler(async (req, res) => {
   const plantillaId = BigInt(id.parse(req.params.id));
   const b = z.object({
