@@ -51,7 +51,12 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia, 
   if (![dispNue, reservadaNueva, transitoNuevo].every(Number.isFinite)) {
     throw new HttpError(400, 'El movimiento contiene una cantidad de inventario no válida');
   }
-  if ((!permitirDisponibleNegativo && dispNue < -0.0001) || reservadaNueva < -0.0001 || transitoNuevo < -0.0001) {
+  // Un saldo disponible negativo previo no debe congelar los otros componentes de la
+  // existencia. Por ejemplo, al cerrar una semana se debe poder sacar del tránsito una
+  // entrega aunque el disponible de Carnicería ya refleje cajas faltantes. Solo se bloquea
+  // cuando este movimiento CREA o EMPEORA el negativo; recuperarlo o dejarlo igual es válido.
+  const disponibleEmpeora = dispNue < -0.0001 && dispNue < dispAnt - 0.0001;
+  if ((!permitirDisponibleNegativo && disponibleEmpeora) || reservadaNueva < -0.0001 || transitoNuevo < -0.0001) {
     throw new HttpError(409, 'Inventario insuficiente para completar el movimiento');
   }
 

@@ -230,7 +230,7 @@ export default function Productos() {
           <input value={form.ultimo_costo} onChange={(e) => setForm({ ...form, ultimo_costo: e.target.value })} inputMode="decimal" placeholder="0.00" />
         </label>
 
-        <details className="prod-extra" open={form.linea_operacion === 'carne'}>
+        <details className="prod-extra">
           <summary>Operación semanal y facturación</summary>
           <label>Línea
             <select value={form.linea_operacion} onChange={(e) => setForm({ ...form, linea_operacion: e.target.value })}>

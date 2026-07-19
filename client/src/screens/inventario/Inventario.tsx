@@ -234,7 +234,7 @@ export default function Inventario() {
         {modo === 'bodega' ? (
           bodega ? (
             <>
-              <StockActual key={`${bodega.id}:${stockKey}`} ubicId={String(bodega.id)} nombre={bodega.nombre} abiertoDefault />
+              <StockActual key={`${bodega.id}:${stockKey}`} ubicId={String(bodega.id)} nombre={bodega.nombre} />
               <AccionesBodega
                 busy={busy}
                 entradaAbierta={entradaAbierta}
@@ -284,7 +284,7 @@ export default function Inventario() {
         </header>
         <FlujoStepper activo="conteo" />
         {error && <p className="error-msg">{error}</p>}
-        <StockActual key={`${ubicId}:${stockKey}`} ubicId={ubicId} nombre={ubicActiva.nombre} abiertoDefault />
+        <StockActual key={`${ubicId}:${stockKey}`} ubicId={ubicId} nombre={ubicActiva.nombre} />
         <AccionesBodega
           busy={busy}
           entradaAbierta={entradaAbierta}
@@ -396,9 +396,9 @@ interface ExistItem { product_id: number; nombre: string; unidad: string; dispon
 interface ExistResp { items: ExistItem[]; valor_total: number }
 
 /** Valor del inventario y stock actual de la ubicación (en vivo, desde existencias). Compacto. */
-function StockActual({ ubicId, nombre, abiertoDefault = false }: { ubicId: string; nombre: string; abiertoDefault?: boolean }) {
+function StockActual({ ubicId, nombre }: { ubicId: string; nombre: string }) {
   const [data, setData] = useState<ExistResp | null>(null);
-  const [abierto, setAbierto] = useState(abiertoDefault);
+  const [abierto, setAbierto] = useState(false);
   const [q, setQ] = useState('');
   const [error, setError] = useState('');
 
@@ -749,7 +749,9 @@ function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; 
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [q, setQ] = useState('');
-  const [colapsadas, setColapsadas] = useState<Set<string>>(new Set());
+  const [colapsadas, setColapsadas] = useState<Set<string>>(
+    () => new Set(detalle.lineas.map((linea) => linea.categoria ?? 'Sin categoría')),
+  );
   const editable = detalle.editable;
   const esAdmin = usuario?.rol === 'admin';
   const esPedido = detalle.ubicacion.tipo === 'sucursal';

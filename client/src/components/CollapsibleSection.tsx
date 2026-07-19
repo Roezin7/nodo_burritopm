@@ -4,7 +4,7 @@ export default function CollapsibleSection({
   title,
   count,
   summary,
-  defaultOpen = true,
+  defaultOpen = false,
   className = '',
   children,
 }: {

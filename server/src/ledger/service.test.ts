@@ -94,6 +94,42 @@ describe('ledger: aplicarMovimiento', () => {
     expect(Number(ex.cantidad_disponible)).toBe(-5); // 20 - 25
   });
 
+  it('permite completar tránsito cuando el disponible ya era negativo', async () => {
+    await prisma.existencias.update({
+      where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } },
+      data: { cantidad_transito: 5 },
+    });
+    await prisma.$transaction(async (tx) => {
+      await aplicarMovimiento(tx, {
+        negocioId, productId, tipo: 'recepcion_parcial', cantidad: 2, usuarioId,
+        origenId: ubicacionId, documentoTipo: 'test', idempotencyKey: 'vitest:recibe-con-negativo',
+        deltas: [{ ubicacionId, productId, transito: -2 }],
+      });
+    });
+    const ex = await prisma.existencias.findUniqueOrThrow({
+      where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } },
+    });
+    expect(Number(ex.cantidad_disponible)).toBe(-5);
+    expect(Number(ex.cantidad_transito)).toBe(3);
+  });
+
+  it('sigue rechazando un movimiento que empeora el saldo negativo sin autorización', async () => {
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await aplicarMovimiento(tx, {
+          negocioId, productId, tipo: 'consumo', cantidad: 1, usuarioId,
+          origenId: ubicacionId, documentoTipo: 'test', idempotencyKey: 'vitest:empeora-negativo',
+          deltas: [{ ubicacionId, productId, disponible: -1 }],
+        });
+      }),
+    ).rejects.toThrow(HttpError);
+
+    const ex = await prisma.existencias.findUniqueOrThrow({
+      where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } },
+    });
+    expect(Number(ex.cantidad_disponible)).toBe(-5);
+  });
+
   it('es idempotente: repetir la misma idempotency_key no vuelve a aplicar el movimiento', async () => {
     // El saldo viene negativo (-5) de la prueba anterior; se permite explícitamente para
     // aislar lo que esta prueba verifica: que repetir la key no vuelve a aplicar el delta.
