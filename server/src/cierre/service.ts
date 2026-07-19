@@ -17,27 +17,26 @@ const hoyChicago = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
 
-/** Semana ISO, con lunes como inicio y sábado como cierre operativo. */
+/** Semana operativa domingo-sábado, numerada con la semana ISO del lunes siguiente. */
 export function semanaDeFecha(d: Date) {
-  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const domingo = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  domingo.setUTCDate(domingo.getUTCDate() - domingo.getUTCDay());
+  const x = sumarDias(domingo, 1);
   const dia = x.getUTCDay() || 7;
   x.setUTCDate(x.getUTCDate() + 4 - dia);
   const anio = x.getUTCFullYear();
   const inicioAnio = new Date(Date.UTC(anio, 0, 1));
   const semana = Math.ceil((((x.getTime() - inicioAnio.getTime()) / 86400000) + 1) / 7);
-  const lunes = new Date(d);
-  const delta = (d.getUTCDay() || 7) - 1;
-  lunes.setUTCDate(d.getUTCDate() - delta);
-  const sabado = sumarDias(lunes, 5);
-  return { anio, semana, lunes, sabado };
+  const sabado = sumarDias(domingo, 6);
+  return { anio, semana, domingo, sabado };
 }
 
 export async function asegurarSemana(negocioId: bigint, fechaCierre: string) {
   const s = semanaDeFecha(fecha(fechaCierre));
   return prisma.semanas_operativas.upsert({
     where: { negocio_id_anio_semana: { negocio_id: negocioId, anio: s.anio, semana: s.semana } },
-    create: { negocio_id: negocioId, anio: s.anio, semana: s.semana, inicia_at: s.lunes, termina_at: s.sabado },
-    update: {},
+    create: { negocio_id: negocioId, anio: s.anio, semana: s.semana, inicia_at: s.domingo, termina_at: s.sabado },
+    update: { inicia_at: s.domingo, termina_at: s.sabado },
   });
 }
 

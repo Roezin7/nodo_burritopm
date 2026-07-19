@@ -713,6 +713,22 @@ export function calcularCoberturaBpm(
   });
 }
 
+/** BPM sí requiere cobertura completa por día. Las rutas externas y las fechas sin una
+ * parada BPM no deben esperar a que se capturen miércoles/sábado del resto de la semana. */
+export function fechasDespachables(
+  desde: string,
+  hasta: string,
+  cobertura: { fecha: string; pendientes: string[] }[],
+) {
+  const bloqueadas = new Set(cobertura.filter((dia) => dia.pendientes.length > 0).map((dia) => dia.fecha));
+  const fechas: string[] = [];
+  for (let cursor = fecha(desde); cursor <= fecha(hasta); cursor = sumarDias(cursor, 1)) {
+    const dia = iso(cursor);
+    if (!bloqueadas.has(dia)) fechas.push(dia);
+  }
+  return fechas;
+}
+
 /** Cobertura esperada de BPM derivada de las rutas configuradas, no de días fijos. */
 export async function coberturaPedidosBpm(negocioId: bigint, linea: LineaOperacion, desde: string, hasta: string) {
   const bpm = await prisma.empresas_clientes.findFirst({
@@ -749,9 +765,8 @@ export async function coberturaPedidosBpm(negocioId: bigint, linea: LineaOperaci
 }
 
 /**
- * Consolida los pedidos confirmados cuando ya existe la cobertura completa de BPM.
- * Es idempotente: puede ejecutarse después de una confirmación individual o masiva
- * sin duplicar distribuciones existentes.
+ * Consolida por fecha: BPM espera cobertura completa de ese día, mientras las rutas
+ * externas avanzan de forma independiente. Es idempotente y no duplica distribuciones.
  */
 async function consolidarPedidosSiCompletos(
   negocioId: bigint,
@@ -762,14 +777,18 @@ async function consolidarPedidosSiCompletos(
 ) {
   const cobertura = await coberturaPedidosBpm(negocioId, linea, desde, hasta);
   let preparaciones = { creadas: 0, existentes: 0, aprobadas: 0 };
-  if (!cobertura.every((c) => c.pendientes.length === 0)) return { cobertura, preparaciones };
-
-  const generadas = await crearPreparacionesEnRango(negocioId, usuarioId, desde, hasta, linea);
+  const fechasListas = fechasDespachables(desde, hasta, cobertura);
+  const generadas = { creadas: [] as { id: number; linea: LineaOperacion; fecha: string; pedidos: number; rutas: number }[], existentes: 0 };
+  for (const dia of fechasListas) {
+    const resultado = await crearPreparacionesEnRango(negocioId, usuarioId, dia, dia, linea);
+    generadas.creadas.push(...resultado.creadas);
+    generadas.existentes += resultado.existentes;
+  }
   const aprobables = await prisma.distribuciones.findMany({
     where: {
       negocio_id: negocioId,
       linea_operacion: linea,
-      fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+      fecha_entrega: { in: fechasListas.map(fecha) },
       estado: { in: ['calculada', 'en_revision'] },
     },
     select: { id: true },
@@ -801,7 +820,7 @@ async function consolidarPedidosSiCompletos(
       where: {
         negocio_id: negocioId,
         linea_operacion: linea,
-        fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+        fecha_entrega: { in: fechasListas.map(fecha) },
         estado: { in: ['aprobada', 'verificada'] },
       },
       select: { id: true },

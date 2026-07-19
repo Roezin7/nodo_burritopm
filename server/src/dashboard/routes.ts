@@ -132,7 +132,7 @@ dashboardRouter.get(
         include: { empresa: true, lineas: { include: { producto: true } } },
       }) : Promise.resolve([]),
       prisma.pedidos_operativos.findMany({
-        where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.lunes, lte: periodo.sabado }, estado: { not: 'cancelado' } },
+        where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.domingo, lte: periodo.sabado }, estado: { not: 'cancelado' } },
         include: { empresa: true, lineas: { include: { producto: true } } },
       }),
       prisma.existencias.findMany({
@@ -147,12 +147,12 @@ dashboardRouter.get(
       prisma.facturas.findMany({ where: { negocio_id: negocioId, estado: 'emitida' }, include: { pagos: true } }),
       prisma.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' } }),
       prisma.producciones.findMany({
-        where: { negocio_id: negocioId, fecha: { gte: periodo.lunes, lte: periodo.sabado } },
+        where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado } },
         include: { salidas: true },
       }),
-      prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: { gte: periodo.lunes, lte: periodo.sabado }, estado: { not: 'cancelada' } } }),
+      prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado }, estado: { not: 'cancelada' } } }),
       prisma.distribuciones.findMany({
-        where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.lunes, lte: periodo.sabado }, estado: { notIn: [...DIST_FINAL] } },
+        where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.domingo, lte: periodo.sabado }, estado: { notIn: [...DIST_FINAL] } },
         include: { rutas: { include: { paradas: true } } },
       }),
       prisma.producto_ubicacion.findMany({
@@ -164,7 +164,7 @@ dashboardRouter.get(
       ? snapshot.map((e) => ({ ...e, products: e.producto, ubicaciones: e.ubicacion }))
       : existenciasVivas;
     const productosPedidos = [...new Map(pedidos.flatMap((p) => p.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
-    const preciosSemanales = await preciosVentaSemana(negocioId, productosPedidos, iso(periodo.lunes), iso(periodo.sabado));
+    const preciosSemanales = await preciosVentaSemana(negocioId, productosPedidos, iso(periodo.domingo), iso(periodo.sabado));
     const proteinasSinPrecio = productosPedidos.filter((p) => p.tipo_operativo === 'proteina' && preciosSemanales.get(p.id.toString()) == null);
 
     const facturasOperativas = facturasSemana.filter((f) => !f.numero.endsWith('-OPEN'));
@@ -254,7 +254,7 @@ dashboardRouter.get(
     if (paradasPendientes > 0) alertas.push({ tipo: 'reparto', titulo: 'Entregas por completar', detalle: `${paradasPendientes} paradas pendientes`, ruta: '/ruta' });
 
     res.json({
-      periodo: { anio: periodo.anio, semana: periodo.semana, inicia_at: iso(periodo.lunes), termina_at: iso(periodo.sabado), estado: semana?.estado ?? 'abierta' },
+      periodo: { anio: periodo.anio, semana: periodo.semana, inicia_at: iso(periodo.domingo), termina_at: iso(periodo.sabado), estado: semana?.estado ?? 'abierta' },
       ventas: {
         fuente: usarFacturas ? 'facturado' : 'proyectado', total: r2(ventaCarne + ventaDesechables), carne: r2(ventaCarne), desechables: r2(ventaDesechables), markup_proteina: r2(markupProteina),
         por_empresa: [...porEmpresa.values()].map((g) => ({ ...g, carne: r2(g.carne), desechables: r2(g.desechables), total: r2(g.total) })),

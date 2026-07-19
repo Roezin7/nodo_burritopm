@@ -13,12 +13,15 @@ const isoLocal = (d: Date) => d.toLocaleDateString('en-CA');
 export function inicioDeSemana(valor: string) {
   const d = new Date(`${valor}T12:00:00`);
   if (Number.isNaN(d.getTime())) return inicioDeSemana(hoyChicago());
-  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()));
+  d.setDate(d.getDate() - d.getDay());
   return isoLocal(d);
 }
 
 function datosIso(valor: string) {
   const d = new Date(`${valor}T00:00:00.000Z`);
+  // La semana operativa abre el domingo, pero conserva el número ISO del lunes
+  // que le sigue. Ejemplo: dom 19 jul 2026 pertenece a la semana 30.
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay() + 1);
   const dia = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dia);
   const inicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -30,7 +33,7 @@ export const numeroDeSemana = (valor: string) => datosIso(valor).numero;
 export function crearSemana(valor = hoyChicago()): SemanaSeleccionada {
   const inicio = inicioDeSemana(valor);
   const d = new Date(`${inicio}T12:00:00`);
-  d.setDate(d.getDate() + 5);
+  d.setDate(d.getDate() + 6);
   const datos = datosIso(inicio);
   return {
     inicio,

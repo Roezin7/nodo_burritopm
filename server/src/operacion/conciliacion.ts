@@ -10,9 +10,8 @@ const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400
 
 export function rangoSemana(fechaIso: string) {
   const d = fecha(fechaIso);
-  const delta = (d.getUTCDay() || 7) - 1;
-  const inicio = sumarDias(d, -delta);
-  return { desde: iso(inicio), hasta: iso(sumarDias(inicio, 5)), corteMiercoles: iso(sumarDias(inicio, 2)) };
+  const inicio = sumarDias(d, -d.getUTCDay());
+  return { desde: iso(inicio), hasta: iso(sumarDias(inicio, 6)), corteMiercoles: iso(sumarDias(inicio, 3)) };
 }
 
 interface Acumulado {
@@ -67,7 +66,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   const ubicacion = await ubicacionConciliable(negocioId, ubicacionId);
   const inicio = fecha(desde);
   const fin = fecha(hasta);
-  const corte = sumarDias(inicio, 2);
+  const corte = sumarDias(inicio, 3);
   const enPrimerCorte = (d: Date) => d <= corte;
   const productos = await prisma.products.findMany({
     where: { negocio_id: negocioId, activo: true, linea_operacion: 'carne' },

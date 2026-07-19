@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const APPLY = process.env.APPLY_WEEK29_RESET === '1';
 const KEY = 'operacion-2026-semana-29-reinicio-carne-v1';
-const inicio = new Date('2026-07-13T00:00:00.000Z');
+const inicio = new Date('2026-07-12T00:00:00.000Z');
 const fin = new Date('2026-07-18T00:00:00.000Z');
 
 const apertura = new Map<string, { cantidad: number; peso?: number; costo?: number }>([

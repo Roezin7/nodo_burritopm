@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, fechasDespachables, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -19,6 +19,18 @@ describe('cobertura configurada de BPM', () => {
       { fecha: '2026-07-15', total: 2, confirmados: 1, pendientes: ['Burlington'] },
       { fecha: '2026-07-18', total: 1, confirmados: 1, pendientes: [] },
     ]);
+  });
+
+  it('no bloquea la ruta externa del lunes por pedidos BPM del miércoles', () => {
+    expect(fechasDespachables('2026-07-19', '2026-07-25', [
+      { fecha: '2026-07-20', pendientes: [] },
+      { fecha: '2026-07-22', pendientes: ['Lisle'] },
+      { fecha: '2026-07-25', pendientes: ['Lisle'] },
+    ])).toContain('2026-07-20');
+    expect(fechasDespachables('2026-07-19', '2026-07-25', [
+      { fecha: '2026-07-20', pendientes: [] },
+      { fecha: '2026-07-22', pendientes: ['Lisle'] },
+    ])).not.toContain('2026-07-22');
   });
 });
 
@@ -54,12 +66,20 @@ describe('reglas de precio de carne', () => {
 });
 
 describe('cierre operativo', () => {
-  it('calcula semana ISO 28 y su rango lunes-sábado', () => {
+  it('calcula semana 28 y su rango domingo-sábado', () => {
     const s = semanaDeFecha(new Date('2026-07-11T00:00:00.000Z'));
     expect(s.anio).toBe(2026);
     expect(s.semana).toBe(28);
-    expect(s.lunes.toISOString().slice(0, 10)).toBe('2026-07-06');
+    expect(s.domingo.toISOString().slice(0, 10)).toBe('2026-07-05');
     expect(s.sabado.toISOString().slice(0, 10)).toBe('2026-07-11');
+  });
+
+  it('abre la semana 30 el domingo 19 de julio', () => {
+    const s = semanaDeFecha(new Date('2026-07-19T00:00:00.000Z'));
+    expect(s.anio).toBe(2026);
+    expect(s.semana).toBe(30);
+    expect(s.domingo.toISOString().slice(0, 10)).toBe('2026-07-19');
+    expect(s.sabado.toISOString().slice(0, 10)).toBe('2026-07-25');
   });
 });
 

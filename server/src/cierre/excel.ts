@@ -250,7 +250,7 @@ function llenarWeeklyOrder(wb: ExcelJS.Workbook, d: Datos) {
     for (const [, offset] of dias) for (let row = 11; row <= 29; row += 1) ws.getCell(row, base + offset).value = null;
     for (let row = 11; row <= 29; row += 1) ws.getCell(row, base + 9).value = null;
     for (const [dia, offset] of dias) {
-      const fecha = sumarDias(d.semana.inicia_at, dia - 1);
+      const fecha = sumarDias(d.semana.inicia_at, dia);
       ws.getCell(9, base + offset - 1).value = excelDate(fecha);
       ws.getCell(9, base + offset).value = excelDate(fecha);
       for (let row = 11; row <= 29; row += 1) {

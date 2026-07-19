@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { calcularFilaConciliacion } from './conciliacion.js';
+import { calcularFilaConciliacion, rangoSemana } from './conciliacion.js';
 
 describe('conciliación semanal de inventario', () => {
+  it('incluye el domingo dentro de la semana que cierra el sábado siguiente', () => {
+    expect(rangoSemana('2026-07-19')).toEqual({
+      desde: '2026-07-19',
+      hasta: '2026-07-25',
+      corteMiercoles: '2026-07-22',
+    });
+    expect(rangoSemana('2026-07-22')).toEqual({
+      desde: '2026-07-19',
+      hasta: '2026-07-25',
+      corteMiercoles: '2026-07-22',
+    });
+  });
+
   it('calcula los cortes de miércoles y sábado en orden operativo', () => {
     const r = calcularFilaConciliacion({
       inicial: 20,
