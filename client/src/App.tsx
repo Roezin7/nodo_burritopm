@@ -58,11 +58,10 @@ function AppBody() {
       </div>
     );
   }
-  if (!usuario) return <><UpdateBanner /><Login /></>;
+  if (!usuario) return <Login />;
 
   return (
     <Shell>
-      <UpdateBanner />
       <OfflineBanner />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -88,14 +87,19 @@ function AppBody() {
   );
 }
 
+function debeMostrarSplash() {
+  try { return !sessionStorage.getItem('bpm-splash'); } catch { return true; }
+}
+
 export default function App() {
-  const [splash, setSplash] = useState(() => !sessionStorage.getItem('bpm-splash'));
+  const [splash, setSplash] = useState(debeMostrarSplash);
   return (
-    <>
+    <AppErrorBoundary>
+      <UpdateBanner />
       {splash && (
         <SplashIntro
           onDone={() => {
-            sessionStorage.setItem('bpm-splash', '1');
+            try { sessionStorage.setItem('bpm-splash', '1'); } catch { /* almacenamiento bloqueado */ }
             setSplash(false);
           }}
         />
@@ -105,12 +109,12 @@ export default function App() {
           <BrowserRouter>
             <SemanaProvider>
               <OperacionConfigProvider>
-                <AppErrorBoundary><AppBody /></AppErrorBoundary>
+                <AppBody />
               </OperacionConfigProvider>
             </SemanaProvider>
           </BrowserRouter>
         </AuthProvider>
       </ToastProvider>
-    </>
+    </AppErrorBoundary>
   );
 }

@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 // Service worker personalizado (estrategia injectManifest): precache de la app + web push.
-import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
+import { cleanupOutdatedCaches, precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { clientsClaim } from 'workbox-core';
 
@@ -15,6 +15,7 @@ self.addEventListener('message', (event) => {
 clientsClaim();
 
 // Precache de los assets generados por el build.
+cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
 // App-shell: las navegaciones (no /api) responden con index.html (offline-first).

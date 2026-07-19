@@ -78,6 +78,73 @@
         }
       })();
     </script>
+    <!-- Si una PWA instalada conserva HTML de un deploy y pierde sus assets, limpia solo
+         el caché de la aplicación y vuelve a intentar una vez. Así nunca queda una pantalla
+         vacía/negra sin una salida para el usuario. -->
+    <script>
+      (function () {
+        var clave = 'bpm-recuperacion-arranque';
+
+        function yaIntento() {
+          try { return sessionStorage.getItem(clave) === '1'; } catch (e) { return false; }
+        }
+
+        function marcarIntento() {
+          try { sessionStorage.setItem(clave, '1'); } catch (e) { /* almacenamiento bloqueado */ }
+        }
+
+        function limpiarIntento() {
+          try { sessionStorage.removeItem(clave); } catch (e) { /* almacenamiento bloqueado */ }
+        }
+
+        function mostrarRecuperacionManual() {
+          var root = document.getElementById('root');
+          if (!root || root.childElementCount) return;
+          root.innerHTML = '<main style="min-height:100dvh;display:grid;place-items:center;padding:24px;background:#19191c;color:#f2efe9;font:16px system-ui;text-align:center"><div><h1 style="font-size:22px">No se pudo abrir la aplicación</h1><p style="opacity:.75">Recarga para obtener la versión más reciente.</p><button onclick="location.reload()" style="border:0;border-radius:10px;padding:12px 18px;background:#5ea531;color:white;font:700 16px system-ui">Recargar</button></div></main>';
+        }
+
+        function recuperar() {
+          if (yaIntento()) {
+            mostrarRecuperacionManual();
+            return;
+          }
+          marcarIntento();
+          var tareas = [];
+          if ('serviceWorker' in navigator) {
+            tareas.push(navigator.serviceWorker.getRegistrations().then(function (registros) {
+              return Promise.all(registros.map(function (registro) { return registro.unregister(); }));
+            }));
+          }
+          if ('caches' in window) {
+            tareas.push(caches.keys().then(function (nombres) {
+              return Promise.all(nombres.filter(function (nombre) {
+                return nombre.indexOf('workbox-precache') !== -1;
+              }).map(function (nombre) { return caches.delete(nombre); }));
+            }));
+          }
+          Promise.allSettled(tareas).then(function () {
+            var url = new URL(location.href);
+            url.searchParams.set('recuperado', Date.now().toString());
+            location.replace(url.toString());
+          });
+        }
+
+        window.addEventListener('error', function (evento) {
+          var elemento = evento.target;
+          var url = elemento && (elemento.src || elemento.href);
+          if (typeof url === 'string' && url.indexOf('/assets/') !== -1) recuperar();
+        }, true);
+
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (root && root.childElementCount) {
+            limpiarIntento();
+            return;
+          }
+          recuperar();
+        }, 8000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
