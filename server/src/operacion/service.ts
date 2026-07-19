@@ -365,8 +365,39 @@ export async function guardarPedidosSemana(
   const preparados: Awaited<ReturnType<typeof prepararPedido>>[] = [];
   for (const input of inputs) preparados.push(await prepararPedido(negocioId, input, true));
   const pedidos = await prisma.$transaction(async (tx) => {
+    const anteriores = await tx.pedidos_operativos.findMany({
+      where: {
+        negocio_id: negocioId,
+        linea_operacion: inputs[0]!.linea,
+        ubicacion_id: { in: inputs.map((input) => BigInt(input.ubicacion_id)) },
+        fecha_entrega: { in: inputs.map((input) => fecha(input.fecha_entrega)) },
+      },
+      include: { lineas: { select: { product_id: true, cantidad: true } } },
+    });
     const guardados: Awaited<ReturnType<typeof guardarPedidoEnTx>>[] = [];
     for (const preparado of preparados) guardados.push(await guardarPedidoEnTx(tx, negocioId, usuarioId, preparado));
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId,
+        usuario_id: usuarioId,
+        accion: 'editar_masivo',
+        entidad: 'pedidos_semana',
+        datos: {
+          pedidos: inputs.map((input) => {
+            const anterior = anteriores.find((pedido) => pedido.ubicacion_id === BigInt(input.ubicacion_id)
+              && pedido.linea_operacion === input.linea
+              && iso(pedido.fecha_entrega) === input.fecha_entrega);
+            return {
+              ubicacion_id: input.ubicacion_id,
+              linea: input.linea,
+              fecha: input.fecha_entrega,
+              anterior: anterior?.lineas.map((linea) => ({ product_id: Number(linea.product_id), cantidad: num0(linea.cantidad) })) ?? [],
+              nuevo: input.lineas.filter((linea) => linea.cantidad > 0).map((linea) => ({ product_id: linea.product_id, cantidad: linea.cantidad })),
+            };
+          }),
+        },
+      },
+    });
     return guardados;
   }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 30_000 });
 

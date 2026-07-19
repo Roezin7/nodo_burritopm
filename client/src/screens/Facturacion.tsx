@@ -50,7 +50,7 @@ interface Cartera {
 }
 
 type Detalle = { tipo: 'cobrar'; factura: FacturaEmitida } | { tipo: 'pagar'; factura: FacturaRecibida };
-type Movimiento = { tipo: 'cobrar' | 'pagar'; id: number; titulo: string; monto: number };
+type Movimiento = { tipo: 'cobrar' | 'pagar'; ids: number[]; titulo: string; monto: number };
 
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -68,6 +68,8 @@ export default function Facturacion() {
   const [fechaPago, setFechaPago] = useState(hoy());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [seleccionCobrar, setSeleccionCobrar] = useState<Set<number>>(() => new Set());
+  const [seleccionPagar, setSeleccionPagar] = useState<Set<number>>(() => new Set());
 
   async function cargar() {
     setError('');
@@ -93,10 +95,14 @@ export default function Facturacion() {
     if (!movimiento) return;
     setBusy(true); setError('');
     try {
-      const ruta = movimiento.tipo === 'cobrar' ? `/cierre/facturas/${movimiento.id}/pagar` : `/cierre/compras/${movimiento.id}/pagar`;
-      await api(ruta, { method: 'POST', body: { fecha_pago: fechaPago } });
+      const lote = movimiento.ids.length > 1;
+      const ruta = movimiento.tipo === 'cobrar'
+        ? lote ? '/cierre/facturas/pagar-lote' : `/cierre/facturas/${movimiento.ids[0]}/pagar`
+        : lote ? '/cierre/compras/pagar-lote' : `/cierre/compras/${movimiento.ids[0]}/pagar`;
+      await api(ruta, { method: 'POST', body: lote ? { ids: movimiento.ids, fecha_pago: fechaPago } : { fecha_pago: fechaPago } });
       const etiqueta = movimiento.tipo === 'cobrar' ? 'Cobro registrado.' : 'Pago registrado.';
       setMovimiento(null); setDetalle(null);
+      setSeleccionCobrar(new Set()); setSeleccionPagar(new Set());
       await cargar();
       toast.ok(etiqueta);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el movimiento.'); }
@@ -105,7 +111,30 @@ export default function Facturacion() {
 
   function prepararMovimiento(tipoMovimiento: 'cobrar' | 'pagar', id: number, titulo: string, monto: number) {
     setFechaPago(hoy());
-    setMovimiento({ tipo: tipoMovimiento, id, titulo, monto });
+    setMovimiento({ tipo: tipoMovimiento, ids: [id], titulo, monto });
+  }
+
+  function prepararLote(tipoMovimiento: 'cobrar' | 'pagar') {
+    const ids = [...(tipoMovimiento === 'cobrar' ? seleccionCobrar : seleccionPagar)];
+    const documentos = tipoMovimiento === 'cobrar' ? emitidas.filter((f) => ids.includes(f.id)) : recibidas.filter((f) => ids.includes(f.id));
+    const monto = documentos.reduce((suma, documento) => suma + documento.saldo, 0);
+    setFechaPago(hoy());
+    setMovimiento({ tipo: tipoMovimiento, ids, titulo: `${ids.length} documentos seleccionados`, monto });
+  }
+
+  async function revertirMovimiento(tipoMovimiento: 'cobrar' | 'pagar', id: number) {
+    if (!window.confirm(`¿Revertir este ${tipoMovimiento === 'cobrar' ? 'cobro' : 'pago'} y devolver el documento a pendientes?`)) return;
+    setBusy(true); setError('');
+    try {
+      await api(tipoMovimiento === 'cobrar' ? `/cierre/facturas/${id}/pago` : `/cierre/compras/${id}/pago`, { method: 'DELETE' });
+      await cargar(); toast.ok(tipoMovimiento === 'cobrar' ? 'Cobro revertido.' : 'Pago revertido.');
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo revertir el movimiento.'); }
+    finally { setBusy(false); }
+  }
+
+  function alternarSeleccion(tipoMovimiento: 'cobrar' | 'pagar', id: number) {
+    const setter = tipoMovimiento === 'cobrar' ? setSeleccionCobrar : setSeleccionPagar;
+    setter((actual) => { const siguiente = new Set(actual); if (siguiente.has(id)) siguiente.delete(id); else siguiente.add(id); return siguiente; });
   }
 
   if (!datos) return <div className="page billing-page"><header className="page-head"><div><span className="eyebrow">Control</span><h1>Facturación</h1></div></header><Spinner label="Cargando cartera…" />{error && <p className="error-msg">{error}</p>}</div>;
@@ -126,30 +155,36 @@ export default function Facturacion() {
       <div className="segmented" aria-label="Tipo de factura"><button className={tipo === 'todas' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('todas')}>Todas</button><button className={tipo === 'cobrar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('cobrar')}>Por cobrar</button><button className={tipo === 'pagar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('pagar')}>Por pagar</button></div>
       <input type="search" aria-label="Buscar factura" placeholder="Buscar folio, empresa o proveedor" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
     </section>
+    {vista === 'pendientes' && (seleccionCobrar.size > 0 || seleccionPagar.size > 0) && <section className="billing-bulkbar">
+      <span>{seleccionCobrar.size + seleccionPagar.size} documento{seleccionCobrar.size + seleccionPagar.size === 1 ? '' : 's'} seleccionado{seleccionCobrar.size + seleccionPagar.size === 1 ? '' : 's'}</span>
+      <div>{seleccionCobrar.size > 0 && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararLote('cobrar')}>Registrar {seleccionCobrar.size} cobros</button>}{seleccionPagar.size > 0 && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararLote('pagar')}>Registrar {seleccionPagar.size} pagos</button>}<button className="btn btn-ghost btn-sm" onClick={() => { setSeleccionCobrar(new Set()); setSeleccionPagar(new Set()); }}>Limpiar selección</button></div>
+    </section>}
 
     <div className={`billing-ledgers ${tipo !== 'todas' ? 'billing-ledgers--single' : ''}`}>
       {tipo !== 'pagar' && <section className="workspace-card billing-ledger">
-        <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Restaurantes que pagan a BPM.</p></div><span>{emitidas.length}</span></div>
+        <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Restaurantes que pagan a BPM.</p></div><div className="billing-select-head"><span>{emitidas.length}</span>{vista === 'pendientes' && emitidas.length > 0 && <button className="link-btn" onClick={() => setSeleccionCobrar(seleccionCobrar.size === emitidas.length ? new Set() : new Set(emitidas.map((factura) => factura.id)))}>{seleccionCobrar.size === emitidas.length ? 'Quitar todas' : 'Seleccionar todas'}</button>}</div></div>
         <div className="billing-list">{emitidas.map((factura) => {
           const vencida = factura.estado === 'emitida' && factura.vence_at < hoy();
           return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
+            {factura.estado === 'emitida' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar ${factura.numero}`} checked={seleccionCobrar.has(factura.id)} onChange={() => alternarSeleccion('cobrar', factura.id)} />}
             <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
             <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
             <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'emitida' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'emitida' ? 'saldo' : 'total'}</small></div>
-            <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'cobrar', factura })}>Ver</button>{factura.estado === 'emitida' && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento('cobrar', factura.id, factura.numero, factura.saldo)}>Registrar cobro</button>}</div>
+            <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'cobrar', factura })}>Ver</button>{factura.estado === 'emitida' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento('cobrar', factura.id, factura.numero, factura.saldo)}>Registrar cobro</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento('cobrar', factura.id)}>Revertir</button>}</div>
           </article>;
         })}{emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}</div>
       </section>}
 
       {tipo !== 'cobrar' && <section className="workspace-card billing-ledger">
-        <div className="workspace-card-head"><div><span className="eyebrow">Egresos</span><h2>Facturas recibidas</h2><p>Compras pendientes de pagar.</p></div><span>{recibidas.length}</span></div>
+        <div className="workspace-card-head"><div><span className="eyebrow">Egresos</span><h2>Facturas recibidas</h2><p>Compras pendientes de pagar.</p></div><div className="billing-select-head"><span>{recibidas.length}</span>{vista === 'pendientes' && recibidas.length > 0 && <button className="link-btn" onClick={() => setSeleccionPagar(seleccionPagar.size === recibidas.length ? new Set() : new Set(recibidas.map((factura) => factura.id)))}>{seleccionPagar.size === recibidas.length ? 'Quitar todas' : 'Seleccionar todas'}</button>}</div></div>
         <div className="billing-list">{recibidas.map((factura) => {
           const vencida = factura.estado === 'pendiente' && factura.vence_at < hoy();
           return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
+            {factura.estado === 'pendiente' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar compra ${factura.referencia ?? factura.id}`} checked={seleccionPagar.has(factura.id)} onChange={() => alternarSeleccion('pagar', factura.id)} />}
             <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'pagar', factura })}><strong>{factura.referencia || `Compra #${factura.id}`}</strong><span>{factura.proveedor}</span><small>{factura.ubicacion}</small></button>
             <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
             <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
-            <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'pagar', factura })}>Ver</button>{factura.estado === 'pendiente' && <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento('pagar', factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button>}</div>
+            <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'pagar', factura })}>Ver</button>{factura.estado === 'pendiente' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento('pagar', factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento('pagar', factura.id)}>Revertir</button>}</div>
           </article>;
         })}{recibidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}</div>
       </section>}

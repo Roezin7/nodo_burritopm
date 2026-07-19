@@ -91,6 +91,20 @@ function fechaLegible(valor: string | null) {
   });
 }
 
+function fechaDocumento(valor: string | null) {
+  if (!valor) return 'FECHA PENDIENTE';
+  const fecha = new Date(`${valor}T12:00:00`);
+  const dia = fecha.toLocaleDateString('en-US', { day: '2-digit' });
+  const mes = fecha.toLocaleDateString('en-US', { month: 'short' });
+  const anio = fecha.toLocaleDateString('en-US', { year: '2-digit' });
+  return `${dia}-${mes}-${anio}`;
+}
+
+function diaDocumento(valor: string | null) {
+  if (!valor) return '';
+  return new Date(`${valor}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+}
+
 function diasDeSemana(semana: SemanaSeleccionada) {
   const dias: { fecha: string; dia: string; numero: string; diaSemana: number }[] = [];
   const cursor = new Date(`${semana.inicio}T12:00:00`);
@@ -145,6 +159,26 @@ function cantidadFila(destino: DestinoDocumento, fila: FilaOrden) {
   return destino.items
     .filter((item) => fila.skus.includes(item.sku))
     .reduce((total, item) => total + item.esperado, 0);
+}
+
+function nombreMatriz(nombre: string) {
+  const limpio = nombre.toUpperCase();
+  const conocidos: [RegExp, string][] = [
+    [/NAPERVILLE.*ONE|NAPERVILLE.*ACE/, 'NAP ONE'],
+    [/NAPERVILLE.*OGDEN/, 'OGDEN'],
+    [/GLENDALE/, 'GLENDALE'],
+    [/ROLLING/, 'ROLLING'],
+    [/SCHAUM/, 'SCHAUM'],
+    [/CAROL.*STREAM/, 'CAROL'],
+    [/WEST.*CHICAGO/, 'WEST'],
+    [/ALGONQUIN/, 'ALGO'],
+    [/LOMBARD/, 'LOMB'],
+    [/LISLE/, 'LISLE'],
+    [/BATAVIA/, 'BATAVIA'],
+    [/STREAMWOOD/, 'STREAM'],
+    [/AURORA/, 'AURORA'],
+  ];
+  return conocidos.find(([patron]) => patron.test(limpio))?.[1] ?? limpio.split(/\s+/).map((parte) => parte[0]).join('').slice(0, 7);
 }
 
 export default function Bodega({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
@@ -327,26 +361,37 @@ function TablaMatriz({ titulo, subtitulo, destinos, filas, linea }: {
   linea: LineaOperacion;
 }) {
   return <table className={`dispatch-sheet dispatch-sheet--matrix dispatch-sheet--${linea}`}>
-    <thead><tr><th className="dispatch-sheet-title" colSpan={destinos.length + 2}>{titulo}<small>{subtitulo}</small></th></tr><tr><th>TOTAL</th><th>ITEM</th>{destinos.map((destino) => <th key={destino.clave}>{destino.nombre}</th>)}</tr></thead>
+    {linea === 'carne' && <caption><strong>{titulo}</strong><small>{subtitulo}</small></caption>}
+    <thead><tr>{linea === 'desechables' ? <><th className="dispatch-matrix-name">DISPOSABLES</th><th>TOTAL</th></> : <><th>TOTAL</th><th className="dispatch-matrix-name">ITEM</th></>}{destinos.map((destino) => <th key={destino.clave} title={destino.nombre}>{nombreMatriz(destino.nombre)}</th>)}</tr></thead>
     <tbody>{filas.map((fila) => {
       const cantidades = destinos.map((destino) => cantidadFila(destino, fila));
       const total = cantidades.reduce((suma, valor) => suma + valor, 0);
-      return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><th>{total > 0 ? numero(total) : ''}</th><td>{fila.nombre}</td>{cantidades.map((cantidad, indice) => <td key={destinos[indice].clave}>{cantidad > 0 ? numero(cantidad) : ''}</td>)}</tr>;
+      return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}>{linea === 'desechables' ? <><th>{fila.nombre}</th><td>{total > 0 ? numero(total) : ''}</td></> : <><th>{total > 0 ? numero(total) : ''}</th><td>{fila.nombre}</td></>}{cantidades.map((cantidad, indice) => <td key={destinos[indice].clave}>{cantidad > 0 ? numero(cantidad) : ''}</td>)}</tr>;
     })}</tbody>
-    <tfoot><tr><th>{numero(destinos.reduce((total, destino) => total + destino.items.reduce((suma, item) => suma + item.esperado, 0), 0))}</th><th>TOTAL</th>{destinos.map((destino) => <th key={destino.clave}>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th>)}</tr></tfoot>
+    {linea === 'carne' && <tfoot><tr><th>{numero(destinos.reduce((total, destino) => total + destino.items.reduce((suma, item) => suma + item.esperado, 0), 0))}</th><th>TOTAL</th>{destinos.map((destino) => <th key={destino.clave}>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th>)}</tr></tfoot>}
   </table>;
 }
 
-function TablaIndividual({ destino, filas, linea }: { destino: DestinoDocumento; filas: FilaOrden[]; linea: LineaOperacion }) {
-  return <table className={`dispatch-sheet dispatch-sheet--individual dispatch-sheet--${linea}`}>
-    <thead><tr><th className="dispatch-sheet-title" colSpan={2}>{destino.nombre}<small>{destino.entregaEn !== destino.nombre ? `ENTREGA EN ${destino.entregaEn}` : destino.direccion || ''}</small></th></tr><tr><th>ITEM</th><th>QTY</th></tr></thead>
-    <tbody>{filas.map((fila) => { const cantidad = cantidadFila(destino, fila); return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><td>{fila.nombre}</td><td>{cantidad > 0 ? numero(cantidad) : ''}</td></tr>; })}</tbody>
-    <tfoot><tr><th>TOTAL</th><th>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th></tr></tfoot>
-  </table>;
+function MarcaMG() {
+  return <div className="dispatch-real-brand"><strong>M &amp; G</strong><span>1058 N. DUPAGE AVENUE</span><span>LOMBARD, ILLINOIS. 60148</span><span>630 245 3643</span></div>;
 }
 
-function EncabezadoHoja({ izquierda, derecha, fecha }: { izquierda: string; derecha: string; fecha: string | null }) {
-  return <header className="dispatch-print-heading"><div><span>M&amp;G MANAGEMENT AND LOGISTICS INC.</span><strong>{izquierda}</strong></div><div><span>{fechaLegible(fecha)}</span><strong>{derecha}</strong></div></header>;
+function TablaIndividual({ destino, filas, linea, fecha }: { destino: DestinoDocumento; filas: FilaOrden[]; linea: LineaOperacion; fecha: string | null }) {
+  return <div className={`dispatch-individual-document dispatch-individual-document--${linea}`}>
+    {linea === 'carne' && <MarcaMG />}
+    <table className={`dispatch-sheet dispatch-sheet--individual dispatch-sheet--${linea}`}>
+      <thead>
+        <tr><th className="dispatch-sheet-title" colSpan={2}>{destino.nombre}<small>{destino.entregaEn !== destino.nombre ? `ENTREGA EN ${destino.entregaEn}` : destino.direccion || ''}</small></th></tr>
+        {linea === 'carne' ? <><tr className="dispatch-sheet-day"><th colSpan={2}>{diaDocumento(fecha)}</th></tr><tr className="dispatch-sheet-date"><th colSpan={2}>{fechaDocumento(fecha)}</th></tr><tr><th>ITEM</th><th>QTY</th></tr></> : <tr className="dispatch-sheet-date"><th colSpan={2}>{diaDocumento(fecha)} · {fechaDocumento(fecha)}</th></tr>}
+      </thead>
+      <tbody>{filas.map((fila) => { const cantidad = cantidadFila(destino, fila); return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><td>{fila.nombre}</td><td>{cantidad > 0 ? numero(cantidad) : ''}</td></tr>; })}</tbody>
+      {linea === 'carne' && <tfoot><tr><th>TOTAL</th><th>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th></tr></tfoot>}
+    </table>
+  </div>;
+}
+
+function EncabezadoDocumento({ titulo, detalle, fecha }: { titulo: string; detalle: string; fecha: string | null }) {
+  return <header className="dispatch-document-date"><span>{titulo}</span><strong>{fechaDocumento(fecha)}</strong><span>{detalle}</span></header>;
 }
 
 function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
@@ -367,7 +412,7 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
     <header className="dispatch-preview-toolbar no-print"><div><span className="eyebrow">Vista previa</span><h2>{alcance.tipo === 'carga' ? 'Hoja general de carga' : alcance.tipo === 'ruta' ? 'Paquete del chofer' : 'Paquete completo'}</h2></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
 
     {mostrarCarga && <section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`}>
-      <EncabezadoHoja izquierda="CARGA GENERAL" derecha={op.linea.toUpperCase()} fecha={op.fecha_entrega} />
+      <EncabezadoDocumento titulo="CARGA GENERAL" detalle={diaDocumento(op.fecha_entrega)} fecha={op.fecha_entrega} />
       <TablaMatriz titulo={op.linea === 'carne' ? 'CARNE' : 'DISPOSABLES'} subtitulo="TOTAL PARA CARGAR" destinos={destinosTotales} filas={filas} linea={op.linea} />
       <footer>{rutas.map((ruta) => `${ruta.conductor || 'Ruta'}: ${ruta.nombre}`).join(' · ')}</footer>
     </section>}
@@ -375,18 +420,17 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
     {mostrarRutas && rutasSeleccionadas.flatMap((ruta) => {
       const destinos = destinosDeRuta(ruta);
       if (esRutaTapatios(ruta)) return [<section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`} key={`ruta-${ruta.ruta_id}`}>
-        <EncabezadoHoja izquierda={ruta.conductor || 'TAPATÍOS'} derecha={ruta.nombre} fecha={ruta.fecha_entrega || op.fecha_entrega} />
+        <EncabezadoDocumento titulo={ruta.conductor || 'TAPATÍOS'} detalle={ruta.nombre} fecha={ruta.fecha_entrega || op.fecha_entrega} />
         <TablaMatriz titulo="RUTA TAPATÍOS" subtitulo="UNA HOJA PARA TODA LA RUTA" destinos={destinos} filas={filas} linea={op.linea} />
         <footer>{destinos.map((destino) => destino.nombre).join(' → ')}</footer>
       </section>];
       const hojasIndividuales = destinos.map((destino, indice) => <section className={`dispatch-print-page dispatch-print-page--ticket dispatch-print-page--${op.linea}`} key={`${ruta.ruta_id}:${destino.clave}`}>
-        <EncabezadoHoja izquierda={ruta.conductor || 'CHOFER'} derecha={`${ruta.nombre} · ${indice + 1}/${destinos.length}`} fecha={ruta.fecha_entrega || op.fecha_entrega} />
-        <TablaIndividual destino={destino} filas={filas} linea={op.linea} />
-        <footer>Parada {indice + 1} de {destinos.length}{destino.direccion ? ` · ${destino.direccion}` : ''}</footer>
+        <TablaIndividual destino={destino} filas={filas} linea={op.linea} fecha={ruta.fecha_entrega || op.fecha_entrega} />
+        <footer>{ruta.conductor || 'CHOFER'} · {ruta.nombre} · PARADA {indice + 1}/{destinos.length}</footer>
       </section>);
       if (op.linea !== 'carne') return hojasIndividuales;
       return [<section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`} key={`total-ruta-${ruta.ruta_id}`}>
-        <EncabezadoHoja izquierda={ruta.conductor || 'CHOFER'} derecha={`${ruta.nombre} · TOTAL`} fecha={ruta.fecha_entrega || op.fecha_entrega} />
+        <EncabezadoDocumento titulo={ruta.conductor || 'CHOFER'} detalle={`${ruta.nombre} · TOTAL`} fecha={ruta.fecha_entrega || op.fecha_entrega} />
         <TablaMatriz titulo="CARNE" subtitulo={`TOTAL DE RUTA · ${ruta.conductor || ruta.nombre}`} destinos={destinos} filas={filas} linea={op.linea} />
         <footer>{destinos.map((destino) => destino.nombre).join(' → ')}</footer>
       </section>, ...hojasIndividuales];

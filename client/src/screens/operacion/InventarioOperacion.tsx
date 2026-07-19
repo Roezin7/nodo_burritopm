@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
-import { useOperacionConfig } from '../../operacion-config';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { useUnsavedChanges } from '../../use-unsaved';
 
 type Linea = 'todas' | 'carne' | 'desechables';
 
@@ -53,7 +53,6 @@ const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 
 export default function InventarioOperacion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
-  const { repartoHabilitado } = useOperacionConfig();
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
@@ -68,6 +67,9 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const [observacion, setObservacion] = useState('');
   const [busy, setBusy] = useState(false);
   const [historial, setHistorial] = useState<InventarioGuardado[]>([]);
+  const [soloDiferencias, setSoloDiferencias] = useState(false);
+  const [tocados, setTocados] = useState<Set<number>>(() => new Set());
+  useUnsavedChanges(editando);
 
   useEffect(() => {
     api<{ ubicaciones: Almacen[] }>('/operacion/catalogo').then((c) => {
@@ -89,7 +91,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       .then(([existencias, inventarios]) => { setStock(existencias); setHistorial(inventarios); })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'));
   }, [almacenId, admin, semana.inicio]);
-  useEffect(() => { setFecha(fechaDentroDeSemana(semana)); setEditando(false); }, [semana.inicio, semana.fin]);
+  useEffect(() => { setFecha(fechaDentroDeSemana(semana)); setEditando(false); setTocados(new Set()); }, [semana.inicio, semana.fin]);
 
   async function recargar() {
     if (!almacenId) return;
@@ -115,10 +117,11 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     const q = buscar.trim().toLowerCase();
     return itemsPeriodo.filter((i) => {
       if (linea !== 'todas' && i.linea !== linea) return false;
-      if (!editando && q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
+      if (q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
+      if (editando && soloDiferencias && Number(cantidades[i.product_id] || 0) === i.disponible) return false;
       return editando || i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0 || (i.faltante ?? 0) > 0;
     });
-  }, [itemsPeriodo, linea, buscar, editando]);
+  }, [itemsPeriodo, linea, buscar, editando, soloDiferencias, cantidades]);
 
   const totales = filas.reduce((a, i) => ({
     disponible: a.disponible + i.disponible,
@@ -132,7 +135,54 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(i.disponible)])));
     if (almacenActual?.codigo === 'CARN') setFecha(semana.fin);
     setObservacion('');
+    setSoloDiferencias(false);
+    setTocados(new Set());
     setEditando(true);
+  }
+
+  function cambiarAlmacen(siguiente: string) {
+    if (siguiente === almacenId) return;
+    if (editando && !window.confirm('Hay un inventario en captura. ¿Descartarlo y cambiar de almacén?')) return;
+    setEditando(false); setCantidades({}); setTocados(new Set()); setObservacion('');
+    setAlmacenId(siguiente);
+  }
+
+  function cambiarCantidad(productId: number, valor: string) {
+    setCantidades((actual) => ({ ...actual, [productId]: valor }));
+    setTocados((actual) => new Set(actual).add(productId));
+  }
+
+  function navegarInventario(evento: ReactKeyboardEvent<HTMLInputElement>) {
+    if (evento.key !== 'Enter') return;
+    evento.preventDefault();
+    const campos = [...document.querySelectorAll<HTMLInputElement>('input[data-inventory-entry]:not(:disabled)')];
+    const indice = campos.indexOf(evento.currentTarget);
+    const siguiente = campos[indice + (evento.shiftKey ? -1 : 1)];
+    if (siguiente) { siguiente.focus(); siguiente.select(); }
+  }
+
+  function pegarInventario(evento: ReactClipboardEvent<HTMLInputElement>, indiceInicio: number) {
+    const texto = evento.clipboardData.getData('text/plain');
+    if (!texto.includes('\n') && !texto.includes('\t')) return;
+    evento.preventDefault();
+    const valores = texto.trim().split(/[\t\r\n]+/).map((valor) => valor.trim().replace(/,/g, ''));
+    setCantidades((actual) => {
+      const siguientes = { ...actual };
+      const siguientesTocados = new Set(tocados);
+      valores.forEach((valor, desplazamiento) => {
+        const item = filas[indiceInicio + desplazamiento];
+        if (!item || (valor !== '' && (!Number.isFinite(Number(valor)) || Number(valor) < 0))) return;
+        siguientes[item.product_id] = valor;
+        siguientesTocados.add(item.product_id);
+      });
+      setTocados(siguientesTocados);
+      return siguientes;
+    });
+  }
+
+  function restaurarTeorico() {
+    setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(i.disponible)])));
+    setTocados(new Set()); setSoloDiferencias(false);
   }
 
   async function guardarCierre() {
@@ -166,11 +216,11 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
       {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
-    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 6 : 5}</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Auditoría opcional</span><h2>Doble check de inventario</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar conteo físico</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">
-        {almacenes.map((a) => <button key={a.id} className={String(a.id) === almacenId ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setAlmacenId(String(a.id))}>{a.nombre}</button>)}
+        {almacenes.map((a) => <button key={a.id} className={String(a.id) === almacenId ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => cambiarAlmacen(String(a.id))}>{a.nombre}</button>)}
       </div>
       <div className="segmented segmented--small" aria-label="Línea de inventario">
         {([['todas', 'Todo'], ['carne', 'Carne'], ['desechables', 'Desechables']] as [Linea, string][]).map(([k, label]) => <button key={k} className={linea === k ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea(k)}>{label}</button>)}
@@ -190,24 +240,24 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
 
       <CollapsibleSection title={editando ? 'Captura física' : 'Productos'} count={filas.length} className="inventory-product-list">
         <div className="workspace-card-head collapsible-inner-toolbar">
-          <div />
-          {!editando && <input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" />}
+          {editando ? <div className="inventory-quick-actions"><button className="btn btn-secondary btn-sm" onClick={restaurarTeorico}>Restaurar teórico</button><button className={`btn btn-sm ${soloDiferencias ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSoloDiferencias((actual) => !actual)}>Solo diferencias</button><span>{tocados.size} revisados</span></div> : <div />}
+          <input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" />
         </div>
         <div className="data-list data-list--inventory">
-          <div className="data-row data-row--head"><span>Producto</span><span>Disponible</span><span>Reserva</span><span>Tránsito</span><span>Costo</span><span>Valor</span></div>
-          {filas.map((i) => <div className="data-row" key={i.product_id}>
+          <div className="data-row data-row--head"><span>Producto</span><span>{editando ? 'Teórico' : 'Disponible'}</span><span>{editando ? 'Físico' : 'Reserva'}</span><span>{editando ? 'Diferencia' : 'Tránsito'}</span><span>Costo</span><span>Valor</span></div>
+          {filas.map((i, indice) => { const fisico = Number(cantidades[i.product_id] || 0); const diferencia = fisico - i.disponible; return <div className={`data-row ${editando && Math.abs(diferencia) > 0.0001 ? 'inventory-row-difference' : ''}`} key={i.product_id}>
             <span className="data-primary"><strong>{i.nombre}</strong><small>{i.sku} · {i.tipo?.replaceAll('_', ' ') ?? i.linea}{(i.faltante ?? 0) > 0 && <span className="txt-danger"> · faltan {i.faltante?.toLocaleString('es-MX')}</span>}</small></span>
-            <span data-label="Disponible">{editando ? <div className="input-suffix input-suffix--compact"><input type="number" min="0" step={i.unidad.toLowerCase().includes('pieza') ? '1' : '0.5'} value={cantidades[i.product_id] ?? ''} onChange={(e) => setCantidades({ ...cantidades, [i.product_id]: e.target.value })} /><span>{i.unidad}</span></div> : <><strong>{i.disponible.toLocaleString('es-MX')}</strong> <small>{i.unidad}</small></>}</span>
-            <span data-label="Reserva">{i.reservada.toLocaleString('es-MX')}</span>
-            <span data-label="Tránsito">{i.transito.toLocaleString('es-MX')}</span>
+            <span data-label={editando ? 'Teórico' : 'Disponible'}><strong>{i.disponible.toLocaleString('es-MX')}</strong> <small>{i.unidad}</small></span>
+            <span data-label={editando ? 'Físico' : 'Reserva'}>{editando ? <div className="input-suffix input-suffix--compact"><input data-inventory-entry type="number" min="0" step={i.unidad.toLowerCase().includes('pieza') ? '1' : '0.5'} value={cantidades[i.product_id] ?? ''} onPaste={(e) => pegarInventario(e, indice)} onKeyDown={navegarInventario} onFocus={(e) => e.currentTarget.select()} onChange={(e) => cambiarCantidad(i.product_id, e.target.value)} /><span>{i.unidad}</span></div> : i.reservada.toLocaleString('es-MX')}</span>
+            <span data-label={editando ? 'Diferencia' : 'Tránsito'} className={editando && diferencia < 0 ? 'txt-danger' : editando && diferencia > 0 ? 'txt-ok' : ''}>{editando ? `${diferencia > 0 ? '+' : ''}${diferencia.toLocaleString('es-MX')}` : i.transito.toLocaleString('es-MX')}</span>
             <span data-label="Costo">{i.costo_promedio == null ? '—' : usd(i.costo_promedio)}</span>
-            <span data-label="Valor"><strong>{usd(i.valor)}</strong></span>
-          </div>)}
+            <span data-label="Valor"><strong>{usd(editando ? fisico * (i.costo_promedio ?? 0) : i.valor)}</strong></span>
+          </div>; })}
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
       </CollapsibleSection>
-      {admin && <CollapsibleSection title={`Inventarios de semana ${semana.numero}`} count={historialSemana.length} defaultOpen={false} className="inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin inventario final</strong></div>}</CollapsibleSection>}
-      {editando && <div className="inventory-capture-actions"><label className="field"><span>{almacenActual?.codigo === 'CARN' ? 'Cierre del sábado' : `Fecha dentro de semana ${semana.numero}`}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} disabled={almacenActual?.codigo === 'CARN'} onChange={(e) => setFecha(e.target.value)} /></label><label className="field field--wide"><span>Observación del ajuste</span><input value={observacion} maxLength={500} placeholder="Ej. diferencia de conteo reportada por producción" onChange={(e) => setObservacion(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar inventario final'}</button></div>}
+      {admin && <CollapsibleSection title={`Conteos físicos de semana ${semana.numero}`} count={historialSemana.length} defaultOpen={false} className="inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin conteo físico · no bloquea el cierre</strong></div>}</CollapsibleSection>}
+      {editando && <div className="inventory-capture-actions"><label className="field"><span>{almacenActual?.codigo === 'CARN' ? 'Doble check del sábado' : `Fecha dentro de semana ${semana.numero}`}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} disabled={almacenActual?.codigo === 'CARN'} onChange={(e) => setFecha(e.target.value)} /></label><label className="field field--wide"><span>Observación del ajuste</span><input value={observacion} maxLength={500} placeholder="Ej. diferencia de conteo reportada por producción" onChange={(e) => setObservacion(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar conteo físico'}</button></div>}
       {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}
   </div>;

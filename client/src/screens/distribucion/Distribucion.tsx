@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useToast, mensajeError } from '../../toast';
@@ -7,6 +7,7 @@ import Spinner from '../../components/Spinner';
 import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 import { crearSemana, hoyChicago, type SemanaSeleccionada } from '../../semana';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { useUnsavedChanges } from '../../use-unsaved';
 
 interface DistResumen {
   id: number;
@@ -246,6 +247,40 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
   const [agregables, setAgregables] = useState<{ id: number; nombre: string }[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  useUnsavedChanges(Object.keys(edits).length > 0);
+
+  function navegarAjustes(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const campos = Array.from(document.querySelectorAll<HTMLInputElement>('[data-consolidated-entry]'));
+    const actual = campos.indexOf(event.currentTarget);
+    const siguiente = campos[actual + (event.shiftKey ? -1 : 1)];
+    siguiente?.focus();
+    siguiente?.select();
+  }
+
+  function pegarAjustes(event: ClipboardEvent<HTMLInputElement>) {
+    const valores = event.clipboardData.getData('text')
+      .split(/[\t\r\n]+/)
+      .map((valor) => valor.trim())
+      .filter(Boolean);
+    if (valores.length < 2) return;
+    const campos = Array.from(document.querySelectorAll<HTMLInputElement>('[data-consolidated-entry]'));
+    const inicio = campos.indexOf(event.currentTarget);
+    if (inicio < 0) return;
+    event.preventDefault();
+    setEdits((actuales) => {
+      const siguientes = { ...actuales };
+      valores.forEach((valor, indice) => {
+        const campo = campos[inicio + indice];
+        const lineaId = Number(campo?.dataset.lineaId);
+        if (campo && Number.isFinite(lineaId) && valor !== '' && Number.isFinite(Number(valor))) {
+          siguientes[lineaId] = valor;
+        }
+      });
+      return siguientes;
+    });
+  }
 
   // El estado y el nombre los conocemos de cualquier vista ya cargada.
   const estado = prod?.estado ?? suc?.estado;
@@ -447,8 +482,12 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
                     <input
                       className="conteo-input2 dist-input"
                       inputMode="decimal"
+                      data-consolidated-entry
+                      data-linea-id={it.linea_id}
                       value={edits[it.linea_id] ?? String(it.cantidad_aprobada ?? it.cantidad_sugerida)}
                       onChange={(e) => setEdits({ ...edits, [it.linea_id]: e.target.value })}
+                      onKeyDown={navegarAjustes}
+                      onPaste={pegarAjustes}
                     />
                   ) : (
                     <span className="dist-aprob">{it.cantidad_aprobada ?? it.cantidad_sugerida}</span>

@@ -40,9 +40,27 @@ cierreRouter.post('/facturas/:id/pagar', asyncHandler(async (req, res) => {
   res.json(await svc.pagarFactura(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, fecha_pago));
 }));
 
+cierreRouter.post('/facturas/pagar-lote', asyncHandler(async (req, res) => {
+  const b = z.object({ ids: z.array(id).min(1).max(200), fecha_pago: fecha }).parse(req.body);
+  res.json(await svc.pagarFacturasLote(req.auth!.negocioId, b.ids.map(BigInt), req.auth!.usuarioId, b.fecha_pago));
+}));
+
+cierreRouter.delete('/facturas/:id/pago', asyncHandler(async (req, res) => {
+  res.json(await svc.revertirPagoFactura(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+}));
+
 cierreRouter.post('/compras/:id/pagar', asyncHandler(async (req, res) => {
   const { fecha_pago } = z.object({ fecha_pago: fecha }).parse(req.body);
   res.json(await svc.pagarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), fecha_pago));
+}));
+
+cierreRouter.post('/compras/pagar-lote', asyncHandler(async (req, res) => {
+  const b = z.object({ ids: z.array(id).min(1).max(200), fecha_pago: fecha }).parse(req.body);
+  res.json(await svc.pagarComprasLote(req.auth!.negocioId, b.ids.map(BigInt), req.auth!.usuarioId, b.fecha_pago));
+}));
+
+cierreRouter.delete('/compras/:id/pago', asyncHandler(async (req, res) => {
+  res.json(await svc.revertirPagoCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
 }));
 
 cierreRouter.get('/:id/excel/:tipo', asyncHandler(async (req, res) => {

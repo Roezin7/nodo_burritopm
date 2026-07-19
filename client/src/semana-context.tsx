@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { crearSemana, type SemanaSeleccionada } from './semana';
+import { hayCambiosSinGuardar } from './use-unsaved';
 
 const CLAVE_SEMANA = 'bpm-semana-seleccionada';
 
@@ -30,6 +31,8 @@ export function SemanaProvider({ children }: { children: ReactNode }) {
 
   const seleccionarSemana = (inicio: string) => {
     const siguiente = crearSemana(inicio);
+    if (siguiente.inicio !== semana.inicio && hayCambiosSinGuardar()
+      && !window.confirm('Hay información sin guardar. ¿Descartarla y cambiar de semana?')) return;
     setSemana(siguiente);
     try { localStorage.setItem(CLAVE_SEMANA, siguiente.inicio); } catch { /* almacenamiento no disponible */ }
     const nuevos = new URLSearchParams(params);

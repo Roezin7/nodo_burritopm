@@ -5,7 +5,8 @@ import { asyncHandler, HttpError } from '../middleware/error.js';
 import * as svc from './service.js';
 import { prisma } from '../db.js';
 import * as conciliacion from './conciliacion.js';
-import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
+import { confirmarRecepcionesSinFaltantesEnRango, eliminarDistribucion } from '../distribuciones/service.js';
+import { asegurarSemanaEditable } from '../lib/semana-operativa.js';
 
 export const operacionRouter = Router();
 const linea = z.enum(['carne', 'desechables']);
@@ -61,6 +62,27 @@ operacionRouter.put('/pedidos/semana', soloAdmin, asyncHandler(async (req, res) 
 operacionRouter.post('/pedidos/confirmar-todos', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({ linea, desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
   res.json(await svc.confirmarPedidosEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.linea, b.desde, b.hasta));
+}));
+
+/** Revierte los consolidados de fechas seleccionadas para corregir ventas en bloque. */
+operacionRouter.post('/pedidos/reabrir-consolidados', soloAdmin, asyncHandler(async (req, res) => {
+  const b = z.object({ linea, fechas: z.array(fecha).min(1).max(7) }).parse(req.body);
+  const fechasUnicas = [...new Set(b.fechas)];
+  for (const fechaEntrega of fechasUnicas) await asegurarSemanaEditable(req.auth!.negocioId, fechaEntrega);
+  const consolidados = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: req.auth!.negocioId,
+      linea_operacion: b.linea,
+      fecha_entrega: { in: fechasUnicas.map((valor) => new Date(`${valor}T00:00:00.000Z`)) },
+      estado: { not: 'cancelada' },
+    },
+    select: { id: true },
+    orderBy: { id: 'desc' },
+  });
+  for (const consolidado of consolidados) {
+    await eliminarDistribucion(req.auth!.negocioId, consolidado.id, req.auth!.usuarioId);
+  }
+  res.json({ eliminados: consolidados.length });
 }));
 
 /** Convierte pedidos confirmados en distribución y genera todas las rutas del día. */

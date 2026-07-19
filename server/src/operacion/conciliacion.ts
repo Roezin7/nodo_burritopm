@@ -226,22 +226,9 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
   if (!pedidosCarne && !producciones) return alertaNegativos;
   const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
   if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
-  if (!reporte.final_capturado) throw new HttpError(409, 'Falta capturar el inventario físico final de Carnicería antes de cerrar.');
-  const [productos, lineasFinales] = await Promise.all([
-    prisma.products.findMany({
-      where: { negocio_id: negocioId, activo: true, linea_operacion: 'carne' },
-      select: { id: true, nombre: true },
-    }),
-    prisma.conteo_lineas.findMany({
-      where: { conteo_id: BigInt(reporte.inventario_final_id!) },
-      select: { product_id: true },
-    }),
-  ]);
-  const contados = new Set(lineasFinales.map((l) => l.product_id.toString()));
-  const faltantes = productos.filter((p) => !contados.has(p.id.toString()));
-  if (faltantes.length) {
-    throw new HttpError(409, `El inventario final está incompleto. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
-  }
+  // El físico final es una auditoría opcional. El cierre usa el saldo vivo que ya integra
+  // compras + producción − despachos; los negativos se reportan como cajas perdidas y se
+  // valúan en cero. Si hubo conteo físico, sus ajustes ya forman parte de ese mismo saldo.
   return alertaNegativos;
 }
 

@@ -521,6 +521,67 @@ export async function pagarCompra(negocioId: bigint, compraId: bigint, fechaPago
   return { ok: true, monto: num0(c.total) };
 }
 
+export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[], usuarioId: bigint, fechaPago: string) {
+  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
+  const resultado = await prisma.$transaction(async (tx) => {
+    const facturas = await tx.facturas.findMany({
+      where: { id: { in: facturaIds }, negocio_id: negocioId, estado: 'emitida' },
+      include: { pagos: true },
+    });
+    if (facturas.length !== new Set(facturaIds.map(String)).size) throw new HttpError(409, 'Una o más facturas ya no están pendientes. Recarga la cartera.');
+    for (const factura of facturas) if (fechaPago < iso(factura.emitida_at)) throw new HttpError(400, `${factura.numero}: la fecha es anterior a la emisión`);
+    const total = r2(facturas.reduce((suma, factura) => suma + num0(factura.total) - factura.pagos.reduce((a, pago) => a + num0(pago.monto), 0), 0));
+    for (const factura of facturas) {
+      const saldo = r2(num0(factura.total) - factura.pagos.reduce((a, pago) => a + num0(pago.monto), 0));
+      await tx.pagos_cliente.create({ data: { factura_id: factura.id, monto: saldo, pagado_at: fecha(fechaPago), registrado_por: usuarioId } });
+      await tx.facturas.update({ where: { id: factura.id }, data: { estado: 'pagada' } });
+    }
+    await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'facturas', datos: { ids: facturaIds.map(Number), fecha_pago: fechaPago, total } } });
+    return { facturas: facturas.length, total };
+  }, { isolationLevel: 'Serializable' });
+  await actualizarUltimoBalance(negocioId);
+  return { ok: true, ...resultado };
+}
+
+export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], usuarioId: bigint, fechaPago: string) {
+  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
+  const resultado = await prisma.$transaction(async (tx) => {
+    const compras = await tx.compras.findMany({ where: { id: { in: compraIds }, negocio_id: negocioId, estado: 'pendiente' } });
+    if (compras.length !== new Set(compraIds.map(String)).size) throw new HttpError(409, 'Una o más compras ya no están pendientes. Recarga la cartera.');
+    for (const compra of compras) if (fechaPago < iso(compra.fecha)) throw new HttpError(400, `Compra #${compra.id}: la fecha es anterior a la compra`);
+    const total = r2(compras.reduce((suma, compra) => suma + num0(compra.total), 0));
+    await tx.compras.updateMany({ where: { id: { in: compraIds } }, data: { estado: 'pagada', pagado_at: fecha(fechaPago) } });
+    await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'compras', datos: { ids: compraIds.map(Number), fecha_pago: fechaPago, total } } });
+    return { compras: compras.length, total };
+  }, { isolationLevel: 'Serializable' });
+  await actualizarUltimoBalance(negocioId);
+  return { ok: true, ...resultado };
+}
+
+export async function revertirPagoFactura(negocioId: bigint, facturaId: bigint, usuarioId: bigint) {
+  const factura = await prisma.facturas.findFirst({ where: { id: facturaId, negocio_id: negocioId, estado: 'pagada' }, include: { pagos: true } });
+  if (!factura) throw new HttpError(404, 'Factura pagada no encontrada');
+  const monto = r2(factura.pagos.reduce((suma, pago) => suma + num0(pago.monto), 0));
+  await prisma.$transaction(async (tx) => {
+    await tx.pagos_cliente.deleteMany({ where: { factura_id: factura.id } });
+    await tx.facturas.update({ where: { id: factura.id }, data: { estado: 'emitida' } });
+    await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'revertir_pago', entidad: 'factura', entidad_id: factura.id, datos: { monto } } });
+  });
+  await actualizarUltimoBalance(negocioId);
+  return { ok: true, monto };
+}
+
+export async function revertirPagoCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint) {
+  const compra = await prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId, estado: 'pagada' } });
+  if (!compra) throw new HttpError(404, 'Compra pagada no encontrada');
+  await prisma.$transaction(async (tx) => {
+    await tx.compras.update({ where: { id: compra.id }, data: { estado: 'pendiente', pagado_at: null } });
+    await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'revertir_pago', entidad: 'compra', entidad_id: compra.id, datos: { monto: num0(compra.total) } } });
+  });
+  await actualizarUltimoBalance(negocioId);
+  return { ok: true, monto: num0(compra.total) };
+}
+
 export async function detalleFactura(negocioId: bigint, facturaId: bigint) {
   const f = await prisma.facturas.findFirst({
     where: { id: facturaId, negocio_id: negocioId },

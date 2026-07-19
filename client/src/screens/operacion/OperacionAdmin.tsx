@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError, getToken } from '../../api';
 import Spinner from '../../components/Spinner';
@@ -6,6 +6,7 @@ import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 
 export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
@@ -122,17 +123,26 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   type LineaCompra = { clave: number; producto: string; cajas: string; peso: string; costo: string; congelado: boolean };
   const nuevaLinea = (productoId = ''): LineaCompra => ({ clave: Date.now() + Math.random(), producto: productoId, cajas: '', peso: '', costo: '', congelado: false });
   const [lineas, setLineas] = useState<LineaCompra[]>(() => [nuevaLinea(String(catalogo.productos.find((p) => p.tipo === 'materia_prima')?.id ?? ''))]);
+  const capturaPendiente = editandoId != null || Boolean(referencia.trim()) || lineas.some((l) => Boolean(l.cajas || l.peso || l.costo));
+  const claveBorradorCompra = `bpm-borrador-compra:${semana.inicio}`;
+  useUnsavedChanges(capturaPendiente);
   const editarLinea = (clave: number, cambios: Partial<LineaCompra>) => setLineas((actuales) => actuales.map((l) => l.clave === clave ? { ...l, ...cambios } : l));
   useEffect(() => {
     const primero = String(productosCompra[0]?.id ?? '');
     setLineas((actuales) => actuales.map((l) => productosCompra.some((p) => String(p.id) === l.producto) ? l : { ...l, producto: primero, peso: '', congelado: false }));
   }, [linea, productosCompra]);
   useEffect(() => {
-    setFecha(fechaDentroDeSemana(semana));
+    const guardado = leerBorradorLocal<{ linea: 'carne' | 'desechables'; proveedor: string; fecha: string; referencia: string; lineas: LineaCompra[] }>(claveBorradorCompra);
+    setLinea(guardado?.valor.linea ?? 'carne');
+    setProveedor(guardado?.valor.proveedor ?? String(catalogo.proveedores[0]?.id ?? ''));
+    setFecha(guardado?.valor.fecha ?? fechaDentroDeSemana(semana));
     setEditandoId(null);
-    setReferencia('');
-    setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]);
-  }, [semana.inicio, semana.fin]);
+    setReferencia(guardado?.valor.referencia ?? '');
+    setLineas(guardado?.valor.lineas?.length ? guardado.valor.lineas : [nuevaLinea(String(catalogo.productos.find((p) => p.linea === 'carne' && ['materia_prima', 'precio_fijo'].includes(p.tipo))?.id ?? ''))]);
+  }, [semana.inicio, semana.fin, claveBorradorCompra]);
+  useEffect(() => {
+    if (capturaPendiente && editandoId == null) guardarBorradorLocal(claveBorradorCompra, { linea, proveedor, fecha, referencia, lineas });
+  }, [capturaPendiente, claveBorradorCompra, editandoId, linea, proveedor, fecha, referencia, lineas]);
   const almacen = linea === 'carne' ? carniceria : bodega;
   const totalCompra = lineas.reduce((total, l) => total + Number(l.costo || 0), 0);
   const lineasValidas = lineas.length > 0 && lineas.every((l) => {
@@ -147,6 +157,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
       await api(editandoId == null ? '/operacion/compras' : `/operacion/compras/${editandoId}`, { method: editandoId == null ? 'POST' : 'PATCH', body });
       const fueEdicion = editandoId != null;
       setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setReferencia(''); setEditandoId(null);
+      if (!fueEdicion) guardarBorradorLocal(claveBorradorCompra, null);
       await onDone(fueEdicion ? 'Compra actualizada e inventario recalculado.' : undefined);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar la compra.'); } finally { setBusy(false); }
   }
@@ -165,8 +176,38 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     setEditandoId(null); setReferencia(''); setFecha(fechaDentroDeSemana(semana));
     setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setError('');
   }
+  function limpiarCompra() {
+    if (capturaPendiente && !window.confirm('¿Limpiar toda la compra que estás capturando?')) return;
+    setReferencia(''); setFecha(fechaDentroDeSemana(semana)); setEditandoId(null);
+    setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setError('');
+    guardarBorradorLocal(claveBorradorCompra, null);
+  }
+  function repetirUltima() {
+    const compra = resumen.compras.find((c) => catalogo.productos.find((p) => p.id === c.lineas[0]?.product_id)?.linea === linea);
+    if (!compra) { setError(`No hay una compra anterior de ${linea}.`); return; }
+    setProveedor(String(compra.proveedor_id));
+    setReferencia('');
+    setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
+    setError('');
+  }
+  function cambiarLineaCompra(siguiente: 'carne' | 'desechables') {
+    if (siguiente === linea) return;
+    if (capturaPendiente && !window.confirm('Hay una compra sin guardar. ¿Descartarla y cambiar de línea?')) return;
+    setLinea(siguiente); setReferencia(''); setEditandoId(null);
+    guardarBorradorLocal(claveBorradorCompra, null);
+    const primero = catalogo.productos.find((p) => p.linea === siguiente && (siguiente === 'desechables' || ['materia_prima', 'precio_fijo'].includes(p.tipo)));
+    setLineas([nuevaLinea(String(primero?.id ?? ''))]);
+  }
+  function avanzarConEnter(evento: ReactKeyboardEvent<HTMLElement>) {
+    if (evento.key !== 'Enter') return;
+    evento.preventDefault();
+    const campos = [...document.querySelectorAll<HTMLElement>('[data-purchase-entry]:not(:disabled)')];
+    const indice = campos.indexOf(evento.currentTarget);
+    const siguiente = campos[indice + (evento.shiftKey ? -1 : 1)];
+    siguiente?.focus();
+    if (siguiente instanceof HTMLInputElement) siguiente.select();
+  }
   async function cambiarLote(id: number, valor: boolean) { setBusy(true); setError(''); try { await api(`/operacion/lotes/${id}`, { method: 'PATCH', body: { congelado: valor } }); await onDone('Lote actualizado.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo actualizar el lote.'); } finally { setBusy(false); } }
-  async function pagarCompra(id: number) { setBusy(true); setError(''); try { await api(`/cierre/compras/${id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone('Compra marcada como pagada.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo marcar la compra pagada.'); } finally { setBusy(false); } }
   async function eliminarCompra(id: number) {
     if (!window.confirm('Se eliminará la compra y se restarán sus cajas, peso y costo del inventario. Solo puede hacerse si todavía no fue utilizada. ¿Continuar?')) return;
     setBusy(true); setError('');
@@ -177,25 +218,25 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   }
   return <div className="operation-stack">
     <section className="workspace-card form-workspace" ref={editorRef}>
-        <div className="workspace-card-head"><div><h2>{editandoId == null ? 'Nueva compra' : `Editar compra #${editandoId}`}</h2>{editandoId != null && <p>Actualiza los datos y guarda una sola vez.</p>}</div><div className="segmented segmented--small"><button disabled={editandoId != null} className={linea === 'carne' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea('carne')}>Carne</button><button disabled={editandoId != null} className={linea === 'desechables' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea('desechables')}>Desechables</button></div></div>
+        <div className="workspace-card-head"><div><h2>{editandoId == null ? 'Nueva compra' : `Editar compra #${editandoId}`}</h2>{editandoId != null && <p>Actualiza los datos y guarda una sola vez.</p>}</div><div className="purchase-head-actions"><button type="button" className="btn btn-secondary btn-sm" disabled={editandoId != null || busy} onClick={repetirUltima}>Repetir última</button><div className="segmented segmented--small"><button disabled={editandoId != null} className={linea === 'carne' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => cambiarLineaCompra('carne')}>Carne</button><button disabled={editandoId != null} className={linea === 'desechables' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => cambiarLineaCompra('desechables')}>Desechables</button></div></div></div>
         <div className="form-grid form-grid--purchase">
-          <label className="field"><span>Proveedor</span><select value={proveedor} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
-          <label className="field"><span>Fecha</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
-          <label className="field field--wide"><span>Factura / referencia</span><input value={referencia} onChange={(e) => setReferencia(e.target.value)} /></label>
+          <label className="field"><span>Proveedor</span><select data-purchase-entry value={proveedor} onKeyDown={avanzarConEnter} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
+          <label className="field"><span>Fecha</span><input data-purchase-entry type="date" min={semana.inicio} max={semana.fin} value={fecha} onKeyDown={avanzarConEnter} onChange={(e) => setFecha(e.target.value)} /></label>
+          <label className="field field--wide"><span>Factura / referencia</span><input data-purchase-entry value={referencia} onKeyDown={avanzarConEnter} onChange={(e) => setReferencia(e.target.value)} /></label>
         </div>
         <div className="purchase-lines">
           {lineas.map((l, indice) => { const seleccionado = productosCompra.find((p) => String(p.id) === l.producto); const requierePeso = seleccionado?.tipo === 'materia_prima'; const pesoCaja = Number(l.cajas) > 0 ? Number(l.peso) / Number(l.cajas) : 0; return <div className="purchase-line" key={l.clave}>
             <span className="purchase-line__number">{indice + 1}</span>
-            <label className="field"><span>Producto</span><select value={l.producto} onChange={(e) => editarLinea(l.clave, { producto: e.target.value })}>{productosCompra.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
-            <label className="field field--number"><span>{seleccionado?.unidad ?? 'Cantidad'}</span><input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={l.cajas} onChange={(e) => editarLinea(l.clave, { cajas: e.target.value })} /></label>
-            {requierePeso ? <label className="field field--number"><span>Peso total</span><div className="input-suffix"><input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.peso} onChange={(e) => editarLinea(l.clave, { peso: e.target.value })} /><span>lb</span></div><small>{pesoCaja.toFixed(2)} lb/caja</small></label> : <span />}
-            <label className="field field--number"><span>Total</span><div className="input-prefix"><span>$</span><input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.costo} onChange={(e) => editarLinea(l.clave, { costo: e.target.value })} /></div></label>
+            <label className="field"><span>Producto</span><select data-purchase-entry value={l.producto} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { producto: e.target.value })}>{productosCompra.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
+            <label className="field field--number"><span>{seleccionado?.unidad ?? 'Cantidad'}</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={l.cajas} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { cajas: e.target.value })} /></label>
+            {requierePeso ? <label className="field field--number"><span>Peso total</span><div className="input-suffix"><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.peso} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { peso: e.target.value })} /><span>lb</span></div><small>{pesoCaja.toFixed(2)} lb/caja</small></label> : <span />}
+            <label className="field field--number"><span>Total</span><div className="input-prefix"><span>$</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.costo} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { costo: e.target.value })} /></div></label>
             {requierePeso && <label className="check-card"><input type="checkbox" checked={l.congelado} onChange={(e) => editarLinea(l.clave, { congelado: e.target.checked })} /><span><strong>Congelado</strong></span></label>}
             {lineas.length > 1 && <button type="button" className="icon-btn" aria-label="Quitar renglón" onClick={() => setLineas((actuales) => actuales.filter((fila) => fila.clave !== l.clave))}>×</button>}
           </div>; })}
           <button type="button" className="btn btn-secondary btn-sm purchase-add" onClick={() => setLineas((actuales) => [...actuales, nuevaLinea(String(productosCompra[0]?.id ?? ''))])}>+ Agregar producto</button>
         </div>
-        <div className="form-submit form-submit--summary"><div className="form-summary"><span>{lineas.length} renglón{lineas.length === 1 ? '' : 'es'}</span><span>Total <strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null && <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
+        <div className="form-submit form-submit--summary"><div className="form-summary"><span>{lineas.length} renglón{lineas.length === 1 ? '' : 'es'}</span><span>Total <strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={limpiarCompra}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
     </section>
 
     {semana.actual && resumen.lotes.length > 0 && <CollapsibleSection title="Materia prima disponible" count={`${resumen.lotes.length} lotes`} defaultOpen={false}>
@@ -203,7 +244,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     </CollapsibleSection>}
 
     <CollapsibleSection title="Compras registradas" count={resumen.cantidad_compras} summary={`Total ${usd(resumen.total_compras)}`}>
-      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha}{c.referencia ? ` · ${c.referencia}` : ''} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <><button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button><button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void pagarCompra(c.id)}>Marcar pagada</button></>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>)}</div>
+      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha}{c.referencia ? ` · ${c.referencia}` : ''} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>)}</div>
     </CollapsibleSection>
   </div>;
 }
@@ -245,6 +286,9 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
   const [borradores, setBorradores] = useState<ProduccionBorrador[]>(() => [{ id: 1, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
   const [produccionesAbiertas, setProduccionesAbiertas] = useState<Set<number>>(() => new Set());
+  const capturaProduccionPendiente = borradores.some((borrador) => Boolean(borrador.entrada) || Object.values(borrador.salidas).some(Boolean));
+  const claveBorradorProduccion = `bpm-borrador-produccion:${semana.inicio}`;
+  useUnsavedChanges(capturaProduccionPendiente);
   const fechasProduccion = useMemo(() => {
     const opciones: { fecha: string; dia: string; numero: number; mes: string }[] = [];
     for (let iso = semana.inicio; iso <= semana.fin;) {
@@ -257,10 +301,17 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   }, [semana.inicio, semana.fin]);
 
   useEffect(() => {
-    setFecha(fechaDentroDeSemana(semana));
-    setBorradores([{ id: siguienteId.current++, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+    const guardado = leerBorradorLocal<{ fecha: string; borradores: ProduccionBorrador[] }>(claveBorradorProduccion);
+    setFecha(guardado?.valor.fecha ?? fechaDentroDeSemana(semana));
+    const filasGuardadas = guardado?.valor.borradores;
+    if (filasGuardadas?.length) siguienteId.current = Math.max(...filasGuardadas.map((fila) => fila.id)) + 1;
+    setBorradores(filasGuardadas ?? [{ id: siguienteId.current++, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
     setProduccionesAbiertas(new Set());
-  }, [semana.inicio, semana.fin]);
+  }, [semana.inicio, semana.fin, claveBorradorProduccion]);
+
+  useEffect(() => {
+    if (capturaProduccionPendiente) guardarBorradorLocal(claveBorradorProduccion, { fecha, borradores });
+  }, [claveBorradorProduccion, capturaProduccionPendiente, fecha, borradores]);
 
   function actualizar(idBorrador: number, cambio: Partial<ProduccionBorrador>) {
     setBorradores((actuales) => actuales.map((b) => b.id === idBorrador ? { ...b, ...cambio } : b));
@@ -271,6 +322,27 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     const materiasUsadas = new Set(borradores.map((b) => b.materia));
     const siguiente = materias.find((m) => !materiasUsadas.has(String(m.id))) ?? materias[0];
     setBorradores((actuales) => [...actuales, crearBorrador(String(siguiente?.id ?? ''))]);
+  }
+
+  function cargarPlanDelDia() {
+    if (capturaProduccionPendiente && !window.confirm('Se reemplazará la captura actual por el plan habitual del día. ¿Continuar?')) return;
+    const dia = new Date(`${fecha}T12:00:00`).getDay();
+    const idsMaterias = [...new Set(catalogo.recetas_produccion.filter((receta) => {
+      const salida = catalogo.productos.find((producto) => producto.id === receta.producto_salida_id);
+      return salida?.produccion_dias.includes(dia);
+    }).map((receta) => receta.materia_prima_id))];
+    setBorradores((idsMaterias.length ? idsMaterias : materias.slice(0, 1).map((materia) => materia.id)).map((materiaId) => crearBorrador(String(materiaId))));
+    setError('');
+  }
+
+  function avanzarProduccion(evento: ReactKeyboardEvent<HTMLInputElement | HTMLSelectElement>) {
+    if (evento.key !== 'Enter') return;
+    evento.preventDefault();
+    const campos = [...document.querySelectorAll<HTMLElement>('[data-production-entry]:not(:disabled)')];
+    const indice = campos.indexOf(evento.currentTarget);
+    const siguiente = campos[indice + (evento.shiftKey ? -1 : 1)];
+    siguiente?.focus();
+    if (siguiente instanceof HTMLInputElement) siguiente.select();
   }
 
   const calculos = borradores.map((borrador, indice) => {
@@ -322,6 +394,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       });
       const cantidad = borradores.length;
       setBorradores([crearBorrador()]);
+      guardarBorradorLocal(claveBorradorProduccion, null);
       await onDone();
       toast.ok(`${cantidad} ${cantidad === 1 ? 'producción guardada' : 'producciones guardadas'} correctamente.`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la producción.'); } finally { setBusy(false); }
@@ -334,6 +407,15 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       await onDone();
       toast.ok('Producción eliminada y saldos recalculados.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la producción.'); }
+    finally { setBusy(false); }
+  }
+  async function eliminarDia(fechaGrupo: string, ids: number[]) {
+    if (!window.confirm(`¿Eliminar los ${ids.length} batches del ${fechaGrupo}? Se revertirán juntos de la captura semanal.`)) return;
+    setBusy(true); setError('');
+    try {
+      for (const id of ids) await api(`/operacion/produccion/${id}`, { method: 'DELETE' });
+      await onDone(); toast.ok(`${ids.length} producciones del día eliminadas y saldos recalculados.`);
+    } catch (e) { await onDone(); setError(e instanceof ApiError ? e.message : 'No se pudo completar la eliminación del día. Revisa los batches restantes.'); }
     finally { setBusy(false); }
   }
   function alternarProduccion(id: number) {
@@ -367,7 +449,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const todasProduccionesAbiertas = resumen.producciones.length > 0 && resumen.producciones.every((p) => produccionesAbiertas.has(p.id));
   return <div className="operation-stack">
     <section className="workspace-card production-capture">
-      <div className="workspace-card-head production-capture-head"><div><h2>Nueva producción</h2></div><div className="production-day-picker"><span>Día · semana {semana.numero}</span><div role="group" aria-label={`Día de producción de la semana ${semana.numero}`}>{fechasProduccion.map((opcion) => <button type="button" key={opcion.fecha} className={fecha === opcion.fecha ? 'is-active' : ''} aria-pressed={fecha === opcion.fecha} onClick={() => setFecha(opcion.fecha)}><strong>{opcion.dia}</strong><small>{opcion.numero} {opcion.mes}</small></button>)}</div></div></div>
+      <div className="workspace-card-head production-capture-head"><div><h2>Nueva producción</h2><button type="button" className="btn btn-secondary btn-sm" onClick={cargarPlanDelDia}>Cargar plan del día</button></div><div className="production-day-picker"><span>Día · semana {semana.numero}</span><div role="group" aria-label={`Día de producción de la semana ${semana.numero}`}>{fechasProduccion.map((opcion) => <button type="button" key={opcion.fecha} className={fecha === opcion.fecha ? 'is-active' : ''} aria-pressed={fecha === opcion.fecha} onClick={() => setFecha(opcion.fecha)}><strong>{opcion.dia}</strong><small>{opcion.numero} {opcion.mes}</small></button>)}</div></div></div>
       <div className="production-drafts">
         {calculos.map((calculo, indice) => {
           const { borrador, materia, terminados, cajasFrescas, cajasCongeladas, consumo, pesoSalida, insuficiente, pesoExcedido } = calculo;
@@ -375,13 +457,13 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
           return <article className={`production-draft ${insuficiente || pesoExcedido ? 'is-alert' : ''}`} key={borrador.id}>
             <header><div><span className="step-badge">{indice + 1}</span><div><strong>{materia?.nombre ?? 'Producto'}</strong><small>Batch del {fecha}</small></div></div>{borradores.length > 1 && <button type="button" className="btn btn-danger-ghost btn-sm" disabled={busy} onClick={() => setBorradores((actuales) => actuales.filter((b) => b.id !== borrador.id))}>Quitar</button>}</header>
             <div className="form-grid production-draft-fields">
-              <label className="field"><span>Materia prima utilizada</span><select value={borrador.materia} onChange={(e) => actualizar(borrador.id, { materia: e.target.value, salidas: {} })}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= semana.fin).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} frescas</option>; })}</select></label>
-              <label className="field field--number"><span>Cajas de materia prima</span><input type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={borrador.entrada} onChange={(e) => actualizar(borrador.id, { entrada: e.target.value })} /></label>
+              <label className="field"><span>Materia prima utilizada</span><select data-production-entry value={borrador.materia} onKeyDown={avanzarProduccion} onChange={(e) => actualizar(borrador.id, { materia: e.target.value, salidas: {} })}>{materias.map((p) => { const disponibles = resumen.lotes.filter((l) => l.product_id === p.id && !l.congelado && l.fecha <= semana.fin).reduce((a, l) => a + l.cajas, 0); return <option key={p.id} value={p.id}>{p.nombre} · {disponibles.toLocaleString('es-MX')} frescas</option>; })}</select></label>
+              <label className="field field--number"><span>Cajas de materia prima</span><input data-production-entry type="number" min="0" step="0.5" inputMode="decimal" placeholder="0" value={borrador.entrada} onKeyDown={avanzarProduccion} onChange={(e) => actualizar(borrador.id, { entrada: e.target.value })} /></label>
             </div>
             <div className={`production-stock-link ${insuficiente ? 'is-alert' : ''}`}><span><strong>Disponible</strong>{cajasFrescas.toLocaleString('es-MX')} cajas frescas{cajasCongeladas > 0 ? ` · ${cajasCongeladas.toLocaleString('es-MX')} congeladas` : ''}</span><span>{consumo.pesoTotal.toFixed(1)} lb usadas · {usd(consumo.costoTotal)}</span></div>
             {insuficiente && <p className="error-msg">La suma de filas con esta materia prima supera las cajas frescas disponibles.</p>}
             <div className="form-divider"><span>Producción terminada y subproductos</span><small>Entrada estimada: {consumo.pesoTotal.toFixed(1)} lb</small></div>
-            <div className="production-output-list">{terminados.map((p) => { const esSubproducto = calculo.subproductos.has(p.id); return <label className={`production-output ${esSubproducto ? 'production-output--byproduct' : ''}`} key={p.id}><span><strong>{p.nombre}</strong><small>{esSubproducto ? `Subproducto del remanente · sin costo · venta ${usd(p.precio ?? 0)}/${p.unidad.toLowerCase()}` : `${p.peso_caja_lb ?? '?'} lb/caja · ${p.produccion_dias.map((d) => dias[d]).join(', ') || 'especial'}`}</small></span><div className="input-suffix input-suffix--compact"><input type="number" min="0" step={esSubproducto ? '1' : '0.5'} inputMode="decimal" value={borrador.salidas[p.id] ?? ''} placeholder="0" onChange={(e) => actualizar(borrador.id, { salidas: { ...borrador.salidas, [p.id]: e.target.value } })} /><span>{p.unidad.toLowerCase()}</span></div></label>; })}</div>
+            <div className="production-output-list">{terminados.map((p) => { const esSubproducto = calculo.subproductos.has(p.id); return <label className={`production-output ${esSubproducto ? 'production-output--byproduct' : ''}`} key={p.id}><span><strong>{p.nombre}</strong><small>{esSubproducto ? `Subproducto del remanente · sin costo · venta ${usd(p.precio ?? 0)}/${p.unidad.toLowerCase()}` : `${p.peso_caja_lb ?? '?'} lb/caja · ${p.produccion_dias.map((d) => dias[d]).join(', ') || 'especial'}`}</small></span><div className="input-suffix input-suffix--compact"><input data-production-entry type="number" min="0" step={esSubproducto ? '1' : '0.5'} inputMode="decimal" value={borrador.salidas[p.id] ?? ''} placeholder="0" onKeyDown={avanzarProduccion} onChange={(e) => actualizar(borrador.id, { salidas: { ...borrador.salidas, [p.id]: e.target.value } })} /><span>{p.unidad.toLowerCase()}</span></div></label>; })}</div>
             {!terminados.length && <div className="empty-state"><strong>Sin receta configurada</strong><span>Selecciona otra materia prima.</span></div>}
             <footer><span>Salida {pesoSalida.toFixed(1)} lb</span><span className={yieldActual > 100 ? 'text-danger' : ''}>Yield {yieldActual.toFixed(1)}%</span></footer>
             {pesoExcedido && <p className="error-msg">El peso terminado supera el peso de materia prima calculado.</p>}
@@ -407,7 +489,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
 
     <section className="workspace-card"><div className="workspace-card-head batch-list-heading"><div><h2>Producción registrada</h2><p>{resumen.producciones.length} batch{resumen.producciones.length === 1 ? '' : 'es'} en {produccionesPorDia.length} día{produccionesPorDia.length === 1 ? '' : 's'}</p></div>{resumen.producciones.length > 0 && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProduccionesAbiertas(todasProduccionesAbiertas ? new Set() : new Set(resumen.producciones.map((p) => p.id)))}>{todasProduccionesAbiertas ? 'Colapsar todo' : 'Expandir todo'}</button>}</div>
       {produccionesPorDia.length === 0 ? <div className="empty-state"><strong>Sin producción registrada</strong><span>Los batches guardados aparecerán separados por día.</span></div> : <div className="batch-day-list">{produccionesPorDia.map((grupo) => <section className="batch-day" key={grupo.fecha}>
-        <header className="batch-day-heading"><div><span>{grupo.dia}</span><strong>{grupo.fechaCorta}</strong></div><p>{grupo.producciones.length} batch{grupo.producciones.length === 1 ? '' : 'es'} · {grupo.cajasEntrada.toLocaleString('es-MX')} cajas de materia prima · {usd(grupo.costo)}</p></header>
+        <header className="batch-day-heading"><div><span>{grupo.dia}</span><strong>{grupo.fechaCorta}</strong></div><p>{grupo.producciones.length} batch{grupo.producciones.length === 1 ? '' : 'es'} · {grupo.cajasEntrada.toLocaleString('es-MX')} cajas de materia prima · {usd(grupo.costo)}</p><button type="button" className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarDia(grupo.fecha, grupo.producciones.map((produccion) => produccion.id))}>Eliminar día</button></header>
         <div className="batch-list">{grupo.producciones.map((p) => {
           const abierta = produccionesAbiertas.has(p.id);
           const resumenSalidas = p.salidas.map((s) => `${s.producto}: ${s.cajas}`).join(' · ');
@@ -457,21 +539,21 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
   if (!reporte) return <section className="workspace-card"><Spinner label="Calculando conciliación…" /></section>;
   return <section className="workspace-card weekly-reconciliation">
     <div className="workspace-card-head">
-      <div><span className="eyebrow">Auditoría de Carnicería</span><h2>Conciliación semanal</h2><p>Inicio + compras y producción − salidas reales = inventario teórico.</p></div>
+      <div><span className="eyebrow">Auditoría de Carnicería</span><h2>Conciliación semanal</h2><p>Inicio + compras y producción − salidas reales = inventario final calculado. El conteo físico es opcional.</p></div>
       {!reporte.inicial_fijado && <button className="btn btn-primary" disabled={busy} onClick={() => void fijarInicio()}>Fijar inventario inicial</button>}
     </div>
     <div className="reconciliation-status">
       <span className={`chip ${reporte.inicial_fijado ? 'chip--ok' : 'chip--warn'}`}>{reporte.inicial_fijado ? 'Inicio fijado' : reporte.origen_inicial === 'cierre_anterior' ? 'Inicio tomado del sábado anterior' : 'Inicio reconstruido, falta fijar'}</span>
-      <span className={`chip ${reporte.final_capturado ? 'chip--ok' : 'chip--warn'}`}>{reporte.final_capturado ? 'Físico final capturado' : 'Falta inventario final'}</span>
+      <span className={`chip ${reporte.final_capturado ? 'chip--ok' : 'chip--muted'}`}>{reporte.final_capturado ? 'Doble check físico capturado' : 'Sin conteo físico · opcional'}</span>
       {reporte.resumen.saldos_provisionales > 0 && <span className="chip chip--warn">{reporte.resumen.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas · no bloquean cierre</span>}
       {reporte.resumen.diferencias_fisicas > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fisicas} diferencias documentadas</span>}
     </div>
-    <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Capturar físico final</Link></div>
-    <CollapsibleSection title="Detalle de conciliación" count={reporte.filas.length} defaultOpen={false}><div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto</th><th>Inicio</th><th>+ Entradas L–X</th><th>− Uso/salida X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida S</th><th>Teórico final</th><th>Físico final</th><th>Diferencia</th></tr></thead><tbody>{reporte.filas.map((f) => {
+    <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Hacer doble check físico (opcional)</Link></div>
+    <CollapsibleSection title="Detalle de conciliación" count={reporte.filas.length} defaultOpen={false}><div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto</th><th>Inicio</th><th>+ Entradas L–X</th><th>− Uso/salida X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida S</th><th>Final calculado</th><th>Físico opcional</th><th>Diferencia</th></tr></thead><tbody>{reporte.filas.map((f) => {
       const entradas1 = f.compras1 + f.produccionSalida1; const salidas1 = f.produccionEntrada1 + f.salidas1;
       const entradas2 = f.compras2 + f.produccionSalida2; const salidas2 = f.produccionEntrada2 + f.salidas2;
       const diferencia = f.diferenciaFinal ?? 0;
-      return <tr key={f.product_id} className={Math.abs(diferencia) > 0.0001 || f.actual < -0.0001 ? 'is-different' : ''}><td><strong>{f.nombre}</strong><small>{f.tipo?.replaceAll('_', ' ')} · pedidos {q(f.pedidos1)} / {q(f.pedidos2)}</small></td><td>{q(f.inicial)}</td><td>{q(entradas1)}</td><td>{q(salidas1)}</td><td><strong>{q(f.saldoMiercoles)}</strong></td><td>{q(entradas2)}</td><td>{q(salidas2)}</td><td><strong>{q(f.teoricoFinal)}</strong></td><td>{f.fisico_final == null ? 'Pendiente' : q(f.fisico_final)}</td><td className={Math.abs(diferencia) > 0.0001 ? 'txt-danger' : ''}>{f.diferenciaFinal == null ? '—' : q(diferencia)}</td></tr>;
+      return <tr key={f.product_id} className={Math.abs(diferencia) > 0.0001 || f.actual < -0.0001 ? 'is-different' : ''}><td><strong>{f.nombre}</strong><small>{f.tipo?.replaceAll('_', ' ')} · pedidos {q(f.pedidos1)} / {q(f.pedidos2)}</small></td><td>{q(f.inicial)}</td><td>{q(entradas1)}</td><td>{q(salidas1)}</td><td><strong>{q(f.saldoMiercoles)}</strong></td><td>{q(entradas2)}</td><td>{q(salidas2)}</td><td><strong>{q(f.teoricoFinal)}</strong></td><td>{f.fisico_final == null ? 'Sin conteo' : q(f.fisico_final)}</td><td className={Math.abs(diferencia) > 0.0001 ? 'txt-danger' : ''}>{f.diferenciaFinal == null ? '—' : q(diferencia)}</td></tr>;
     })}</tbody></table></div></CollapsibleSection>
     {!reporte.filas.length && <div className="empty-state"><strong>Sin movimiento de carne</strong><span>No hay productos que conciliar en esta semana.</span></div>}
   </section>;
@@ -487,7 +569,7 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   const nombresExcel: Record<string, string> = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' };
   async function descargar(id: number, tipo: string) { const res = await fetch(`/api/cierre/${id}/excel/${tipo}`, { headers: { Authorization: `Bearer ${getToken()}` } }); if (!res.ok) { setError('No se pudo generar el Excel.'); return; } const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nombresExcel[tipo] ?? `${tipo}.xlsx`; a.click(); URL.revokeObjectURL(url); }
   async function pagar(f: Factura) { setBusy(true); setError(''); try { await api(`/cierre/facturas/${f.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); } finally { setBusy(false); } }
-  async function reabrir(id: number) { if (!window.confirm('Se anularán las facturas y se revertirá el inventario final de esta semana. Después podrás corregir compras o producción y capturar de nuevo el físico final. ¿Continuar?')) return; setBusy(true); setError(''); try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); } finally { setBusy(false); } }
+  async function reabrir(id: number) { if (!window.confirm('Se anularán las facturas y, si existió un conteo físico, se revertirán sus ajustes. Después podrás corregir compras o producción y cerrar nuevamente. ¿Continuar?')) return; setBusy(true); setError(''); try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); } finally { setBusy(false); } }
   const libros = [['weekly-order', 'Weekly Order'], ['disposables', 'Disposables'], ['production', 'Production'], ['billing', 'Billing'], ['lbt', 'LBT'], ['aurora', 'Aurora']] as const;
   const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   return <div className="operation-stack">
@@ -502,6 +584,7 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     {vistaPrevia && <div className="modal-backdrop" onClick={() => { if (!busy) setVistaPrevia(null); }}><div className="modal-card close-preview-modal" onClick={(e) => e.stopPropagation()}>
       <div className="card-head"><div><span className="eyebrow">Vista previa · Semana {vistaPrevia.semana.numero}</span><h2>Resultado estimado del cierre</h2><p>{vistaPrevia.semana.inicia_at} al {vistaPrevia.semana.termina_at}</p></div><button className="icon-btn" disabled={busy} aria-label="Cerrar" onClick={() => setVistaPrevia(null)}>×</button></div>
       <div className="close-preview-total"><span>Venta que se facturará</span><strong>{usd(vistaPrevia.ventas.total)}</strong><small>Carne {usd(vistaPrevia.ventas.carne)} · Desechables {usd(vistaPrevia.ventas.desechables)}</small></div>
+      <p className="notice"><strong>Inventario calculado automáticamente:</strong> saldo inicial + compras + producción − ventas. El conteo físico es opcional; los saldos negativos se reportan como cajas perdidas y se valúan en cero.</p>
       <div className="metric-strip metric-strip--three"><div><span>Inventario final</span><strong>{usd(vistaPrevia.inventario.total)}</strong><small>Incluye carne, congelado y desechables</small></div><div><span>Por cobrar al cierre</span><strong>{usd(vistaPrevia.cartera.por_cobrar_al_cierre)}</strong><small>Actual {usd(vistaPrevia.cartera.por_cobrar_actual)} + esta semana</small></div><div><span>Por pagar</span><strong>{usd(vistaPrevia.cartera.por_pagar)}</strong><small>Compras pendientes</small></div></div>
       <div className="close-preview-balance"><span>Balance estimado</span><strong>{usd(vistaPrevia.balance_estimado)}</strong></div>
       {vistaPrevia.cajas_perdidas > 0 && <p className="notice notice--warning"><strong>{vistaPrevia.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas</strong> en {vistaPrevia.productos_con_faltante} {vistaPrevia.productos_con_faltante === 1 ? 'producto' : 'productos'}. Se valuarán como cero y se crearán incidencias; no bloquean el cierre.</p>}
