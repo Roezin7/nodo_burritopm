@@ -126,7 +126,6 @@ function SelectorSemana({ semana, opciones, onChange }: { semana: ReturnType<typ
     <button className="icon-btn" aria-label="Semana anterior" onClick={() => onChange(anterior.inicio)}>←</button>
     <label><span>Panorama general</span><select value={semana.inicio} onChange={(e) => onChange(e.target.value)}>{opciones.map((s) => <option key={s.inicio} value={s.inicio}>Semana {s.numero} · {s.anio} · {etiquetaRango(s)}</option>)}</select></label>
     <button className="icon-btn" aria-label="Semana siguiente" onClick={() => onChange(siguiente.inicio)}>→</button>
-    <div className="global-week-summary"><strong>Semana {semana.numero}</strong><span>{etiquetaRango(semana)}</span></div>
     {!semana.actual && <button className="btn btn-ghost btn-sm" onClick={() => onChange(crearSemana().inicio)}>Semana actual</button>}
   </section>;
 }

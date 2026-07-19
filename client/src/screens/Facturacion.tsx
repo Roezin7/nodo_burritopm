@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError, nuevaClaveIdempotencia } from '../api';
 import Spinner from '../components/Spinner';
+import CollapsibleSection from '../components/CollapsibleSection';
 import { crearSemana, etiquetaRango, semanasAlrededor } from '../semana';
 import { useToast } from '../toast';
+
+/** Cuántas filas se muestran siempre; el resto queda colapsado para no saturar la pantalla. */
+const LIMITE_VISIBLE = 6;
 
 interface FacturaEmitida {
   id: number;
@@ -190,6 +194,27 @@ export default function Facturacion() {
     finally { setBusy(false); }
   }
 
+  function filaEmitida(factura: FacturaEmitida) {
+    const vencida = factura.en_ciclo && factura.vence_at < hoy();
+    return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
+      <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
+      <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.en_ciclo ? 'Sale del ciclo' : 'Salió del ciclo'}</small>{fechaCorta(factura.sale_ciclo_at)}</span></div>
+      <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? vencida ? 'chip--danger' : 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? vencida ? 'En ciclo · vencida' : 'En ciclo' : 'Cobro automático'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'saldo del ciclo' : 'total histórico'}</small></div>
+      <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'cobrar', factura })}>Ver</button></div>
+    </article>;
+  }
+
+  function filaRecibida(factura: FacturaRecibida) {
+    const vencida = factura.estado === 'pendiente' && factura.vence_at < hoy();
+    return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
+      {factura.estado === 'pendiente' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar compra ${factura.referencia ?? factura.id}`} checked={seleccionPagar.has(factura.id)} onChange={() => alternarSeleccion(factura.id)} />}
+      <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'pagar', factura })}><strong>{factura.referencia || `Compra #${factura.id}`}</strong><span>{factura.proveedor}</span><small>{factura.ubicacion}</small></button>
+      <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
+      <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
+      <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'pagar', factura })}>Ver</button>{factura.estado === 'pendiente' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
+    </article>;
+  }
+
   if (!datos) return <div className="page billing-page"><header className="page-head"><div><span className="eyebrow">Control</span><h1>Facturación</h1></div></header><Spinner label="Cargando cartera…" />{error && <p className="error-msg">{error}</p>}</div>;
 
   return <div className="page billing-page">
@@ -227,29 +252,24 @@ export default function Facturacion() {
     <div className={`billing-ledgers ${tipo !== 'todas' ? 'billing-ledgers--single' : ''}`}>
       {tipo !== 'pagar' && <section className="workspace-card billing-ledger">
         <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Entran durante tres semanas y después pasan solas al historial.</p></div><div className="billing-select-head"><span>{emitidas.length}</span></div></div>
-        <div className="billing-list">{emitidas.map((factura) => {
-          const vencida = factura.en_ciclo && factura.vence_at < hoy();
-          return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
-            <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
-            <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.en_ciclo ? 'Sale del ciclo' : 'Salió del ciclo'}</small>{fechaCorta(factura.sale_ciclo_at)}</span></div>
-            <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? vencida ? 'chip--danger' : 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? vencida ? 'En ciclo · vencida' : 'En ciclo' : 'Cobro automático'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'saldo del ciclo' : 'total histórico'}</small></div>
-            <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'cobrar', factura })}>Ver</button></div>
-          </article>;
-        })}{emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}</div>
+        <div className="billing-list">
+          {emitidas.slice(0, LIMITE_VISIBLE).map(filaEmitida)}
+          {emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
+        </div>
+        {emitidas.length > LIMITE_VISIBLE && <CollapsibleSection className="billing-rest" title="Ver el resto" count={emitidas.length - LIMITE_VISIBLE}>
+          <div className="billing-list">{emitidas.slice(LIMITE_VISIBLE).map(filaEmitida)}</div>
+        </CollapsibleSection>}
       </section>}
 
       {tipo !== 'cobrar' && <section className="workspace-card billing-ledger">
         <div className="workspace-card-head"><div><span className="eyebrow">Egresos</span><h2>Facturas recibidas</h2><p>Compras pendientes de pagar.</p></div><div className="billing-select-head"><span>{recibidas.length}</span>{vista === 'pendientes' && recibidas.length > 0 && <button className="link-btn" onClick={() => setSeleccionPagar(seleccionPagar.size === recibidas.length ? new Set() : new Set(recibidas.map((factura) => factura.id)))}>{seleccionPagar.size === recibidas.length ? 'Quitar todas' : 'Seleccionar todas'}</button>}</div></div>
-        <div className="billing-list">{recibidas.map((factura) => {
-          const vencida = factura.estado === 'pendiente' && factura.vence_at < hoy();
-          return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
-            {factura.estado === 'pendiente' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar compra ${factura.referencia ?? factura.id}`} checked={seleccionPagar.has(factura.id)} onChange={() => alternarSeleccion(factura.id)} />}
-            <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'pagar', factura })}><strong>{factura.referencia || `Compra #${factura.id}`}</strong><span>{factura.proveedor}</span><small>{factura.ubicacion}</small></button>
-            <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
-            <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
-            <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'pagar', factura })}>Ver</button>{factura.estado === 'pendiente' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
-          </article>;
-        })}{recibidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}</div>
+        <div className="billing-list">
+          {recibidas.slice(0, LIMITE_VISIBLE).map(filaRecibida)}
+          {recibidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
+        </div>
+        {recibidas.length > LIMITE_VISIBLE && <CollapsibleSection className="billing-rest" title="Ver el resto" count={recibidas.length - LIMITE_VISIBLE}>
+          <div className="billing-list">{recibidas.slice(LIMITE_VISIBLE).map(filaRecibida)}</div>
+        </CollapsibleSection>}
       </section>}
     </div>
 

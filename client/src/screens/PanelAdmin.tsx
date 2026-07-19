@@ -48,7 +48,11 @@ export default function PanelAdmin() {
       <span className={`chip ${p.ventas.fuente === 'facturado' ? 'chip--ok' : 'chip--info'}`}>{p.ventas.fuente === 'facturado' ? 'Facturado' : 'Proyección en curso'}</span>
     </div>
 
-    {p.alertas.length > 0 && <div className="overview-alerts">{p.alertas.map((a) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>)}</div>}
+    {/* En la semana actual, la primera alerta ya se muestra arriba como "tarea de hoy": no repetirla aquí. */}
+    {(() => {
+      const alertasVisibles = semana.actual ? p.alertas.slice(1) : p.alertas;
+      return alertasVisibles.length > 0 && <div className="overview-alerts">{alertasVisibles.map((a) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>)}</div>;
+    })()}
 
     <div className="kpi-grid overview-kpis">
       <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
