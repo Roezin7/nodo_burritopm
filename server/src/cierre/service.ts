@@ -75,14 +75,14 @@ function saldosFacturas(facturas: {
   emitida_at: Date;
   total: Prisma.Decimal;
   pagos: { monto: Prisma.Decimal; pagado_at: Date }[];
-}[], pagosHasta?: Date) {
+}[], pagosHasta?: Date, ignorarPagos = false) {
   return distribuirCreditosCliente(facturas.map((factura) => ({
     id: factura.id.toString(),
     ubicacion_id: factura.ubicacion_id.toString(),
     semana_id: factura.semana_id.toString(),
     emitida_at: factura.emitida_at,
     total: num0(factura.total),
-    pagado: r2(factura.pagos
+    pagado: ignorarPagos ? 0 : r2(factura.pagos
       .filter((pago) => !pagosHasta || pago.pagado_at <= pagosHasta)
       .reduce((total, pago) => total + num0(pago.monto), 0)),
   })));
@@ -100,6 +100,11 @@ export function semanaDeFecha(d: Date) {
   const semana = Math.ceil((((x.getTime() - inicioAnio.getTime()) / 86400000) + 1) / 7);
   const sabado = sumarDias(domingo, 6);
   return { anio, semana, domingo, sabado };
+}
+
+/** El cierre lleva la semana actual y las dos anteriores (ventana móvil de 21 días). */
+export function inicioVentanaCuentasPorCobrar(iniciaAt: Date) {
+  return sumarDias(iniciaAt, -14);
 }
 
 export async function asegurarSemana(negocioId: bigint, fechaCierre: string) {
@@ -218,7 +223,7 @@ async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
 async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: Date, db: Db = prisma, usarInventarioVivo = false) {
   const semana = await db.semanas_operativas.findUnique({
     where: { id: semanaId },
-    select: { estado: true, valor_carne: true, valor_congelado: true, valor_desechables: true },
+    select: { estado: true, inicia_at: true, valor_carne: true, valor_congelado: true, valor_desechables: true },
   });
   // Después del cierre el inventario guardado es la fotografía contable. Cobrar o pagar
   // días después solo actualiza cartera; nunca sustituye esa foto con el inventario vivo.
@@ -226,13 +231,21 @@ async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: D
     ? { valor_carne: num0(semana.valor_carne), valor_congelado: num0(semana.valor_congelado), valor_desechables: num0(semana.valor_desechables) }
     : await valuacionInventario(negocioId, db);
   const facturas = await db.facturas.findMany({
-    // Cuentas por cobrar es el saldo completo, no solo las últimas tres semanas.
-    where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] }, emitida_at: { lte: terminaAt } },
+    // Billing trabaja con una ventana móvil: semana del cierre + dos anteriores.
+    where: {
+      negocio_id: negocioId,
+      estado: { in: ['emitida', 'pagada'] },
+      emitida_at: { lte: terminaAt },
+      semana: { inicia_at: { gte: inicioVentanaCuentasPorCobrar(semana!.inicia_at) }, termina_at: { lte: terminaAt } },
+    },
     include: { pagos: true },
   });
   // El balance de una semana es una fotografía al sábado. Un cobro o pago registrado
   // después no debe reescribir retroactivamente lo que seguía abierto en ese cierre.
-  const cartera = saldosFacturas(facturas, terminaAt);
+  // El cobro BPM es automático por antigüedad. Mientras una semana esté en la
+  // ventana de tres semanas se considera por cobrar; después sale del ciclo.
+  // Los pagos_cliente históricos no alteran este libro móvil.
+  const cartera = saldosFacturas(facturas, terminaAt, true);
   const cobrar = r2([...cartera.saldos.values()].reduce((total, saldo) => total + saldo, 0));
   const compras = await db.compras.findMany({
     where: {
@@ -346,6 +359,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     const diasCredito = g.linea === 'carne' ? g.empresa.dias_credito_carne : g.empresa.dias_credito_desechables;
     return [{
       numero: numeroFactura(semana.anio, semana.semana, g.empresa.codigo, g.ubicacion.codigo, g.linea),
+      ubicacion_id: g.ubicacion.id.toString(),
       empresa: g.empresa.nombre,
       ubicacion: g.ubicacion.nombre,
       linea: g.linea,
@@ -364,6 +378,10 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
         estado: { in: ['emitida', 'pagada'] },
         emitida_at: { lte: semana.termina_at },
         NOT: { semana_id: semana.id },
+        semana: {
+          inicia_at: { gte: inicioVentanaCuentasPorCobrar(semana.inicia_at) },
+          termina_at: { lte: semana.termina_at },
+        },
       },
       include: { pagos: true },
     }),
@@ -372,12 +390,21 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       select: { total: true },
     }),
   ]);
-  const porCobrarActual = r2(facturasAnteriores.reduce((total, factura) => total + Math.max(0, num0(factura.total)
-    - factura.pagos.filter((pago) => pago.pagado_at <= semana.termina_at).reduce((suma, pago) => suma + num0(pago.monto), 0)), 0));
+  const documentosAnteriores: DocumentoCarteraCliente[] = facturasAnteriores.map((factura) => ({
+    id: factura.id.toString(), ubicacion_id: factura.ubicacion_id.toString(), semana_id: factura.semana_id.toString(),
+    emitida_at: factura.emitida_at, total: num0(factura.total),
+    pagado: 0,
+  }));
+  const porCobrarActual = r2([...distribuirCreditosCliente(documentosAnteriores).saldos.values()].reduce((total, saldo) => total + saldo, 0));
   const ventaCarne = r2(facturas.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
   const ventaDesechables = r2(facturas.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
   const ventaTotal = r2(ventaCarne + ventaDesechables);
-  const porCobrar = r2(porCobrarActual + ventaTotal);
+  const documentosProyectados: DocumentoCarteraCliente[] = facturas.map((factura, indice) => ({
+    id: `previa:${indice}`, ubicacion_id: factura.ubicacion_id, semana_id: semana.id.toString(),
+    emitida_at: semana.termina_at, total: factura.total, pagado: 0,
+  }));
+  const porCobrar = r2([...distribuirCreditosCliente([...documentosAnteriores, ...documentosProyectados]).saldos.values()]
+    .reduce((total, saldo) => total + saldo, 0));
   const porPagar = r2(comprasPendientes.reduce((total, compra) => total + num0(compra.total), 0));
   const inventarioTotal = r2(inventario.valor_carne + inventario.valor_congelado + inventario.valor_desechables);
 
@@ -581,11 +608,13 @@ export async function listarCierres(negocioId: bigint) {
 
 /** Cartera completa para Control: facturas emitidas y facturas recibidas de proveedores. */
 export async function listarCartera(negocioId: bigint) {
+  const periodoActual = semanaDeFecha(fecha(hoyChicago()));
+  const inicioCiclo = inicioVentanaCuentasPorCobrar(periodoActual.domingo);
   const [facturas, compras, ajustes] = await Promise.all([
     prisma.facturas.findMany({
       where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } },
       include: {
-        semana: { select: { anio: true, semana: true } },
+        semana: { select: { anio: true, semana: true, inicia_at: true, termina_at: true } },
         empresa: { select: { nombre: true } },
         ubicacion: { select: { nombre: true } },
         pagos: { orderBy: { pagado_at: 'desc' } },
@@ -613,9 +642,11 @@ export async function listarCartera(negocioId: bigint) {
     }),
   ]);
 
-  const cartera = saldosFacturas(facturas);
+  const facturasCiclo = facturas.filter((factura) => factura.semana.inicia_at >= inicioCiclo && factura.semana.termina_at <= periodoActual.sabado);
+  const cartera = saldosFacturas(facturasCiclo, undefined, true);
   const emitidas = facturas.filter((f) => num0(f.total) >= 0).map((f) => {
     const pagado = r2(f.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
+    const enCiclo = f.semana.inicia_at >= inicioCiclo && f.semana.termina_at <= periodoActual.sabado;
     return {
       id: Number(f.id),
       numero: f.numero,
@@ -630,8 +661,11 @@ export async function listarCartera(negocioId: bigint) {
       estado: f.estado,
       total: num0(f.total),
       pagado,
-      credito_aplicado: cartera.creditoAplicado.get(f.id.toString()) ?? 0,
-      saldo: cartera.saldos.get(f.id.toString()) ?? 0,
+      en_ciclo: enCiclo,
+      estado_cartera: enCiclo ? 'en_ciclo' : 'cobrada_automatica',
+      sale_ciclo_at: iso(sumarDias(f.semana.termina_at, 15)),
+      credito_aplicado: enCiclo ? cartera.creditoAplicado.get(f.id.toString()) ?? 0 : 0,
+      saldo: enCiclo ? cartera.saldos.get(f.id.toString()) ?? 0 : 0,
       pagado_at: f.pagos[0] ? iso(f.pagos[0].pagado_at) : null,
       lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })),
     };
@@ -649,7 +683,7 @@ export async function listarCartera(negocioId: bigint) {
     pagado_at: c.pagado_at ? iso(c.pagado_at) : null,
     lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cantidad: num0(l.cajas), unidad: l.producto.unidad_distribucion.nombre, peso_lb: num0(l.peso_total_lb), importe: num0(l.costo_total) })),
   }));
-  const pendientesEmitidas = emitidas.filter((f) => f.estado === 'emitida' && f.saldo > 0);
+  const pendientesEmitidas = emitidas.filter((f) => f.en_ciclo && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
   const hoy = hoyChicago();
 

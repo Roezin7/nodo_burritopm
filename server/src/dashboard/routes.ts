@@ -3,7 +3,7 @@ import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
-import { distribuirCreditosCliente, semanaDeFecha } from '../cierre/service.js';
+import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, semanaDeFecha } from '../cierre/service.js';
 import { preciosVentaSemana } from '../operacion/service.js';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -144,7 +144,14 @@ dashboardRouter.get(
         include: { producto: true, ubicacion: { select: { id: true, nombre: true } } },
       }) : Promise.resolve([]),
       prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 }, producto: { tipo_operativo: 'materia_prima' } } }),
-      prisma.facturas.findMany({ where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } }, include: { pagos: true } }),
+      prisma.facturas.findMany({
+        where: {
+          negocio_id: negocioId,
+          estado: { in: ['emitida', 'pagada'] },
+          semana: { inicia_at: { gte: inicioVentanaCuentasPorCobrar(periodo.domingo) }, termina_at: { lte: periodo.sabado } },
+        },
+        include: { pagos: true },
+      }),
       prisma.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' } }),
       prisma.producciones.findMany({
         where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado } },
@@ -216,10 +223,10 @@ dashboardRouter.get(
 
     const carteraClientes = distribuirCreditosCliente(facturasPendientes.map((f) => ({
       id: f.id.toString(), ubicacion_id: f.ubicacion_id.toString(), semana_id: f.semana_id.toString(),
-      emitida_at: f.emitida_at, total: num0(f.total), pagado: f.pagos.reduce((a, p) => a + num0(p.monto), 0),
+      emitida_at: f.emitida_at, total: num0(f.total), pagado: 0,
     })));
     const saldoFactura = (f: (typeof facturasPendientes)[number]) => carteraClientes.saldos.get(f.id.toString()) ?? 0;
-    const facturasAbiertas = facturasPendientes.filter((f) => f.estado === 'emitida' && saldoFactura(f) > 0);
+    const facturasAbiertas = facturasPendientes.filter((f) => saldoFactura(f) > 0);
     const porCobrarVivo = facturasAbiertas.reduce((a, f) => a + saldoFactura(f), 0);
     const porCobrar = snapshot.length && semana ? num0(semana.cuentas_por_cobrar) : porCobrarVivo;
     const vencidoCobrar = facturasAbiertas.filter((f) => f.vence_at < hoy).reduce((a, f) => a + saldoFactura(f), 0);

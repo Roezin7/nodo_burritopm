@@ -54,7 +54,7 @@ export default function PanelAdmin() {
       <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
       <div className="kpi-card"><span className="kpi-label">Markup de proteína</span><span className="big-number">{usd(p.ventas.markup_proteina)}</span><small>$15 por caja producida vendida</small></div>
       <div className="kpi-card"><span className="kpi-label">Inventario y reservas</span><span className="big-number">{usd(p.inventario.total)}</span><small>Carne, materia prima, desechables y compras en hold</small></div>
-      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + saldo pendiente por cobrar − por pagar</small></div>
+      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + ciclo por cobrar de 3 semanas − por pagar</small></div>
     </div>
 
     <div className="overview-grid">
@@ -70,7 +70,7 @@ export default function PanelAdmin() {
 
       <section className="card overview-card">
         <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
-        <div className="cash-grid"><div><small>Total por cobrar</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>{p.cartera.facturas_pendientes} facturas pendientes</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>De ese total, vencido</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>incluido en por cobrar</span></div><div><small>Total por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras pendientes</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>De ese total, vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>incluido en por pagar</span></div></div>
+        <div className="cash-grid"><div><small>Por cobrar · ciclo 3 semanas</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>semana actual + 2 anteriores</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Con fecha vencida</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>sale automáticamente del ciclo</span></div><div><small>Total por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras pendientes</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>De ese total, vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere pago manual</span></div></div>
       </section>
 
       <section className="card overview-card">

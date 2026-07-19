@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distribuirCreditosCliente, numeroFactura } from './service.js';
+import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, numeroFactura } from './service.js';
 
 describe('folios de cierre semanal', () => {
   it('no colisiona sucursales cuyos códigos comparten los primeros cinco caracteres', () => {
@@ -44,5 +44,12 @@ describe('créditos por ubicación', () => {
 
     expect(resultado.saldos.get('factura-lisle')).toBe(0);
     expect(resultado.creditoDisponible).toBe(0);
+  });
+});
+
+describe('ventana móvil de cuentas por cobrar', () => {
+  it('incluye la semana del cierre y exactamente las dos anteriores', () => {
+    expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-12T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-06-28');
+    expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-19T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-07-05');
   });
 });

@@ -50,17 +50,15 @@ cierreRouter.get('/facturas/:id', asyncHandler(async (req, res) => {
 }));
 
 cierreRouter.post('/facturas/:id/pagar', asyncHandler(async (req, res) => {
-  const { fecha_pago } = z.object({ fecha_pago: fecha }).parse(req.body);
-  res.json(await svc.pagarFactura(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, fecha_pago));
+  res.status(409).json({ error: 'Las cuentas por cobrar salen automáticamente después de su ciclo de tres semanas; no requieren cobro manual.' });
 }));
 
 cierreRouter.post('/facturas/pagar-lote', asyncHandler(async (req, res) => {
-  const b = z.object({ ids: z.array(id).min(1).max(200), fecha_pago: fecha }).parse(req.body);
-  res.json(await svc.pagarFacturasLote(req.auth!.negocioId, b.ids.map(BigInt), req.auth!.usuarioId, b.fecha_pago));
+  res.status(409).json({ error: 'Las cuentas por cobrar salen automáticamente después de su ciclo de tres semanas; no requieren cobro manual.' });
 }));
 
 cierreRouter.delete('/facturas/:id/pago', asyncHandler(async (req, res) => {
-  res.json(await svc.revertirPagoFactura(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+  res.status(409).json({ error: 'La cobranza de restaurantes es automática; únicamente los pagos a proveedores se modifican manualmente.' });
 }));
 
 cierreRouter.post('/compras/:id/pagar', asyncHandler(async (req, res) => {
