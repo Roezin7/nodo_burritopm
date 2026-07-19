@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import Spinner from '../components/Spinner';
-import { crearSemana, etiquetaRango, moverSemana, semanasAlrededor } from '../semana';
+import WeekPicker from '../components/WeekPicker';
 import { useSemanaGlobal } from '../semana-context';
 
 interface Panorama {
@@ -27,7 +27,6 @@ export default function PanelAdmin() {
   const [p, setP] = useState<Panorama | null>(null);
   const [error, setError] = useState('');
   const { semana, seleccionarSemana, rutaSemana } = useSemanaGlobal();
-  const opciones = semanasAlrededor(crearSemana());
   useEffect(() => {
     setP(null); setError('');
     api<Panorama>(`/dashboard/general?semana=${semana.inicio}`).then(setP).catch(() => setError('No se pudo cargar el panorama general.'));
@@ -37,12 +36,7 @@ export default function PanelAdmin() {
 
   const maxEmpresa = Math.max(1, ...p.ventas.por_empresa.map((e) => e.total));
   return <div className="panel-admin overview">
-    <section className="global-week-picker overview-week-picker" aria-label="Semana del panorama">
-      <button className="icon-btn" aria-label="Semana anterior" onClick={() => seleccionarSemana(moverSemana(semana, -1).inicio)}>←</button>
-      <label><span>Panorama general</span><select value={semana.inicio} onChange={(e) => seleccionarSemana(e.target.value)}>{opciones.map((s) => <option key={s.inicio} value={s.inicio}>Semana {s.numero} · {s.anio} · {etiquetaRango(s)}</option>)}</select></label>
-      <button className="icon-btn" aria-label="Semana siguiente" onClick={() => seleccionarSemana(moverSemana(semana, 1).inicio)}>→</button>
-      {!semana.actual && <button className="btn btn-ghost btn-sm" onClick={() => seleccionarSemana(crearSemana().inicio)}>Semana actual</button>}
-    </section>
+    <WeekPicker semana={semana} onChange={seleccionarSemana} label="Panorama general" className="overview-week-picker" />
     <div className="overview-head">
       <div><h2>Panorama semanal</h2><p className="muted">Semana {p.periodo.semana} · {fecha(p.periodo.inicia_at)}–{fecha(p.periodo.termina_at)} · {p.periodo.estado}</p></div>
       <span className={`chip ${p.ventas.fuente === 'facturado' ? 'chip--ok' : 'chip--info'}`}>{p.ventas.fuente === 'facturado' ? 'Facturado' : 'Proyección en curso'}</span>
@@ -51,7 +45,9 @@ export default function PanelAdmin() {
     {/* En la semana actual, la primera alerta ya se muestra arriba como "tarea de hoy": no repetirla aquí. */}
     {(() => {
       const alertasVisibles = semana.actual ? p.alertas.slice(1) : p.alertas;
-      return alertasVisibles.length > 0 && <div className="overview-alerts">{alertasVisibles.map((a) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>)}</div>;
+      if (!alertasVisibles.length) return null;
+      const enlace = (a: Panorama['alertas'][number]) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>;
+      return <><div className="overview-alerts">{alertasVisibles.slice(0, 2).map(enlace)}</div>{alertasVisibles.length > 2 && <details className="overview-more-alerts"><summary>Ver {alertasVisibles.length - 2} alerta{alertasVisibles.length - 2 === 1 ? '' : 's'} adicional{alertasVisibles.length - 2 === 1 ? '' : 'es'}</summary><div className="overview-alerts">{alertasVisibles.slice(2).map(enlace)}</div></details>}</>;
     })()}
 
     <div className="kpi-grid overview-kpis">

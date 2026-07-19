@@ -139,10 +139,6 @@ export default function Home() {
       <header className="page-head operation-page-head"><div><span className="eyebrow">Resumen</span><h1>{saludo()}, {usuario.nombre}</h1></div></header>
       <ActivarAvisos />
       <TareaHoy repartoHabilitado={repartoHabilitado} />
-      <div className="quick-actions" aria-label="Acciones rápidas">
-        <Link to="/semana"><span><Icono name="clipboard" size={20} /></span><strong>Abrir captura</strong><small>Compras, producción y ventas</small></Link>
-        <Link to="/incidencias"><span><Icono name="alert" size={20} /></span><strong>Incidencias</strong><small>Diferencias por resolver</small></Link>
-      </div>
       <PanelAdmin />
     </div>
   );

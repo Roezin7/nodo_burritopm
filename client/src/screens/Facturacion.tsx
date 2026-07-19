@@ -200,7 +200,6 @@ export default function Facturacion() {
       <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
       <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.en_ciclo ? 'Sale del ciclo' : 'Salió del ciclo'}</small>{fechaCorta(factura.sale_ciclo_at)}</span></div>
       <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? vencida ? 'chip--danger' : 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? vencida ? 'En ciclo · vencida' : 'En ciclo' : 'Cobro automático'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'saldo del ciclo' : 'total histórico'}</small></div>
-      <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'cobrar', factura })}>Ver</button></div>
     </article>;
   }
 
@@ -211,7 +210,7 @@ export default function Facturacion() {
       <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'pagar', factura })}><strong>{factura.referencia || `Compra #${factura.id}`}</strong><span>{factura.proveedor}</span><small>{factura.ubicacion}</small></button>
       <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
       <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
-      <div className="billing-row-actions"><button className="btn btn-secondary btn-sm" onClick={() => setDetalle({ tipo: 'pagar', factura })}>Ver</button>{factura.estado === 'pendiente' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
+      <div className="billing-row-actions">{factura.estado === 'pendiente' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
     </article>;
   }
 
@@ -228,16 +227,16 @@ export default function Facturacion() {
       <div className={datos.resumen.vencido_pagar > 0 ? 'is-overdue' : ''}><span>De ese total, vencido</span><strong>{usd(datos.resumen.vencido_pagar)}</strong><small>No se suma otra vez · proveedores</small></div>
     </section>
 
-    <section className="billing-explainer" aria-label="Cómo leer la cartera">
-      <span aria-hidden="true">i</span>
-      <p><strong>Cobranza automática:</strong> cada factura participa en su semana y las dos siguientes. Al comenzar la cuarta pasa al historial sin que el admin registre un cobro. Sólo las cuentas por pagar a proveedores requieren confirmación manual. Los créditos de Lisle únicamente reducen Lisle.</p>
-    </section>
+    <details className="billing-help">
+      <summary>Cómo funciona la cartera</summary>
+      <p>Las facturas emitidas permanecen en el ciclo durante su semana y las dos siguientes; después pasan solas al historial. El administrador sólo confirma pagos a proveedores. Los créditos de producción reducen exclusivamente el saldo de Lisle.</p>
+    </details>
 
-    <section className="workspace-card lisle-credit-panel">
-      <div className="workspace-card-head"><div><span className="eyebrow">Saldo a favor</span><h2>Créditos de producción de Lisle</h2><p>Registra aquí lo que BPM debe reconocer a Lisle por producir tacos dorados, tamales u otros productos. Se aplicará al cerrar la semana.</p></div><button className="btn btn-primary" onClick={abrirCredito}>Agregar crédito</button></div>
+    <CollapsibleSection className="lisle-credit-panel" title="Créditos de Lisle" count={datos.creditos.filter((credito) => credito.estado === 'abierto').length} summary={datos.resumen.credito_lisle_disponible > 0 ? `${usd(datos.resumen.credito_lisle_disponible)} disponible` : 'Saldo a favor por producción'}>
+      <div className="workspace-card-head"><div><p>Producción hecha por Lisle que BPM debe reconocer al cierre.</p></div><button className="btn btn-secondary" onClick={abrirCredito}>Agregar crédito</button></div>
       {datos.resumen.credito_lisle_disponible > 0 && <div className="lisle-credit-available"><span>Crédito disponible después de compensar facturas</span><strong>{usd(datos.resumen.credito_lisle_disponible)}</strong></div>}
       <div className="lisle-credit-list">{datos.creditos.slice(0, 6).map((credito) => <div key={credito.id}><span><strong>{credito.descripcion}</strong><small>Semana {credito.semana} · {credito.anio} · {credito.estado === 'abierto' ? 'se aplicará al cierre' : `aplicado en ${credito.factura ?? 'factura semanal'}`}</small></span><strong>{usd(credito.monto)}</strong>{credito.estado === 'abierto' && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void eliminarCredito(credito.id)}>Eliminar</button>}</div>)}{datos.creditos.length === 0 && <p className="muted">Todavía no hay créditos registrados.</p>}</div>
-    </section>
+    </CollapsibleSection>
 
     <section className="workspace-card billing-toolbar">
       <div className="segmented" aria-label="Estado de facturas"><button className={vista === 'pendientes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setVista('pendientes')}>Actuales</button><button className={vista === 'historial' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setVista('historial')}>Historial</button></div>

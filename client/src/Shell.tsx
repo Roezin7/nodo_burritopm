@@ -23,7 +23,6 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/semana', label: 'Semana', icono: 'clipboard', grupo: 'general' },
   { ruta: '/semana/compras', label: 'Compras', icono: 'cart', grupo: 'captura', soloAdmin: true },
   { ruta: '/semana/produccion', label: 'Producción', icono: 'factory', grupo: 'captura', soloAdmin: true },
   { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'captura', roles: ['admin', 'encargado_sucursal'] },
@@ -114,11 +113,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     <span className="ctx-chip ctx-chip--sync" onClick={() => void sincronizar()}>
       <span className="dot-status" /> Sincronizando {pendientes}
     </span>
-  ) : (
-    <span className="ctx-chip">
-      <span className="dot-status" /> En línea
-    </span>
-  );
+  ) : null;
 
   return (
     <div className="shell">
@@ -171,9 +166,6 @@ export default function Shell({ children }: { children: ReactNode }) {
           <div className="ctx-right">
             {syncChip}
             {usuario?.rol === 'admin' && <NavLink className="icon-btn" to="/configuracion" aria-label="Configuración" title="Configuración"><Icono name="settings" size={18} /></NavLink>}
-            <button className="icon-btn" onClick={alternar} aria-label="Cambiar tema" title="Cambiar tema">
-              <Icono name={tema === 'dark' ? 'sun' : 'moon'} size={18} />
-            </button>
           </div>
         </header>
 

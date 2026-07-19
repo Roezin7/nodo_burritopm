@@ -228,8 +228,8 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     </div>
 
     {error && <p className="error-msg">{error}</p>}
-    {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} cajas perdidas:</strong> se muestran como existencia 0 y no impedirán cerrar la semana. Al cerrar se creará una incidencia para el administrador.</p>}
-    {!semana.actual && <p className="notice">{stock?.fuente === 'cierre_semanal' ? <><strong>Cierre de semana {semana.numero}:</strong> cantidades y costos provienen de la fotografía contable.</> : capturaSemana ? <><strong>Inventario final de semana {semana.numero}:</strong> se muestra la captura física del {capturaSemana.fecha}; la valuación todavía corresponde al costo vigente.</> : <><strong>Sin fotografía histórica:</strong> la semana no tiene un cierre disponible y el saldo mostrado es el actual.</>}</p>}
+    {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} cajas perdidas.</strong> Se mostrarán en 0 y no bloquearán el cierre.</p>}
+    {!semana.actual && <p className="context-note">{stock?.fuente === 'cierre_semanal' ? <>Vista del cierre contable de la semana {semana.numero}.</> : capturaSemana ? <>Conteo físico del {capturaSemana.fecha}; valuado al costo vigente.</> : <>Sin cierre histórico; se muestra el saldo actual.</>}</p>}
     {!stock && !error ? <Spinner label="Calculando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
         <div><span>Valor</span><strong>{usd(totales.valor)}</strong></div>

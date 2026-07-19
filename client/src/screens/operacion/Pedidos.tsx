@@ -35,7 +35,6 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [cargandoPedido, setCargandoPedido] = useState(false);
   const [impresion, setImpresion] = useState<{ linea: Linea; inicio: string; fin: string; pedidos: Pedido[] } | null>(null);
-  const [cargandoImpresion, setCargandoImpresion] = useState(false);
   const [estado, setEstado] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [cantidadesGuardadas, setCantidadesGuardadas] = useState<Record<number, string>>({});
@@ -197,12 +196,11 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   }
 
   async function abrirImpresion(lineaObjetivo: Linea) {
-    setCargandoImpresion(true); setError('');
+    setError('');
     try {
       const rows = await api<Pedido[]>(`/operacion/pedidos?linea=${lineaObjetivo}&desde=${semana.inicio}&hasta=${semana.fin}`);
       setImpresion({ linea: lineaObjetivo, inicio: semana.inicio, fin: semana.fin, pedidos: rows.filter((p) => !['borrador', 'cancelado'].includes(p.estado)) });
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo preparar la orden para imprimir.'); }
-    finally { setCargandoImpresion(false); }
   }
 
   async function confirmarTodos(desde: string, hasta: string) {
@@ -243,16 +241,16 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Ventas</span><h1>Venta semanal</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 3</span><h2>Ventas</h2></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
-        {admin && <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Capturar</button><button className={vista === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setVista('historial')}>Historial por sucursal</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Consolidados</button></div>}
+        {admin && <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setVista('historial')}>Historial</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Despachos</button></div>}
         {vista !== 'consolidados' && <div className="segmented order-line-switch">
         <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('carne')}>Carne</button>
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
         </div>}
       </div>
-      {admin && vista === 'captura' && <section className="workspace-card weekly-capture-mode">
-        <div><span className="eyebrow">Forma de captura</span><strong>{capturaSemanal ? 'Toda la semana' : 'Una orden'}</strong><small>{capturaSemanal ? 'Todos los días programados por restaurante, en una sola vista.' : 'Captura o corrige una sucursal y fecha específica.'}</small></div>
+      {admin && vista === 'captura' && <div className="weekly-capture-mode">
+        <strong>Capturar:</strong>
         <div className="segmented segmented--small"><button className={capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('semana')}>Semana completa</button><button className={!capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('individual')}>Orden individual</button></div>
-      </section>}
+      </div>}
       {error && <p className="error-msg">{error}</p>}
       {vista === 'consolidados' ? <Distribucion integrado semana={semana} soloRevision /> : vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className="order-workspace">
         <section className="order-capture">
@@ -260,10 +258,10 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
             <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
             <label className="field order-delivery-field"><span className="order-delivery-label">Entrega de semana {semana.numero}{admin && <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setFechaManual((actual) => { if (actual && entregas[0]) setFecha(entregas[0].fecha); return !actual; }); }}>{fechaManual ? 'Usar ruta programada' : 'Fecha excepcional'}</button>}</span>{fechaManual ? <input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /> : <select value={fecha} disabled={!entregas.length} onChange={(e) => setFecha(e.target.value)}>{!entregas.length && <option value="">Sin entrega configurada</option>}{entregas.map((e) => <option key={e.fecha} value={e.fecha}>{fechaEntregaCorta(e.fecha)}</option>)}</select>}<small className="order-delivery-hint">{fechaManual ? 'Fecha excepcional dentro de la semana seleccionada.' : entregaSeleccionada ? `${entregaSeleccionada.rutas.map((r) => r.nombre).join(' / ')} · ${[...new Set(entregaSeleccionada.rutas.map((r) => r.conductor))].join(', ')}` : 'Este restaurante no aparece en una ruta activa para esta línea.'}</small></label>
           </div>
-          {ubic?.entrega_en && <p className="notice">Se factura a <strong>{ubic.nombre}</strong> y se entrega físicamente en <strong>{ubic.entrega_en.nombre}</strong>.</p>}
+          {ubic?.entrega_en && <p className="context-note">Entrega física en <strong>{ubic.entrega_en.nombre}</strong>; la factura permanece en {ubic.nombre}.</p>}
           {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada y esta venta se muestra en modo consulta.</p>}
-          {!semanaCerrada && !cargandoPedido && !editable && <p className="notice notice--warning">Esta venta ya fue procesada. Solicita al administrador que haga la corrección.</p>}
-          {!semanaCerrada && admin && estado && !['borrador', 'confirmado'].includes(estado) && <p className="notice">La venta ya fue procesada. Al guardar, el sistema corregirá automáticamente su despacho, inventario y facturación sin rehacer la ruta.</p>}
+          {!semanaCerrada && !cargandoPedido && !editable && <p className="notice notice--warning">Esta venta ya fue procesada. El administrador puede corregirla.</p>}
+          {!semanaCerrada && editable && admin && estado && !['borrador', 'confirmado'].includes(estado) && <p className="context-note">Corrección vinculada: al guardar se actualizarán despacho, inventario y facturación.</p>}
           <CollapsibleSection title="Productos" count={productos.length} className="product-picker">
             <div className="workspace-card-head"><div /><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" /></div>
             <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
@@ -277,8 +275,6 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
           <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha ? `Semana ${semana.numero} · ${fechaLarga(fecha)}` : 'Sin entrega programada'} · {linea}</p>
           <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total {linea}</dt><dd>{usd(total)}</dd></div></dl>
           <div className="order-actions"><button className="btn btn-secondary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha || unidadesOrden <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : cargandoPedido ? 'Cargando…' : admin && estado && !['borrador', 'confirmado'].includes(estado) ? 'Guardar corrección' : 'Confirmar'}</button></div>
-          {admin && <button className="btn btn-secondary btn-block order-confirm-all" disabled={semanaCerrada || busy || !fecha} onClick={() => void confirmarTodos(fecha, fecha)}>Confirmar todos de esta fecha</button>}
-          {admin && <div className="order-print-actions"><span>Orden de semana {semana.numero}</span><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('carne')}>Imprimir carne</button><button className="btn btn-secondary btn-block" disabled={cargandoImpresion} onClick={() => void abrirImpresion('desechables')}>Imprimir desechables</button></div>}
         </aside>
       </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} semana={semana} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} onPrint={() => void abrirImpresion(linea)} onConfirmar={() => void confirmarTodos(semana.inicio, semana.fin)} confirmando={busy || semanaCerrada} />}
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}

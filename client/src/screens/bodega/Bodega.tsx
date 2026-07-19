@@ -376,10 +376,9 @@ function OperacionView({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const distribuciones = op.distribuciones ?? [{ id: op.id, estado: op.estado }];
-  const enRuta = distribuciones.some((distribucion) => ['en_transito', 'parcialmente_entregada'].includes(distribucion.estado));
-  const completado = distribuciones.every((distribucion) => ESTADOS_COMPLETADOS.includes(distribucion.estado));
   const puedeVerificar = distribuciones.some((distribucion) => distribucion.estado === 'aprobada');
   const puedeCargar = distribuciones.some((distribucion) => distribucion.estado === 'verificada' || (distribucion.estado === 'aprobada' && !verificacionCarga));
+  const hayAcciones = repartoHabilitado && ((puedeVerificar && verificacionCarga) || puedeCargar);
   const totalFaltante = op.total_carga.filter((t) => t.faltante > 0).length;
 
   async function ejecutar(endpoint: string) {
@@ -400,7 +399,7 @@ function OperacionView({
   return <div className={integrado ? 'embedded-operation dispatch-workspace' : 'page dispatch-workspace'}>
     <header className="page-head dispatch-page-head"><div><button className="link-btn" onClick={onSalir}>← Despacho</button><span className="eyebrow">{op.linea}</span><h1>Documentos de salida</h1><p className="page-sub">{fechaLegible(op.fecha_entrega)} · {rutas.length} ruta{rutas.length === 1 ? '' : 's'}</p></div><div className="page-actions"><button className="btn btn-secondary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'carga' })}>Hoja general de carga</button><button className="btn btn-primary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'completo' })}>Imprimir paquete completo</button></div></header>
     {error && <p className="error-msg">{error}</p>}
-    {totalFaltante > 0 && <p className="aviso-falt">Hay {totalFaltante} producto{totalFaltante === 1 ? '' : 's'} con inventario pendiente de conciliar. Las hojas conservan las cantidades confirmadas para que el cierre semanal refleje la diferencia real.</p>}
+    {totalFaltante > 0 && <p className="aviso-falt">{totalFaltante} producto{totalFaltante === 1 ? '' : 's'} pendiente{totalFaltante === 1 ? '' : 's'} de conciliar. Las hojas mantienen las cantidades confirmadas.</p>}
 
     <section className="dispatch-summary card">
       <div><span className="eyebrow">Salida</span><strong>{op.linea === 'carne' ? 'Orden total de carne' : 'Orden total de desechables'}</strong><small>{fechaLegible(op.fecha_entrega)}</small></div>
@@ -415,19 +414,16 @@ function OperacionView({
         const destinos = destinosDeRuta(ruta);
         const tapatios = esRutaTapatios(ruta);
         return <article className="dispatch-route-card" key={ruta.ruta_id}>
-          <header><div><span className="eyebrow">{ruta.conductor || 'Ruta'}</span><h2>{ruta.nombre}</h2><p>{tapatios ? 'Una hoja consolidada para toda la ruta' : op.linea === 'carne' ? `Una hoja total + ${destinos.length} individuales` : `${destinos.length} hojas individuales para el chofer`}</p></div><button className="btn btn-secondary" onClick={() => setImpresion({ tipo: 'ruta', rutaId: ruta.ruta_id })}>Imprimir ruta</button></header>
+          <header><div><span className="eyebrow">{ruta.conductor || 'Ruta'}</span><h2>{ruta.nombre}</h2><p>{tapatios ? 'Documento consolidado' : `${destinos.length} parada${destinos.length === 1 ? '' : 's'}`}</p></div><button className="btn btn-secondary" onClick={() => setImpresion({ tipo: 'ruta', rutaId: ruta.ruta_id })}>Imprimir ruta</button></header>
           <ol>{destinos.map((destino, indice) => <li key={destino.clave}><span>{indice + 1}</span><div><strong>{destino.nombre}</strong>{destino.entregaEn !== destino.nombre && <small>Se entrega en {destino.entregaEn}</small>}</div><b>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</b></li>)}</ol>
         </article>;
       })}
     </div>}
 
-    <div className="action-bar dispatch-final-actions">
+    {hayAcciones && <div className="action-bar dispatch-final-actions">
       {repartoHabilitado && puedeVerificar && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
       {repartoHabilitado && puedeCargar && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>Confirmar salida a ruta →</button>}
-      {!repartoHabilitado && distribuciones.some((distribucion) => ['aprobada', 'verificada'].includes(distribucion.estado)) && <span className="muted">El despacho se completará automáticamente; no requiere confirmación.</span>}
-      {enRuta && <span className="muted">{repartoHabilitado ? 'Salida confirmada · en ruta.' : 'Despacho confirmado.'}</span>}
-      {completado && <span className="muted">Despacho completado. Usa Auditoría únicamente si se reporta un faltante.</span>}
-    </div>
+    </div>}
 
     {impresion && <PaqueteDespacho op={op} rutas={rutas} productos={productos} alcance={impresion} onClose={() => setImpresion(null)} />}
   </div>;
