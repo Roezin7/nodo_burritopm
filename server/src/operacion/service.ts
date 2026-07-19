@@ -618,11 +618,27 @@ export async function crearDistribucionOperativa(
   await asegurarSemanaEditable(negocioId, fechaEntrega);
   await repararPedidosHuerfanos(negocioId);
   const entrega = fecha(fechaEntrega);
+  const lineaSinDespacho = { distribucion_lineas: { none: {} } };
+  const filtroPedidos: Prisma.pedidos_operativosWhereInput = permitirComplemento ? {
+    negocio_id: negocioId,
+    linea_operacion: linea,
+    fecha_entrega: entrega,
+    estado: { notIn: ['borrador', 'cancelado', 'cerrado'] },
+    lineas: { some: lineaSinDespacho },
+  } : {
+    negocio_id: negocioId,
+    linea_operacion: linea,
+    fecha_entrega: entrega,
+    estado: 'confirmado',
+  };
   const pedidos = await prisma.pedidos_operativos.findMany({
-    where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: 'confirmado' },
-    include: { lineas: { include: { producto: true } }, ubicacion: { select: { id: true, nombre: true, entrega_en_ubicacion_id: true } } },
+    where: filtroPedidos,
+    include: {
+      lineas: { where: permitirComplemento ? lineaSinDespacho : undefined, include: { producto: true } },
+      ubicacion: { select: { id: true, nombre: true, entrega_en_ubicacion_id: true } },
+    },
   });
-  if (!pedidos.length) throw new HttpError(400, 'No hay pedidos confirmados para esa fecha');
+  if (!pedidos.length) throw new HttpError(400, 'No hay ventas pendientes de despacho para esa fecha');
   const ya = await prisma.distribuciones.findFirst({ where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: { not: 'cancelada' } } });
   if (ya && !permitirComplemento) throw new HttpError(409, 'Ya existe una distribución para esa línea y fecha');
   const dias = entrega.getUTCDay();
@@ -667,13 +683,16 @@ export async function crearDistribucionOperativa(
       await tx.ruta_paradas.createMany({ data: us.map((u, i) => ({ ruta_id: ruta.id, ubicacion_id: u.id, orden: i + 1 })) });
       rutasCreadas += 1;
     }
-    await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'en_preparacion' } });
+    await tx.pedidos_operativos.updateMany({
+      where: { id: { in: pedidos.map((p) => p.id) }, estado: 'confirmado' },
+      data: { estado: 'en_preparacion' },
+    });
     return { d, rutasCreadas };
   });
   return { id: Number(resultado.d.id), pedidos: pedidos.length, rutas: resultado.rutasCreadas };
 }
 
-/** Crea de una vez todas las preparaciones de la semana que tengan pedidos confirmados. */
+/** Crea de una vez todos los despachos que tengan líneas de venta todavía sin vincular. */
 export async function crearPreparacionesEnRango(
   negocioId: bigint,
   usuarioId: bigint,
@@ -687,8 +706,8 @@ export async function crearPreparacionesEnRango(
       negocio_id: negocioId,
       linea_operacion: linea,
       fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
-      estado: 'confirmado',
-      lineas: { some: {} },
+      estado: { notIn: ['borrador', 'cancelado', 'cerrado'] },
+      lineas: { some: { distribucion_lineas: { none: {} } } },
     },
     select: { linea_operacion: true, fecha_entrega: true },
     distinct: ['linea_operacion', 'fecha_entrega'],

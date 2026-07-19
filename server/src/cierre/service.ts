@@ -6,6 +6,7 @@ import { coberturaPedidosBpm, preciosVentaSemana, sincronizarDespachosConfirmado
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { eliminarConteoEnTx } from '../conteos/service.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
+import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -200,7 +201,13 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
 async function sincronizarVentasParaCierre(negocioId: bigint, usuarioId: bigint, semana: SemanaCierre) {
   const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
   if (!negocio?.reparto_habilitado) {
-    await sincronizarDespachosConfirmados(negocioId, usuarioId, iso(semana.inicia_at), iso(semana.termina_at));
+    const desde = iso(semana.inicia_at);
+    const hasta = iso(semana.termina_at);
+    await sincronizarDespachosConfirmados(negocioId, usuarioId, desde, hasta);
+    // Si Reparto se apagó después de cargar el camión, pueden quedar despachos antiguos
+    // detenidos en tránsito. El cierre los recibe completos de forma automática; Auditoría
+    // sigue disponible únicamente cuando exista un faltante real.
+    await confirmarRecepcionesSinFaltantesEnRango(negocioId, usuarioId, desde, hasta);
   }
 }
 
