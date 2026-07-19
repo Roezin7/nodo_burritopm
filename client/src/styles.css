@@ -3676,6 +3676,28 @@ form > .form-actions .btn,
 .dispatch-print-page--desechables .dispatch-sheet-title { height: 22px !important; }
 .dispatch-print-page--desechables .dispatch-sheet caption { padding-bottom: 3px; }
 .dispatch-individual-document--desechables { max-width: 560px; }
+.dispatch-tapatios-document { width: 100%; color: #111; font-family: Arial, sans-serif; }
+.dispatch-tapatios-document > .dispatch-real-brand { min-height: 92px; justify-content: center; margin-bottom: 7px; }
+.dispatch-tapatios-title { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 40px; margin-bottom: 10px; border-top: 4px double #111; border-bottom: 4px double #111; text-transform: uppercase; }
+.dispatch-tapatios-title::before { content: ''; }
+.dispatch-tapatios-title strong { justify-self: center; font-size: 1.35rem; line-height: 1; }
+.dispatch-tapatios-title span { justify-self: end; padding-right: 8px; font-size: 0.72rem; font-weight: 800; }
+.dispatch-tapatios-grid { display: flex; align-items: flex-start; gap: 28px; }
+.dispatch-tapatios-stop { flex: 1 1 0; min-width: 0; }
+.dispatch-tapatios-stop > header { display: flex; align-items: center; flex-direction: column; justify-content: flex-end; min-height: 30px; padding: 0 4px 3px; border-bottom: 4px double #111; text-align: center; text-transform: uppercase; }
+.dispatch-tapatios-stop > header strong { font-size: 0.82rem; line-height: 1.05; }
+.dispatch-tapatios-stop > header small { margin-top: 2px; font-size: 0.48rem; }
+.dispatch-tapatios-date { min-height: 25px; padding: 5px 3px 3px; border-bottom: 4px double #111; font-size: 0.68rem; font-weight: 800; text-align: center; text-transform: uppercase; }
+.dispatch-tapatios-table { width: 100%; margin-top: 8px; border-collapse: collapse; table-layout: fixed; color: #111; font-size: 0.7rem; text-transform: uppercase; }
+.dispatch-tapatios-table th, .dispatch-tapatios-table td { height: 23px; padding: 1px 4px; border: 1.5px solid #111; text-align: center; }
+.dispatch-tapatios-table thead th { font-weight: 900; text-decoration: underline; }
+.dispatch-tapatios-table th:first-child:last-child { width: auto; }
+.dispatch-tapatios-table th:last-child, .dispatch-tapatios-table td:last-child { width: 48px; font-weight: 800; }
+.dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:first-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:first-child { width: 48px; }
+.dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:nth-child(2), .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:nth-child(2) { width: auto; }
+.dispatch-tapatios-table tbody td:nth-last-child(2) { font-weight: 650; }
+.dispatch-tapatios-table tfoot th { border-top: 4px double #111; font-size: 0.82rem; }
+.dispatch-tapatios-document > footer { margin-top: 6px; font-size: 0.55rem; font-weight: 750; text-transform: uppercase; }
 
 /* Inventario nuevo */
 .workspace-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; margin-bottom: 1rem; }
@@ -4016,6 +4038,7 @@ form > .form-actions .btn,
   .dispatch-print { position: absolute; inset: 0; width: 100%; max-width: none; overflow: visible; padding: 0; background: #fff; }
   .dispatch-print-page { margin: 0; padding: 0; border: 0; }
   .dispatch-print-page--matrix { page: dispatch-landscape; }
+  .dispatch-print-page--tapatios { page: dispatch-landscape; }
   .dispatch-print-page--ticket { page: dispatch-portrait; max-width: none; }
   .dispatch-sheet { font-size: 6.5pt; }
   .dispatch-sheet th, .dispatch-sheet td { height: 15px; padding: 0 2px; border-color: #000; }
@@ -4030,6 +4053,21 @@ form > .form-actions .btn,
   .dispatch-real-brand { margin-bottom: 2mm; }
   .dispatch-real-brand strong { font-size: 17pt; }
   .dispatch-real-brand span { font-size: 6.5pt; }
+  .dispatch-print-page--tapatios { width: 100%; }
+  .dispatch-tapatios-document > .dispatch-real-brand { min-height: 18mm; margin-bottom: 1.5mm; }
+  .dispatch-tapatios-title { min-height: 10mm; margin-bottom: 2mm; }
+  .dispatch-tapatios-title strong { font-size: 17pt; }
+  .dispatch-tapatios-title span { font-size: 8pt; }
+  .dispatch-tapatios-grid { gap: 8mm; }
+  .dispatch-tapatios-stop > header { min-height: 7mm; }
+  .dispatch-tapatios-stop > header strong { font-size: 9pt; }
+  .dispatch-tapatios-stop > header small { font-size: 5pt; }
+  .dispatch-tapatios-date { min-height: 6mm; padding-top: 1.2mm; font-size: 7.5pt; }
+  .dispatch-tapatios-table { margin-top: 2mm; font-size: 7.5pt; }
+  .dispatch-tapatios-table th, .dispatch-tapatios-table td { height: 6mm; padding: 0 1mm; border-color: #000; }
+  .dispatch-tapatios-table th:last-child, .dispatch-tapatios-table td:last-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:first-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:first-child { width: 12mm; }
+  .dispatch-tapatios-table tfoot th { font-size: 9pt; }
+  .dispatch-tapatios-document > footer { font-size: 6pt; }
   .dispatch-print-page > footer { font-size: 6pt; }
 }
 

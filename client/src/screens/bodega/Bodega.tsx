@@ -376,6 +376,49 @@ function MarcaMG() {
   return <div className="dispatch-real-brand"><strong>M &amp; G</strong><span>1058 N. DUPAGE AVENUE</span><span>LOMBARD, ILLINOIS. 60148</span><span>630 245 3643</span></div>;
 }
 
+function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
+  ruta: RutaDetalle;
+  destinos: DestinoDocumento[];
+  filas: FilaOrden[];
+  fecha: string | null;
+}) {
+  const fechaRuta = ruta.fecha_entrega || fecha;
+  const totalesPorFila = filas.map((fila) => destinos.reduce((total, destino) => total + cantidadFila(destino, fila), 0));
+  const totalRuta = totalesPorFila.reduce((total, cantidad) => total + cantidad, 0);
+
+  return <div className="dispatch-tapatios-document">
+    <MarcaMG />
+    <header className="dispatch-tapatios-title">
+      <strong>TAPATIOS · {diaDocumento(fechaRuta)}</strong>
+      <span>{fechaDocumento(fechaRuta)}</span>
+    </header>
+    <div className="dispatch-tapatios-grid">
+      {destinos.map((destino, indiceDestino) => {
+        const cantidades = filas.map((fila) => cantidadFila(destino, fila));
+        const totalDestino = cantidades.reduce((total, cantidad) => total + cantidad, 0);
+        const incluyeTotalRuta = indiceDestino === 0;
+        return <section className={`dispatch-tapatios-stop ${incluyeTotalRuta ? 'dispatch-tapatios-stop--route-total' : ''}`} key={destino.clave}>
+          <header>
+            <strong>{destino.nombre}</strong>
+            {destino.entregaEn !== destino.nombre && <small>ENTREGA EN {destino.entregaEn}</small>}
+          </header>
+          <div className="dispatch-tapatios-date">{fechaDocumento(fechaRuta)}</div>
+          <table className="dispatch-tapatios-table">
+            <thead><tr>{incluyeTotalRuta && <th>TOTAL</th>}<th>ITEM</th><th>QTY</th></tr></thead>
+            <tbody>{filas.map((fila, indiceFila) => <tr key={`${destino.clave}:${fila.nombre}`}>
+              {incluyeTotalRuta && <td>{numero(totalesPorFila[indiceFila])}</td>}
+              <td>{fila.nombre}</td>
+              <td>{numero(cantidades[indiceFila])}</td>
+            </tr>)}</tbody>
+            <tfoot><tr>{incluyeTotalRuta && <th>{numero(totalRuta)}</th>}<th>TOTAL</th><th>{numero(totalDestino)}</th></tr></tfoot>
+          </table>
+        </section>;
+      })}
+    </div>
+    <footer>{ruta.conductor || 'CHOFER'} · {ruta.nombre} · {destinos.map((destino) => destino.nombre).join(' → ')}</footer>
+  </div>;
+}
+
 function TablaIndividual({ destino, filas, linea, fecha }: { destino: DestinoDocumento; filas: FilaOrden[]; linea: LineaOperacion; fecha: string | null }) {
   return <div className={`dispatch-individual-document dispatch-individual-document--${linea}`}>
     {linea === 'carne' && <MarcaMG />}
@@ -411,18 +454,18 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
   return <div className="modal-backdrop" onClick={onClose}><div className="modal-card invoice-print dispatch-print" onClick={(e) => e.stopPropagation()}>
     <header className="dispatch-preview-toolbar no-print"><div><span className="eyebrow">Vista previa</span><h2>{alcance.tipo === 'carga' ? 'Hoja general de carga' : alcance.tipo === 'ruta' ? 'Paquete del chofer' : 'Paquete completo'}</h2></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
 
-    {mostrarCarga && <section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`}>
+    {mostrarCarga && (unicaTapatios ? <section className="dispatch-print-page dispatch-print-page--tapatios">
+      <HojaRutaTapatios ruta={rutas[0]} destinos={destinosDeRuta(rutas[0])} filas={filas} fecha={op.fecha_entrega} />
+    </section> : <section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`}>
       <EncabezadoDocumento titulo="CARGA GENERAL" detalle={diaDocumento(op.fecha_entrega)} fecha={op.fecha_entrega} />
       <TablaMatriz titulo={op.linea === 'carne' ? 'CARNE' : 'DISPOSABLES'} subtitulo="TOTAL PARA CARGAR" destinos={destinosTotales} filas={filas} linea={op.linea} />
       <footer>{rutas.map((ruta) => `${ruta.conductor || 'Ruta'}: ${ruta.nombre}`).join(' · ')}</footer>
-    </section>}
+    </section>)}
 
     {mostrarRutas && rutasSeleccionadas.flatMap((ruta) => {
       const destinos = destinosDeRuta(ruta);
-      if (esRutaTapatios(ruta)) return [<section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`} key={`ruta-${ruta.ruta_id}`}>
-        <EncabezadoDocumento titulo={ruta.conductor || 'TAPATÍOS'} detalle={ruta.nombre} fecha={ruta.fecha_entrega || op.fecha_entrega} />
-        <TablaMatriz titulo="RUTA TAPATÍOS" subtitulo="UNA HOJA PARA TODA LA RUTA" destinos={destinos} filas={filas} linea={op.linea} />
-        <footer>{destinos.map((destino) => destino.nombre).join(' → ')}</footer>
+      if (esRutaTapatios(ruta)) return [<section className="dispatch-print-page dispatch-print-page--tapatios" key={`ruta-${ruta.ruta_id}`}>
+        <HojaRutaTapatios ruta={ruta} destinos={destinos} filas={filas} fecha={op.fecha_entrega} />
       </section>];
       const hojasIndividuales = destinos.map((destino, indice) => <section className={`dispatch-print-page dispatch-print-page--ticket dispatch-print-page--${op.linea}`} key={`${ruta.ruta_id}:${destino.clave}`}>
         <TablaIndividual destino={destino} filas={filas} linea={op.linea} fecha={ruta.fecha_entrega || op.fecha_entrega} />
