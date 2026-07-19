@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
+import { transaccionSerializable } from '../lib/transaccion.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -122,7 +123,7 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
   });
   const sello = Date.now(); // cada cierre reconcilia (permite re-cierre tras reabrir)
 
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     for (const l of lineas) {
       const contado = num0(l.qty);
       const ex = await tx.existencias.findUnique({

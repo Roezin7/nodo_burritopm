@@ -3,10 +3,9 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
+import { idParam } from '../lib/validation.js';
 
 export const incidenciasRouter = Router();
-
-const idParam = z.coerce.number().int().positive();
 
 /** GET /incidencias?estado=abierta|todas — lista de incidencias (admin). */
 incidenciasRouter.get(

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, ApiError } from '../../api';
+import { api, ApiError, nuevaClaveIdempotencia } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { useToast, mensajeError } from '../../toast';
 import { FlujoStepper } from '../../flujo';
@@ -59,6 +59,7 @@ interface InventarioDetalle {
 export default function Inventario() {
   const { usuario } = useAuth();
   const esAdmin = usuario?.rol === 'admin';
+  const toast = useToast();
 
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
   const [ubicId, setUbicId] = useState<string>('');
@@ -86,7 +87,7 @@ export default function Inventario() {
     if (esAdmin) return;
     api<{ id: number; nombre: string; tipo: 'bodega' | 'sucursal'; activo: boolean }[]>('/ubicaciones')
       .then((us) => setSucursalesDestino(us.filter((u) => u.activo && u.tipo === 'sucursal')))
-      .catch(() => {});
+      .catch((e) => toast.error(mensajeError(e, 'No se pudieron cargar las sucursales destino.')));
   }, [esAdmin]);
 
   // Cargar ubicaciones disponibles según rol. El admin entra centrado en la Bodega.
@@ -522,13 +523,15 @@ function RegistrarSalida({ abierto, sucursales, onClose, onHecho }: {
   const [cantidad, setCantidad] = useState('');
   const [destino, setDestino] = useState<string>('directa');
   const [motivo, setMotivo] = useState('');
+  const [idempotencyKey, setIdempotencyKey] = useState(() => nuevaClaveIdempotencia('retiro'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!abierto || productos.length) return;
-    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo))).catch(() => {});
-  }, [abierto, productos.length]);
+    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo)))
+      .catch((e) => toast.error(mensajeError(e, 'No se pudo cargar el catálogo de productos.')));
+  }, [abierto, productos.length, toast]);
 
   const resultados = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -536,7 +539,7 @@ function RegistrarSalida({ abierto, sucursales, onClose, onHecho }: {
     return productos.filter((p) => p.nombre.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t)).slice(0, 8);
   }, [q, productos]);
 
-  function limpiar() { setSel(null); setQ(''); setCantidad(''); setMotivo(''); setDestino('directa'); }
+  function limpiar() { setSel(null); setQ(''); setCantidad(''); setMotivo(''); setDestino('directa'); setIdempotencyKey(nuevaClaveIdempotencia('retiro')); }
   function cerrar() { onClose(); limpiar(); setError(''); }
 
   async function registrar() {
@@ -546,7 +549,7 @@ function RegistrarSalida({ abierto, sucursales, onClose, onHecho }: {
     try {
       const r = await api<{ destino: string | null }>('/existencias/retiro', {
         method: 'POST',
-        body: { product_id: sel.id, cantidad: c, destino_ubicacion_id: destino === 'directa' ? null : Number(destino), motivo: motivo.trim() || undefined },
+        body: { product_id: sel.id, cantidad: c, destino_ubicacion_id: destino === 'directa' ? null : Number(destino), motivo: motivo.trim() || undefined, idempotency_key: idempotencyKey },
       });
       toast.ok(`−${c} ${sel.unidad_distribucion} de ${sel.nombre}${r.destino ? ` → ${r.destino}` : ' (salida directa)'}.`);
       limpiar();
@@ -633,13 +636,15 @@ function AgregarEntrada({ abierto, onClose, onHecho }: { abierto: boolean; onClo
   const [sel, setSel] = useState<ProdCat | null>(null);
   const [cantidad, setCantidad] = useState('');
   const [costo, setCosto] = useState('');
+  const [idempotencyKey, setIdempotencyKey] = useState(() => nuevaClaveIdempotencia('ingreso'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!abierto || productos.length) return;
-    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo))).catch(() => {});
-  }, [abierto, productos.length]);
+    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo)))
+      .catch((e) => toast.error(mensajeError(e, 'No se pudo cargar el catálogo de productos.')));
+  }, [abierto, productos.length, toast]);
 
   const resultados = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -647,7 +652,7 @@ function AgregarEntrada({ abierto, onClose, onHecho }: { abierto: boolean; onClo
     return productos.filter((p) => p.nombre.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t)).slice(0, 8);
   }, [q, productos]);
 
-  function limpiar() { setSel(null); setQ(''); setCantidad(''); setCosto(''); }
+  function limpiar() { setSel(null); setQ(''); setCantidad(''); setCosto(''); setIdempotencyKey(nuevaClaveIdempotencia('ingreso')); }
   function cerrar() { onClose(); limpiar(); setError(''); }
 
   async function registrar() {
@@ -655,7 +660,7 @@ function AgregarEntrada({ abierto, onClose, onHecho }: { abierto: boolean; onClo
     if (!sel || !(c > 0)) { setError('Elige producto y cantidad'); return; }
     setBusy(true); setError('');
     try {
-      await api('/existencias/ingreso', { method: 'POST', body: { product_id: sel.id, cantidad: c, costo_unitario: costo ? Number(costo) : null } });
+      await api('/existencias/ingreso', { method: 'POST', body: { product_id: sel.id, cantidad: c, costo_unitario: costo ? Number(costo) : null, idempotency_key: idempotencyKey } });
       toast.ok(`+${c} ${sel.unidad_distribucion} de ${sel.nombre} a bodega.`);
       limpiar();
       onHecho();

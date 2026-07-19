@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError, getToken } from '../../api';
+import { api, ApiError, getToken, nuevaClaveIdempotencia } from '../../api';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
@@ -118,6 +118,8 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   const [proveedor, setProveedor] = useState(String(catalogo.proveedores[0]?.id ?? ''));
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
   const [referencia, setReferencia] = useState('');
+  const [idempotencyKey, setIdempotencyKey] = useState(() => nuevaClaveIdempotencia('compra'));
+  const [borradorHidratado, setBorradorHidratado] = useState<string | null>(null);
   const [editandoId, setEditandoId] = useState<number | null>(null);
   const editorRef = useRef<HTMLElement | null>(null);
   type LineaCompra = { clave: number; producto: string; cajas: string; peso: string; costo: string; congelado: boolean };
@@ -132,17 +134,20 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     setLineas((actuales) => actuales.map((l) => productosCompra.some((p) => String(p.id) === l.producto) ? l : { ...l, producto: primero, peso: '', congelado: false }));
   }, [linea, productosCompra]);
   useEffect(() => {
-    const guardado = leerBorradorLocal<{ linea: 'carne' | 'desechables'; proveedor: string; fecha: string; referencia: string; lineas: LineaCompra[] }>(claveBorradorCompra);
+    const guardado = leerBorradorLocal<{ linea: 'carne' | 'desechables'; proveedor: string; fecha: string; referencia: string; lineas: LineaCompra[]; idempotencyKey?: string }>(claveBorradorCompra);
     setLinea(guardado?.valor.linea ?? 'carne');
     setProveedor(guardado?.valor.proveedor ?? String(catalogo.proveedores[0]?.id ?? ''));
     setFecha(guardado?.valor.fecha ?? fechaDentroDeSemana(semana));
     setEditandoId(null);
     setReferencia(guardado?.valor.referencia ?? '');
+    setIdempotencyKey(guardado?.valor.idempotencyKey ?? nuevaClaveIdempotencia('compra'));
     setLineas(guardado?.valor.lineas?.length ? guardado.valor.lineas : [nuevaLinea(String(catalogo.productos.find((p) => p.linea === 'carne' && ['materia_prima', 'precio_fijo'].includes(p.tipo))?.id ?? ''))]);
+    setBorradorHidratado(claveBorradorCompra);
   }, [semana.inicio, semana.fin, claveBorradorCompra]);
   useEffect(() => {
-    if (capturaPendiente && editandoId == null) guardarBorradorLocal(claveBorradorCompra, { linea, proveedor, fecha, referencia, lineas });
-  }, [capturaPendiente, claveBorradorCompra, editandoId, linea, proveedor, fecha, referencia, lineas]);
+    if (borradorHidratado !== claveBorradorCompra) return;
+    if (capturaPendiente && editandoId == null) guardarBorradorLocal(claveBorradorCompra, { linea, proveedor, fecha, referencia, lineas, idempotencyKey });
+  }, [capturaPendiente, claveBorradorCompra, borradorHidratado, editandoId, linea, proveedor, fecha, referencia, lineas, idempotencyKey]);
   const almacen = linea === 'carne' ? carniceria : bodega;
   const totalCompra = lineas.reduce((total, l) => total + Number(l.costo || 0), 0);
   const lineasValidas = lineas.length > 0 && lineas.every((l) => {
@@ -153,10 +158,10 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     if (!almacen) { setError('Falta configurar el almacén de esta línea.'); return; }
     setBusy(true); setError('');
     try {
-      const body = { proveedor_id: Number(proveedor), ubicacion_id: almacen.id, fecha, referencia: referencia || null, lineas: lineas.map((l) => { const p = productosCompra.find((producto) => String(producto.id) === l.producto); const materiaPrima = p?.tipo === 'materia_prima'; return { product_id: Number(l.producto), cajas: Number(l.cajas), peso_total_lb: materiaPrima ? Number(l.peso) : 0, costo_total: Number(l.costo), congelado: materiaPrima && l.congelado }; }) };
+      const body = { proveedor_id: Number(proveedor), ubicacion_id: almacen.id, fecha, referencia: referencia || null, ...(editandoId == null ? { idempotency_key: idempotencyKey } : {}), lineas: lineas.map((l) => { const p = productosCompra.find((producto) => String(producto.id) === l.producto); const materiaPrima = p?.tipo === 'materia_prima'; return { product_id: Number(l.producto), cajas: Number(l.cajas), peso_total_lb: materiaPrima ? Number(l.peso) : 0, costo_total: Number(l.costo), congelado: materiaPrima && l.congelado }; }) };
       await api(editandoId == null ? '/operacion/compras' : `/operacion/compras/${editandoId}`, { method: editandoId == null ? 'POST' : 'PATCH', body });
       const fueEdicion = editandoId != null;
-      setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setReferencia(''); setEditandoId(null);
+      setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setReferencia(''); setEditandoId(null); setIdempotencyKey(nuevaClaveIdempotencia('compra'));
       if (!fueEdicion) guardarBorradorLocal(claveBorradorCompra, null);
       await onDone(fueEdicion ? 'Compra actualizada e inventario recalculado.' : undefined);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar la compra.'); } finally { setBusy(false); }
@@ -174,12 +179,12 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   }
   function cancelarEdicion() {
     setEditandoId(null); setReferencia(''); setFecha(fechaDentroDeSemana(semana));
-    setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setError('');
+    setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setIdempotencyKey(nuevaClaveIdempotencia('compra')); setError('');
   }
   function limpiarCompra() {
     if (capturaPendiente && !window.confirm('¿Limpiar toda la compra que estás capturando?')) return;
     setReferencia(''); setFecha(fechaDentroDeSemana(semana)); setEditandoId(null);
-    setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setError('');
+    setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setIdempotencyKey(nuevaClaveIdempotencia('compra')); setError('');
     guardarBorradorLocal(claveBorradorCompra, null);
   }
   function repetirUltima() {
@@ -187,6 +192,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     if (!compra) { setError(`No hay una compra anterior de ${linea}.`); return; }
     setProveedor(String(compra.proveedor_id));
     setReferencia('');
+    setIdempotencyKey(nuevaClaveIdempotencia('compra'));
     setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
     setError('');
   }
@@ -194,6 +200,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     if (siguiente === linea) return;
     if (capturaPendiente && !window.confirm('Hay una compra sin guardar. ¿Descartarla y cambiar de línea?')) return;
     setLinea(siguiente); setReferencia(''); setEditandoId(null);
+    setIdempotencyKey(nuevaClaveIdempotencia('compra'));
     guardarBorradorLocal(claveBorradorCompra, null);
     const primero = catalogo.productos.find((p) => p.linea === siguiente && (siguiente === 'desechables' || ['materia_prima', 'precio_fijo'].includes(p.tipo)));
     setLineas([nuevaLinea(String(primero?.id ?? ''))]);
@@ -251,6 +258,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
 
 interface ProduccionBorrador {
   id: number;
+  idempotencyKey: string;
   materia: string;
   entrada: string;
   salidas: Record<number, string>;
@@ -282,9 +290,10 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const materias = catalogo.productos.filter((p) => p.tipo === 'materia_prima');
   const siguienteId = useRef(2);
-  const crearBorrador = (materia = String(materias[0]?.id ?? '')): ProduccionBorrador => ({ id: siguienteId.current++, materia, entrada: '', salidas: {} });
+  const crearBorrador = (materia = String(materias[0]?.id ?? '')): ProduccionBorrador => ({ id: siguienteId.current++, idempotencyKey: nuevaClaveIdempotencia('produccion'), materia, entrada: '', salidas: {} });
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
-  const [borradores, setBorradores] = useState<ProduccionBorrador[]>(() => [{ id: 1, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+  const [borradores, setBorradores] = useState<ProduccionBorrador[]>(() => [{ id: 1, idempotencyKey: nuevaClaveIdempotencia('produccion'), materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+  const [borradorHidratado, setBorradorHidratado] = useState<string | null>(null);
   const [produccionesAbiertas, setProduccionesAbiertas] = useState<Set<number>>(() => new Set());
   const capturaProduccionPendiente = borradores.some((borrador) => Boolean(borrador.entrada) || Object.values(borrador.salidas).some(Boolean));
   const claveBorradorProduccion = `bpm-borrador-produccion:${semana.inicio}`;
@@ -303,15 +312,16 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   useEffect(() => {
     const guardado = leerBorradorLocal<{ fecha: string; borradores: ProduccionBorrador[] }>(claveBorradorProduccion);
     setFecha(guardado?.valor.fecha ?? fechaDentroDeSemana(semana));
-    const filasGuardadas = guardado?.valor.borradores;
+    const filasGuardadas = guardado?.valor.borradores?.map((fila) => ({ ...fila, idempotencyKey: fila.idempotencyKey ?? nuevaClaveIdempotencia('produccion') }));
     if (filasGuardadas?.length) siguienteId.current = Math.max(...filasGuardadas.map((fila) => fila.id)) + 1;
-    setBorradores(filasGuardadas ?? [{ id: siguienteId.current++, materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+    setBorradores(filasGuardadas ?? [crearBorrador()]);
     setProduccionesAbiertas(new Set());
+    setBorradorHidratado(claveBorradorProduccion);
   }, [semana.inicio, semana.fin, claveBorradorProduccion]);
 
   useEffect(() => {
-    if (capturaProduccionPendiente) guardarBorradorLocal(claveBorradorProduccion, { fecha, borradores });
-  }, [claveBorradorProduccion, capturaProduccionPendiente, fecha, borradores]);
+    if (borradorHidratado === claveBorradorProduccion && capturaProduccionPendiente) guardarBorradorLocal(claveBorradorProduccion, { fecha, borradores });
+  }, [claveBorradorProduccion, borradorHidratado, capturaProduccionPendiente, fecha, borradores]);
 
   function actualizar(idBorrador: number, cambio: Partial<ProduccionBorrador>) {
     setBorradores((actuales) => actuales.map((b) => b.id === idBorrador ? { ...b, ...cambio } : b));
@@ -388,6 +398,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
             materia_prima_id: Number(c.borrador.materia),
             fecha,
             cajas_materia_prima: c.entrada,
+            idempotency_key: c.borrador.idempotencyKey,
             salidas: c.terminados.filter((p) => Number(c.borrador.salidas[p.id] || 0) > 0).map((p) => ({ product_id: p.id, cajas: Number(c.borrador.salidas[p.id]) })),
           })),
         },

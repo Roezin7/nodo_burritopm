@@ -4,10 +4,9 @@ import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
+import { idParam } from '../lib/validation.js';
 
 export const catalogoRouter = Router();
-
-const idParam = z.coerce.number().int().positive();
 
 // ───────────────────────────── Categorías ──────────────────────────────────
 

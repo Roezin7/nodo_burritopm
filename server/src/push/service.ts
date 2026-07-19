@@ -27,8 +27,10 @@ export async function guardarSuscripcion(
   });
 }
 
-export async function borrarSuscripcion(endpoint: string) {
-  await prisma.push_subscriptions.deleteMany({ where: { endpoint } });
+/** Borra una suscripción. Si se pasa usuarioId, solo borra si es dueño (evita que un usuario
+ *  desactive los avisos de otro con solo conocer su endpoint). */
+export async function borrarSuscripcion(endpoint: string, usuarioId?: bigint) {
+  await prisma.push_subscriptions.deleteMany({ where: { endpoint, ...(usuarioId != null ? { usuario_id: usuarioId } : {}) } });
 }
 
 /** Envía un aviso a todos los dispositivos de una lista de usuarios. Best-effort. */

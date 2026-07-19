@@ -7,6 +7,7 @@ import Spinner from '../../components/Spinner';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 
 interface LineaRec {
   linea_id: number;
@@ -41,7 +42,35 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
   const [ok, setOk] = useState('');
   const [busy, setBusy] = useState(false);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
+  const [contextoDists, setContextoDists] = useState('');
+  const [claveBorradorHidratado, setClaveBorradorHidratado] = useState<string | null>(null);
   const solicitud = useRef(0);
+
+  // Un repartidor/encargado sin señal que ajusta cantidades por un faltante perdía el ajuste
+  // si salía de la pantalla mientras esperaba señal: la confirmación exige conexión (correcto,
+  // para no duplicar movimientos), pero el borrador local sí puede sobrevivir la espera.
+  const contextoActual = `${ubicId}:${semana.inicio}:${semana.fin}`;
+  const idsDistribuciones = dists.map((dist) => dist.id).sort((a, b) => a - b).join(',');
+  const claveBorrador = ubicId && dists.length && contextoDists === contextoActual
+    ? `bpm-borrador-recepcion:${ubicId}:${semana.inicio}:${idsDistribuciones}`
+    : null;
+  useUnsavedChanges(problema.size > 0);
+  useEffect(() => {
+    if (!claveBorrador) { setClaveBorradorHidratado(null); return; }
+    const borrador = leerBorradorLocal<{ recibido: Record<number, string>; problema: number[] }>(claveBorrador);
+    if (borrador?.valor && borrador.valor.problema.length) {
+      setRecibido(borrador.valor.recibido);
+      setProblema(new Set(borrador.valor.problema));
+    } else {
+      setRecibido({});
+      setProblema(new Set());
+    }
+    setClaveBorradorHidratado(claveBorrador);
+  }, [claveBorrador]);
+  useEffect(() => {
+    if (!claveBorrador || claveBorradorHidratado !== claveBorrador) return;
+    guardarBorradorLocal(claveBorrador, problema.size > 0 ? { recibido, problema: [...problema] } : null);
+  }, [claveBorrador, claveBorradorHidratado, recibido, problema]);
 
   useEffect(() => {
     async function cargarUbic() {
@@ -57,10 +86,16 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
     if (!ubicId) return;
     const turno = ++solicitud.current;
     setError('');
-    try { const filas = await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`); if (turno === solicitud.current) setDists(filas); }
+    try {
+      const filas = await api<DistRec[]>(`/distribuciones/recepciones?ubicacion=${ubicId}&desde=${semana.inicio}&hasta=${semana.fin}`);
+      if (turno === solicitud.current) { setDists(filas); setContextoDists(contextoActual); }
+    }
     catch (e) { if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'Error al cargar'); }
   }
-  useEffect(() => { setDists([]); setHistorial([]); setTab(semana.actual ? 'pendientes' : 'historial'); void cargar(); }, [ubicId, semana.inicio, semana.fin]);
+  useEffect(() => {
+    setDists([]); setContextoDists(''); setClaveBorradorHidratado(null); setRecibido({}); setProblema(new Set());
+    setHistorial([]); setTab(semana.actual ? 'pendientes' : 'historial'); void cargar();
+  }, [ubicId, semana.inicio, semana.fin]);
   useEffect(() => {
     if (tab !== 'historial' || !ubicId || historial.length) return;
     setCargandoHistorial(true); setError('');
@@ -78,6 +113,7 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
         .filter((l) => l.recibida == null)
         .map((l) => ({ linea_id: l.linea_id, cantidad: modoProblema ? (Number(recibido[l.linea_id] ?? l.esperado) || 0) : l.esperado }));
       await api(`/distribuciones/${d.id}/recibir`, { method: 'POST', body: { ubicacion_id: Number(ubicId), items } });
+      if (claveBorrador) guardarBorradorLocal(claveBorrador, null);
       setRecibido({});
       setProblema((p) => { const n = new Set(p); n.delete(d.id); return n; });
       setOk('Recepción confirmada.');
@@ -104,7 +140,10 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
         <p className="muted">No tienes una sucursal asignada.</p>
       ) : (
         <>
-          <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={setUbicId} />
+          <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={(siguiente) => {
+            if (problema.size > 0 && !window.confirm('Hay una recepción con ajustes sin confirmar. ¿Cambiar de sucursal y conservarla como borrador?')) return;
+            setUbicId(siguiente);
+          }} />
 
           <div className="tabs">
             <button className={tab === 'pendientes' ? 'tab tab--on' : 'tab'} onClick={() => setTab('pendientes')}>Por recibir ({dists.length})</button>

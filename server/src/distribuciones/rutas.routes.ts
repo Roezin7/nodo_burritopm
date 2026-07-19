@@ -2,11 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, requireRole, soloAdmin } from '../auth/middleware.js';
+import { idParam } from '../lib/validation.js';
 import * as rutas from './rutas.service.js';
 
 export const rutasRouter = Router();
 
-const idParam = z.coerce.number().int().positive();
 const fechaParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const rangoQuery = z.object({ desde: fechaParam.optional(), hasta: fechaParam.optional() });
 // Rol unificado "Bodega y reparto": el encargado de bodega también ejecuta la ruta.

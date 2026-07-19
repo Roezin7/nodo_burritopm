@@ -7,6 +7,7 @@ import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import Spinner from '../../components/Spinner';
 import { nombreEnOrden, type LineaOperacion } from '../../operationOrder';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
+import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 
 interface ParadaItem {
   linea_id: number;
@@ -217,6 +218,24 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
   const [error, setError] = useState('');
   const yaCerrada = cerrada(parada.estado);
 
+  // La confirmación exige conexión (evita duplicar movimientos), pero un repartidor sin señal
+  // que ya ajustó cantidades por un faltante no debe perderlas si sale de la pantalla mientras
+  // espera señal.
+  const claveBorrador = `bpm-borrador-parada:${parada.parada_id}`;
+  useUnsavedChanges(modoProblema && Object.keys(entregado).length > 0);
+  useEffect(() => {
+    const borrador = leerBorradorLocal<{ entregado: Record<number, string> }>(claveBorrador);
+    if (borrador?.valor && Object.keys(borrador.valor.entregado).length) {
+      setEntregado(borrador.valor.entregado);
+      setModoProblema(true);
+    }
+    // Solo al entrar a esta parada.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    guardarBorradorLocal(claveBorrador, modoProblema && Object.keys(entregado).length ? { entregado } : null);
+  }, [claveBorrador, modoProblema, entregado]);
+
   async function entregar(items?: { linea_id: number; cantidad: number }[]) {
     setBusy(true); setError('');
     try {
@@ -224,6 +243,7 @@ function ParadaView({ ruta, parada, onSalir, onHecho }: { ruta: RutaDetalle; par
         method: 'POST',
         body: items ? { items } : {},
       });
+      guardarBorradorLocal(claveBorrador, null);
       onHecho();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo registrar la entrega');

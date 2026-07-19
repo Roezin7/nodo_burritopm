@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { suscribir, sincronizar, descartarFallos, type FalloSync } from './offline';
+import { suscribir, sincronizar, descartarFallos, reintentarFallo, descartarOperacionFallida, type FalloSync } from './offline';
 
 export default function OfflineBanner() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -18,20 +18,21 @@ export default function OfflineBanner() {
           {!online && <span>Sin conexión — ventas y conteos pueden quedar pendientes; las demás acciones requieren reconectar.</span>}
           {online && pendientes > 0 && (
             <span onClick={() => void sincronizar()}>
-              🔄 Sincronizando {pendientes} cambio{pendientes !== 1 ? 's' : ''}…
+              🔄 {fallidos.some((fallo) => fallo.reintentable) ? `${pendientes} cambio${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''} de revisión` : `Sincronizando ${pendientes} cambio${pendientes !== 1 ? 's' : ''}…`}
             </span>
           )}
           {pendientes > 0 && <strong className="offline-pill">{pendientes}</strong>}
         </div>
       )}
-      {fallidos.length > 0 && (
-        <div className="offline-banner offline-banner--error">
-          <span>
-            ⚠️ {fallidos.length} cambio{fallidos.length !== 1 ? 's' : ''} no se guardó: {fallidos[fallidos.length - 1]!.error}. Revísalo y vuelve a capturarlo.
-          </span>
-          <button className="offline-pill" onClick={descartarFallos} style={{ border: 'none', cursor: 'pointer' }}>Entendido</button>
+      {fallidos.map((f) => (
+        <div key={f.id} className="offline-banner offline-banner--error">
+          <span>⚠️ {f.error}</span>
+          {f.reintentable ? <>
+            <button className="offline-pill" onClick={() => reintentarFallo(f.id)} style={{ border: 'none', cursor: 'pointer' }}>Reintentar</button>
+            <button className="offline-pill" onClick={() => descartarOperacionFallida(f.id)} style={{ border: 'none', cursor: 'pointer' }}>Descartar</button>
+          </> : <button className="offline-pill" onClick={() => descartarFallos(f.id)} style={{ border: 'none', cursor: 'pointer' }}>Entendido</button>}
         </div>
-      )}
+      ))}
     </>
   );
 }

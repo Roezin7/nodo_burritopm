@@ -5,10 +5,10 @@ import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../a
 import * as svc from './service.js';
 import * as rutas from './rutas.service.js';
 import { prisma } from '../db.js';
+import { idParam } from '../lib/validation.js';
 
 export const distribucionesRouter = Router();
 
-const idParam = z.coerce.number().int().positive();
 const fechaParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const sucursal = requireRole('admin', 'encargado_sucursal');
 
@@ -27,6 +27,7 @@ async function exigirBodegasDeDistribucion(req: Parameters<typeof usuarioPuedeUb
   if (!lineas.length) throw new HttpError(404, 'Distribución no encontrada');
   const codigos = new Set(lineas.map((l) => l.products.linea_operacion === 'carne' ? 'CARN' : 'BOD'));
   const bodegas = await prisma.ubicaciones.findMany({ where: { negocio_id: req.auth!.negocioId, codigo: { in: [...codigos] }, activo: true } });
+  if (bodegas.length !== codigos.size) throw new HttpError(409, 'La distribución usa un almacén que no está configurado o está inactivo');
   for (const bodega of bodegas) {
     if (!(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, `No tienes acceso a ${bodega.nombre}`);
   }
@@ -284,6 +285,7 @@ distribucionesRouter.get(
   requireRole('admin', 'encargado_bodega'),
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
+    await exigirBodegasDeDistribucion(req, id);
     res.json(await rutas.rutaDetalle(req.auth!.negocioId, id));
   }),
 );
@@ -294,6 +296,7 @@ distribucionesRouter.get(
   requireRole('admin', 'encargado_bodega'),
   asyncHandler(async (req, res) => {
     const id = BigInt(idParam.parse(req.params.id));
+    await exigirBodegasDeDistribucion(req, id);
     res.json(await rutas.rutasDeDistribucion(req.auth!.negocioId, id));
   }),
 );

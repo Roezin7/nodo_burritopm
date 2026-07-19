@@ -34,7 +34,7 @@ pushRouter.post(
   '/baja',
   asyncHandler(async (req, res) => {
     const { endpoint } = z.object({ endpoint: z.string().url() }).parse(req.body);
-    await borrarSuscripcion(endpoint);
+    await borrarSuscripcion(endpoint, req.auth!.usuarioId);
     res.json({ ok: true });
   }),
 );

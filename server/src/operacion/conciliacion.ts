@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
+import { transaccionSerializable } from '../lib/transaccion.js';
 
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -181,7 +182,7 @@ export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuari
     where: { negocio_id: negocioId, id: { in: reporte.filas.map((f) => BigInt(f.product_id)) } },
     select: { id: true, unidad_distribucion_id: true },
   });
-  const conteo = await prisma.$transaction(async (tx) => {
+  const conteo = await transaccionSerializable(async (tx) => {
     const ya = await tx.conteos.findFirst({
       where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), notas: { startsWith: 'inventario_inicial_operativo' } },
       select: { id: true },
@@ -195,7 +196,7 @@ export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuari
       data: reporte.filas.map((f) => ({ conteo_id: c.id, product_id: BigInt(f.product_id), unidad_id: unidadDe.get(String(f.product_id))!, qty: f.inicial_calculado, factor: 1, contado: true })),
     });
     return c;
-  }, { isolationLevel: 'Serializable' });
+  });
   return { id: Number(conteo.id), creado: true };
 }
 

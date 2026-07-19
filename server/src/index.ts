@@ -54,7 +54,10 @@ app.use(helmet({ contentSecurityPolicy: isProd ? csp : false, hsts: isProd }));
 const origenes = env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
 app.use(cors({ origin: origenes.length ? origenes : false }));
 
-app.use(express.json({ limit: '10mb' })); // 10mb para imágenes del borrador IA (Fase 7)
+// 2mb es de sobra para cualquier captura JSON actual (pedidos, compras, conteos). El límite
+// de 10mb para imágenes del borrador IA (Fase 7) debe aplicarse solo a esa ruta cuando exista,
+// no globalmente — así una petición cualquiera no puede forzar el parseo de payloads enormes.
+app.use(express.json({ limit: '2mb' }));
 
 // --- Rate limiting ---
 // Límite general por IP (generoso: una tablet en piso hace muchas peticiones legítimas).

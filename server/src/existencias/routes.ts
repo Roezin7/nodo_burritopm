@@ -6,6 +6,9 @@ import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, requireRole, usuarioPuedeUbicacion } from '../auth/middleware.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { prepararSalidaFifo, registrarSalidaFifo } from '../inventario/fifo.js';
+import { idempotencyKey } from '../lib/validation.js';
+import { transaccionSerializable } from '../lib/transaccion.js';
+import { randomUUID } from 'node:crypto';
 
 export const existenciasRouter = Router();
 
@@ -37,6 +40,7 @@ existenciasRouter.post(
         cantidad: z.coerce.number().positive(),
         destino_ubicacion_id: z.coerce.number().int().positive().nullable().optional(),
         motivo: z.string().trim().max(300).optional(),
+        idempotency_key: idempotencyKey.optional(),
       })
       .parse(req.body);
 
@@ -60,9 +64,18 @@ existenciasRouter.post(
       destino = d;
     }
 
-    const key = `retiro:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const key = b.idempotency_key ?? `retiro:${negocioId}:${randomUUID()}`;
 
-    await prisma.$transaction(async (tx) => {
+    await transaccionSerializable(async (tx) => {
+      const existente = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: key } });
+      if (existente) {
+        const coincide = existente.negocio_id === negocioId && existente.usuario_id === req.auth!.usuarioId
+          && existente.product_id === producto.id && existente.ubicacion_origen_id === bodega.id
+          && existente.ubicacion_destino_id === (destino?.id ?? null) && num0(existente.cantidad) === b.cantidad
+          && existente.documento_tipo === 'retiro' && (existente.comentario ?? null) === (b.motivo ?? null);
+        if (!coincide) throw new HttpError(409, 'Esta llave de captura ya fue usada por un retiro diferente.');
+        return;
+      }
       const fifo = producto.linea_operacion === 'desechables'
         ? await prepararSalidaFifo(tx, { negocioId, ubicacionId: bodega.id, productId: producto.id, cantidad: b.cantidad, producto: producto.nombre })
         : null;
@@ -91,7 +104,7 @@ existenciasRouter.post(
         if (!movimiento) throw new HttpError(500, 'No se pudo vincular el retiro a sus lotes FIFO');
         await registrarSalidaFifo(tx, { movimientoId: movimiento.id, ubicacionId: bodega.id, productId: producto.id, consumos: fifo.consumos });
       }
-    });
+    }, { reintentarUnico: true });
 
     res.status(201).json({ ok: true, destino: destino?.nombre ?? null });
   }),
@@ -113,6 +126,7 @@ existenciasRouter.post(
         cantidad: z.coerce.number().positive(),
         costo_unitario: z.coerce.number().nonnegative().nullable().optional(),
         motivo: z.string().trim().max(300).optional(),
+        idempotency_key: idempotencyKey.optional(),
       })
       .parse(req.body);
 
@@ -130,9 +144,19 @@ existenciasRouter.post(
     if (producto.linea_operacion === 'desechables' && costo == null) {
       throw new HttpError(400, 'Indica el costo unitario para crear el lote FIFO de desechables.');
     }
-    const key = `ingreso:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const key = b.idempotency_key ?? `ingreso:${negocioId}:${randomUUID()}`;
 
-    await prisma.$transaction(async (tx) => {
+    await transaccionSerializable(async (tx) => {
+      const existente = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: key } });
+      if (existente) {
+        const coincide = existente.negocio_id === negocioId && existente.usuario_id === req.auth!.usuarioId
+          && existente.product_id === producto.id && existente.ubicacion_destino_id === bodega.id
+          && num0(existente.cantidad) === b.cantidad && existente.documento_tipo === 'ingreso'
+          && (b.costo_unitario == null || num(existente.costo_unitario) === b.costo_unitario)
+          && (existente.comentario ?? null) === (b.motivo ?? null);
+        if (!coincide) throw new HttpError(409, 'Esta llave de captura ya fue usada por un ingreso diferente.');
+        return;
+      }
       await aplicarMovimiento(tx, {
         negocioId,
         productId: producto.id,
@@ -170,7 +194,7 @@ existenciasRouter.post(
           data: { ultimo_costo: b.costo_unitario, costo_promedio: ex?.costo_promedio ?? b.costo_unitario },
         });
       }
-    });
+    }, { reintentarUnico: true });
 
     res.status(201).json({ ok: true });
   }),

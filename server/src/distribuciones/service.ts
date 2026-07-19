@@ -9,6 +9,7 @@ import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-ope
 import { asegurarInventarioInicialSemanal, repararPedidosHuerfanos } from '../operacion/conciliacion.js';
 import type { Prisma } from '@prisma/client';
 import { prepararSalidaFifo, registrarSalidaFifo, restaurarSalidaFifo } from '../inventario/fifo.js';
+import { transaccionSerializable } from '../lib/transaccion.js';
 
 async function pedidosVinculados(tx: Prisma.TransactionClient, distribucionId: bigint) {
   const lineas = await tx.distribucion_lineas.findMany({
@@ -137,7 +138,7 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
     );
   }
 
-  const dist = await prisma.$transaction(async (tx) => {
+  const dist = await transaccionSerializable(async (tx) => {
     const d = await tx.distribuciones.create({
       data: { negocio_id: negocioId, estado: 'calculada', creado_por: usuarioId },
     });
@@ -192,38 +193,45 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
   if (!ESTADOS_EDITABLES.includes(dist.estado)) {
     throw new HttpError(409, 'Solo se pueden agregar sucursales a un pedido en cálculo o revisión (aún sin aprobar).');
   }
-  const enPedido = await prisma.distribucion_lineas.findMany({
-    where: { distribucion_id: id },
-    select: { ubicacion_destino_id: true },
-    distinct: ['ubicacion_destino_id'],
-  });
-  const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
-
   if (!dist.fecha_entrega || !dist.linea_operacion) throw new HttpError(409, 'Este consolidado anterior no admite ventas operativas nuevas');
-  const pedidos = await prisma.pedidos_operativos.findMany({
-    where: {
-      negocio_id: negocioId,
-      ubicacion_id: { in: ubicacionIds.map(BigInt), notIn: [...yaIds].map(BigInt) },
-      linea_operacion: dist.linea_operacion,
-      fecha_entrega: dist.fecha_entrega,
-      estado: 'confirmado',
-      lineas: { some: {} },
-    },
-    include: { lineas: { include: { producto: true } }, ubicacion: true },
-  });
-  if (!pedidos.length) throw new HttpError(400, 'Esas sucursales no tienen una venta confirmada pendiente para este consolidado');
+  const fechaEntrega = dist.fecha_entrega;
+  const lineaOperacion = dist.linea_operacion;
 
-  const lineasData = pedidos.flatMap((pedido) => pedido.lineas.map((linea) => ({
-    distribucion_id: id,
-    ubicacion_destino_id: pedido.ubicacion_id,
-    product_id: linea.product_id,
-    pedido_linea_id: linea.id,
-    cantidad_sugerida: linea.cantidad,
-    cantidad_aprobada: linea.cantidad,
-    costo_unitario: linea.producto.ultimo_costo ?? linea.producto.costo_promedio,
-    costo_total: redondear2(num0(linea.cantidad) * (num(linea.producto.ultimo_costo) ?? num(linea.producto.costo_promedio) ?? 0)),
-  })));
-  await prisma.$transaction(async (tx) => {
+  // Leer "sucursales ya incluidas" y escribir las líneas nuevas en la misma transacción
+  // serializable: si dos solicitudes agregan la misma sucursal a la vez, la segunda ve el
+  // efecto de la primera en vez de duplicar líneas.
+  const resultado = await transaccionSerializable(async (tx) => {
+    const enPedido = await tx.distribucion_lineas.findMany({
+      where: { distribucion_id: id },
+      select: { ubicacion_destino_id: true },
+      distinct: ['ubicacion_destino_id'],
+    });
+    const yaIds = new Set(enPedido.map((l) => l.ubicacion_destino_id.toString()));
+
+    const pedidos = await tx.pedidos_operativos.findMany({
+      where: {
+        negocio_id: negocioId,
+        ubicacion_id: { in: ubicacionIds.map(BigInt), notIn: [...yaIds].map(BigInt) },
+        linea_operacion: lineaOperacion,
+        fecha_entrega: fechaEntrega,
+        estado: 'confirmado',
+        lineas: { some: {} },
+      },
+      include: { lineas: { include: { producto: true } }, ubicacion: true },
+    });
+    if (!pedidos.length) throw new HttpError(400, 'Esas sucursales no tienen una venta confirmada pendiente para este consolidado');
+
+    const lineasData = pedidos.flatMap((pedido) => pedido.lineas.map((linea) => ({
+      distribucion_id: id,
+      ubicacion_destino_id: pedido.ubicacion_id,
+      product_id: linea.product_id,
+      pedido_linea_id: linea.id,
+      cantidad_sugerida: linea.cantidad,
+      cantidad_aprobada: linea.cantidad,
+      costo_unitario: linea.producto.ultimo_costo ?? linea.producto.costo_promedio,
+      costo_total: redondear2(num0(linea.cantidad) * (num(linea.producto.ultimo_costo) ?? num(linea.producto.costo_promedio) ?? 0)),
+    })));
+
     await tx.distribucion_lineas.createMany({ data: lineasData });
     const rutas = await tx.rutas.findMany({
       where: { distribucion_id: id },
@@ -247,8 +255,9 @@ export async function agregarSucursales(negocioId: bigint, id: bigint, ubicacion
       ruta.paradas.push(nueva);
     }
     await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'en_preparacion' } });
+    return { agregadas: pedidos.map((p) => p.ubicacion.nombre), lineas: lineasData.length };
   });
-  return { agregadas: pedidos.map((p) => p.ubicacion.nombre), lineas: lineasData.length, sin_conteo: [] };
+  return { ...resultado, sin_conteo: [] };
 }
 
 /**
@@ -332,7 +341,7 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
       })
     : [];
 
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     for (const l of lineas) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
@@ -730,7 +739,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   let totalCargado = 0;
   const sucursalesConCarga = new Set<string>(); // solo estas serán paradas de la ruta
 
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     for (const l of [...lineas].sort((a, b) => Number(a.id - b.id))) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
@@ -828,7 +837,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
         data: { estado: 'cancelada', notas: 'Reparto desactivado: entrega completada al despachar' },
       });
     }
-  }, { isolationLevel: 'Serializable' });
+  });
   if (negocio?.reparto_habilitado) {
     void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
   }
@@ -1019,7 +1028,7 @@ export async function recibirDistribucion(
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
 
   let incidenciaEnSucursal = false;
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     for (const l of lineas) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
@@ -1087,7 +1096,7 @@ export async function recibirDistribucion(
     await marcarPedidosRecibidosEnUbicacion(tx, id, ubicacionId);
     // Sella la parada de esta sucursal en la ruta (si existe).
     await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal);
-  }, { isolationLevel: 'Serializable' });
+  });
   return { ok: true };
 }
 
@@ -1125,7 +1134,7 @@ export async function auditarFaltantesRecepcion(
   }
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
 
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     // Releer dentro de la transacción evita duplicar o desfasar inventario si la sucursal
     // confirma al mismo tiempo que el administrador guarda su auditoría.
     const lineasActuales = await tx.distribucion_lineas.findMany({
@@ -1193,7 +1202,7 @@ export async function auditarFaltantesRecepcion(
     await marcarPedidosRecibidosEnUbicacion(tx, id, ubicacionId);
     const incidenciaEnSucursal = await tx.distribucion_lineas.count({ where: { distribucion_id: id, ubicacion_destino_id: ubicacionId, incidencia_id: { not: null } } });
     await sellarParadaPorRecepcion(tx, negocioId, id, ubicacionId, incidenciaEnSucursal > 0);
-  }, { isolationLevel: 'Serializable' });
+  });
   return { ok: true };
 }
 

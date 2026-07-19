@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../auth/middleware.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import * as svc from './service.js';
+import { idempotencyKey } from '../lib/validation.js';
 import { prisma } from '../db.js';
 import * as conciliacion from './conciliacion.js';
 import { confirmarRecepcionesSinFaltantesEnRango, eliminarDistribucion } from '../distribuciones/service.js';
@@ -138,6 +139,7 @@ operacionRouter.post('/conciliacion/inicializar', soloAdmin, asyncHandler(async 
 operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     proveedor_id: id, ubicacion_id: id, fecha, referencia: z.string().trim().max(120).nullable().optional(),
+    idempotency_key: idempotencyKey.optional(),
     lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
   res.status(201).json(await svc.registrarCompra(req.auth!.negocioId, req.auth!.usuarioId, b));
@@ -182,6 +184,7 @@ operacionRouter.delete('/inventarios-finales/:token', soloAdmin, asyncHandler(as
 
 const produccionSchema = z.object({
   ubicacion_id: id, materia_prima_id: id, fecha, cajas_materia_prima: z.coerce.number().positive(), notas: z.string().trim().max(500).nullable().optional(),
+  idempotency_key: idempotencyKey.optional(),
   salidas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive() })).min(1),
 });
 

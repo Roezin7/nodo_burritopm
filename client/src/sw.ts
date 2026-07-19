@@ -6,7 +6,12 @@ import { clientsClaim } from 'workbox-core';
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: { url: string; revision: string | null }[] };
 
-self.skipWaiting();
+// No skipWaiting() automático: con registerType 'prompt', el nuevo service worker se queda
+// esperando hasta que pwaUpdate.ts le mande SKIP_WAITING (el usuario aceptó el banner de
+// actualización). Así una pestaña abierta todo el turno no se recarga bajo el usuario.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
 clientsClaim();
 
 // Precache de los assets generados por el build.

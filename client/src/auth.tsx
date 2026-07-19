@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, getToken, setToken } from './api';
+import { useToast } from './toast';
 
 export type Rol = 'admin' | 'encargado_bodega' | 'encargado_sucursal';
 
@@ -60,15 +61,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [cargando, setCargando] = useState(true);
   const [recienEntro, setRecienEntro] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     const expirada = () => {
-      setUsuario(null);
+      // Sin esto, el login reaparecía de la nada a media captura y el usuario no entendía
+      // si era un error de la app; ahora se explica que fue la sesión, no una falla.
+      setUsuario((actual) => {
+        if (actual) toast.error('Tu sesión expiró. Vuelve a entrar con tu PIN.');
+        return null;
+      });
       setRecienEntro(false);
     };
     window.addEventListener('bpm-auth-expired', expirada);
     return () => window.removeEventListener('bpm-auth-expired', expirada);
-  }, []);
+  }, [toast]);
 
   // Al montar: si hay token, validar con /me.
   useEffect(() => {

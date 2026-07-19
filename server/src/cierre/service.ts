@@ -5,6 +5,7 @@ import { HttpError } from '../middleware/error.js';
 import { coberturaPedidosBpm, preciosVentaSemana } from '../operacion/service.js';
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { eliminarConteoEnTx } from '../conteos/service.js';
+import { transaccionSerializable } from '../lib/transaccion.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -262,7 +263,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
-  const cierre = await prisma.$transaction(async (tx) => {
+  const cierre = await transaccionSerializable(async (tx) => {
     const vigente = await tx.semanas_operativas.findUnique({ where: { id: semana.id }, select: { estado: true } });
     if (vigente?.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
     // Conserva todo el historial para que un recierre genere v2, v3, etc. Consultar solo las
@@ -344,7 +345,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       cajas_perdidas: alertaInventario.cajas_perdidas,
       productos_con_faltante: alertaInventario.saldos.length,
     };
-  }, { isolationLevel: 'Serializable' });
+  });
   return { semana_id: Number(semana.id), anio: semana.anio, semana: semana.semana, ...cierre };
 }
 
@@ -390,7 +391,7 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
     orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     select: { id: true },
   });
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     const vigente = await tx.semanas_operativas.findUnique({ where: { id: s.id }, select: { estado: true } });
     if (vigente?.estado !== 'cerrada') throw new HttpError(409, 'La semana ya fue reabierta');
     await tx.facturas.updateMany({ where: { semana_id: s.id, estado: 'emitida' }, data: { estado: 'anulada' } });
@@ -400,7 +401,7 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
     // El ajuste físico y la semana se revierten juntos; nunca queda una reapertura parcial.
     for (const inventario of inventariosFinales) await eliminarConteoEnTx(tx, negocioId, inventario.id, usuarioId, 'reabrir_semana');
     await tx.inventario_semanal.deleteMany({ where: { semana_id: s.id } });
-  }, { isolationLevel: 'Serializable' });
+  });
   // La apertura se fija después de quitar el ajuste final. Esto también repara semanas antiguas
   // que fueron cerradas antes de que existiera la fotografía de inventario inicial.
   if (carniceria) await asegurarInventarioInicialSemanal(negocioId, usuarioId, iso(s.inicia_at), carniceria.id);
@@ -523,7 +524,7 @@ export async function pagarCompra(negocioId: bigint, compraId: bigint, fechaPago
 
 export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[], usuarioId: bigint, fechaPago: string) {
   if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
-  const resultado = await prisma.$transaction(async (tx) => {
+  const resultado = await transaccionSerializable(async (tx) => {
     const facturas = await tx.facturas.findMany({
       where: { id: { in: facturaIds }, negocio_id: negocioId, estado: 'emitida' },
       include: { pagos: true },
@@ -538,14 +539,14 @@ export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[],
     }
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'facturas', datos: { ids: facturaIds.map(Number), fecha_pago: fechaPago, total } } });
     return { facturas: facturas.length, total };
-  }, { isolationLevel: 'Serializable' });
+  });
   await actualizarUltimoBalance(negocioId);
   return { ok: true, ...resultado };
 }
 
 export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], usuarioId: bigint, fechaPago: string) {
   if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
-  const resultado = await prisma.$transaction(async (tx) => {
+  const resultado = await transaccionSerializable(async (tx) => {
     const compras = await tx.compras.findMany({ where: { id: { in: compraIds }, negocio_id: negocioId, estado: 'pendiente' } });
     if (compras.length !== new Set(compraIds.map(String)).size) throw new HttpError(409, 'Una o más compras ya no están pendientes. Recarga la cartera.');
     for (const compra of compras) if (fechaPago < iso(compra.fecha)) throw new HttpError(400, `Compra #${compra.id}: la fecha es anterior a la compra`);
@@ -553,7 +554,7 @@ export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], u
     await tx.compras.updateMany({ where: { id: { in: compraIds } }, data: { estado: 'pagada', pagado_at: fecha(fechaPago) } });
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'compras', datos: { ids: compraIds.map(Number), fecha_pago: fechaPago, total } } });
     return { compras: compras.length, total };
-  }, { isolationLevel: 'Serializable' });
+  });
   await actualizarUltimoBalance(negocioId);
   return { ok: true, ...resultado };
 }

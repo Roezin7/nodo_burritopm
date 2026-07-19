@@ -3,11 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, requireRole, soloAdmin, usuarioPuedeUbicacion } from '../auth/middleware.js';
+import { idParam } from '../lib/validation.js';
 import * as svc from './service.js';
 
 export const conteosRouter = Router();
-
-const idParam = z.coerce.number().int().positive();
 
 // Quién puede operar conteos (además del admin): bodega y sucursal.
 const puedeContar = requireRole('admin', 'encargado_bodega', 'encargado_sucursal');

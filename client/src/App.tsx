@@ -7,6 +7,7 @@ import ConteosInventario from './screens/inventario/Inventario';
 import Incidencias from './screens/incidencias/Incidencias';
 import Configuracion from './screens/config/Configuracion';
 import OfflineBanner from './OfflineBanner';
+import UpdateBanner from './UpdateBanner';
 import Shell from './Shell';
 import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
@@ -57,10 +58,11 @@ function AppBody() {
       </div>
     );
   }
-  if (!usuario) return <Login />;
+  if (!usuario) return <><UpdateBanner /><Login /></>;
 
   return (
     <Shell>
+      <UpdateBanner />
       <OfflineBanner />
       <Routes>
         <Route path="/" element={<Home />} />

@@ -3,11 +3,11 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
+import { idParam } from '../lib/validation.js';
 
 export const ubicacionesRouter = Router();
 
 const tipo = z.enum(['bodega', 'sucursal']);
-const idParam = z.coerce.number().int().positive();
 
 interface UbicacionDTO {
   id: number;

@@ -291,7 +291,8 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
   // Sucursales rezagadas que aún se pueden sumar (solo mientras el pedido es editable).
   useEffect(() => {
     if (!editable) { setAgregables([]); return; }
-    api<{ id: number; nombre: string }[]>(`/distribuciones/${id}/agregables`).then(setAgregables).catch(() => setAgregables([]));
+    api<{ id: number; nombre: string }[]>(`/distribuciones/${id}/agregables`).then(setAgregables)
+      .catch((e) => { setAgregables([]); toast.error(mensajeError(e, 'No se pudieron cargar las sucursales rezagadas.')); });
   }, [id, editable]);
 
   async function agregarSucursal(sucId: number) {

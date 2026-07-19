@@ -1,12 +1,24 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { firmarToken } from './jwt.js';
 import { requireAuth, soloAdmin } from './middleware.js';
+import { idParam } from '../lib/validation.js';
 
 export const authRouter = Router();
+
+// Esta ruta es pública (pantalla de selección antes del login) y expone nombres/roles por
+// negocio_id: un límite propio, más estricto que el general de la API, reduce su valor para
+// reconocimiento dirigido o enumeración de negocios.
+const limiteUsuarios = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /** Ubicaciones asignadas a un usuario (DTO ligero para login / gestión). */
 async function ubicacionesDe(usuarioId: bigint) {
@@ -31,6 +43,7 @@ async function ubicacionesDe(usuarioId: bigint) {
  */
 authRouter.get(
   '/usuarios',
+  limiteUsuarios,
   asyncHandler(async (req, res) => {
     const negocioId = BigInt(z.coerce.number().int().positive().catch(1).parse(req.query.negocio));
     const usuarios = await prisma.usuarios.findMany({
@@ -127,7 +140,6 @@ authRouter.post(
 //  Administración de usuarios (solo admin)
 // ---------------------------------------------------------------------------
 const rol = z.enum(['admin', 'encargado_bodega', 'encargado_sucursal']);
-const idParam = z.coerce.number().int().positive();
 
 /**
  * Valida que los ids de ubicación pertenezcan al negocio y devuelve los BigInt.

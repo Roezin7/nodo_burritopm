@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { reconciliarConteo } from '../ledger/service.js';
+import { transaccionSerializable } from '../lib/transaccion.js';
 
 const EDITABLES = ['borrador', 'en_captura', 'reabierto'] as const;
 type EstadoEditable = (typeof EDITABLES)[number];
@@ -326,8 +327,5 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
 }
 
 export async function eliminarConteo(negocioId: bigint, conteoId: bigint, usuarioId: bigint) {
-  return prisma.$transaction(
-    (tx) => eliminarConteoEnTx(tx, negocioId, conteoId, usuarioId),
-    { isolationLevel: 'Serializable' },
-  );
+  return transaccionSerializable((tx) => eliminarConteoEnTx(tx, negocioId, conteoId, usuarioId));
 }

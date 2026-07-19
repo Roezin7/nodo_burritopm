@@ -8,6 +8,7 @@ import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-ope
 import { asegurarInventarioInicialSemanal, rangoSemana, repararPedidosHuerfanos } from './conciliacion.js';
 import { confirmarCarga } from '../distribuciones/service.js';
 import { calcularConsumoFifo, type LoteFifoCalculable } from '../inventario/fifo.js';
+import { esErrorPrisma, transaccionSerializable } from '../lib/transaccion.js';
 
 export { calcularConsumoFifo, type LoteFifoCalculable } from '../inventario/fifo.js';
 
@@ -338,10 +339,7 @@ export async function guardarPedido(
   esAdmin: boolean,
 ) {
   const preparado = await prepararPedido(negocioId, input, esAdmin);
-  const guardado = await prisma.$transaction(
-    (tx) => guardarPedidoEnTx(tx, negocioId, usuarioId, preparado),
-    { isolationLevel: 'Serializable' },
-  );
+  const guardado = await transaccionSerializable((tx) => guardarPedidoEnTx(tx, negocioId, usuarioId, preparado));
   if (input.confirmar && guardado.estado === 'confirmado') {
     const rango = rangoSemana(input.fecha_entrega);
     await consolidarPedidosSiCompletos(negocioId, usuarioId, input.linea, rango.desde, rango.hasta);
@@ -364,7 +362,7 @@ export async function guardarPedidosSemana(
 
   const preparados: Awaited<ReturnType<typeof prepararPedido>>[] = [];
   for (const input of inputs) preparados.push(await prepararPedido(negocioId, input, true));
-  const pedidos = await prisma.$transaction(async (tx) => {
+  const pedidos = await transaccionSerializable(async (tx) => {
     const anteriores = await tx.pedidos_operativos.findMany({
       where: {
         negocio_id: negocioId,
@@ -399,7 +397,7 @@ export async function guardarPedidosSemana(
       },
     });
     return guardados;
-  }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 30_000 });
+  }, { timeout: 30_000 });
 
   const rangos = new Map<string, { linea: LineaOperacion; desde: string; hasta: string }>();
   for (const input of inputs.filter((p) => p.confirmar)) {
@@ -707,7 +705,36 @@ export interface CompraInput {
   ubicacion_id: number;
   fecha: string;
   referencia?: string | null;
+  idempotency_key?: string;
   lineas: { product_id: number; cajas: number; peso_total_lb?: number; costo_total: number; congelado?: boolean }[];
+}
+
+function firmaLineasCompra(lineas: CompraInput['lineas']): string[] {
+  return lineas.map((linea) => [
+    linea.product_id, r3(linea.cajas), r3(linea.peso_total_lb ?? 0), r2(linea.costo_total), Boolean(linea.congelado),
+  ].join(':')).sort();
+}
+
+function compraCoincide(
+  compra: Prisma.comprasGetPayload<{ include: { lineas: true } }>,
+  negocioId: bigint,
+  usuarioId: bigint,
+  input: CompraInput,
+  total: number,
+  fechaCompra: Date,
+): boolean {
+  const firmaGuardada = firmaLineasCompra(compra.lineas.map((linea) => ({
+    product_id: Number(linea.product_id), cajas: num0(linea.cajas), peso_total_lb: num0(linea.peso_total_lb),
+    costo_total: num0(linea.costo_total), congelado: linea.congelado,
+  })));
+  return compra.negocio_id === negocioId
+    && compra.registrado_por === usuarioId
+    && compra.proveedor_id === BigInt(input.proveedor_id)
+    && compra.ubicacion_id === BigInt(input.ubicacion_id)
+    && compra.fecha.getTime() === fechaCompra.getTime()
+    && num0(compra.total) === total
+    && (compra.referencia ?? null) === (input.referencia ?? null)
+    && JSON.stringify(firmaGuardada) === JSON.stringify(firmaLineasCompra(input.lineas));
 }
 
 export async function registrarCompra(negocioId: bigint, usuarioId: bigint, input: CompraInput) {
@@ -730,9 +757,19 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
   const total = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
   const f = fecha(input.fecha);
 
-  const compra = await prisma.$transaction(async (tx) => {
+  const ejecutar = () => transaccionSerializable(async (tx) => {
+    if (input.idempotency_key) {
+      const existente = await tx.compras.findUnique({ where: { idempotency_key: input.idempotency_key }, include: { lineas: true } });
+      if (existente) {
+        if (!compraCoincide(existente, negocioId, usuarioId, input, total, f)) {
+          throw new HttpError(409, 'Esta llave de captura ya fue usada por una compra diferente. Recarga la pantalla antes de continuar.');
+        }
+        return existente;
+      }
+    }
+
     const c = await tx.compras.create({
-      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, vence_at: sumarDias(f, 14), referencia: input.referencia, total, registrado_por: usuarioId },
+      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, vence_at: sumarDias(f, 14), referencia: input.referencia, total, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
     });
     for (const [i, l] of input.lineas.entries()) {
       const pid = BigInt(l.product_id);
@@ -773,7 +810,16 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
       await tx.products.update({ where: { id: pid }, data: { ultimo_costo: costoCaja, peso_caja_lb: esMateriaPrima ? pesoCaja : undefined } });
     }
     return c;
-  }, { isolationLevel: 'Serializable' });
+  });
+  let compra;
+  try {
+    compra = await ejecutar();
+  } catch (error) {
+    // Dos envíos simultáneos con la misma llave pueden competir por el índice único. Al
+    // repetir la transacción, la segunda solicitud encuentra y devuelve la compra confirmada.
+    if (!input.idempotency_key || !esErrorPrisma(error, 'P2002')) throw error;
+    compra = await ejecutar();
+  }
   return { id: Number(compra.id), total, vence_at: iso(compra.vence_at) };
 }
 
@@ -804,7 +850,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
 
   const total = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
   const nuevaFecha = fecha(input.fecha);
-  return prisma.$transaction(async (tx) => {
+  return transaccionSerializable(async (tx) => {
     const anterior = await tx.compras.findFirst({
       where: { id: compraId, negocio_id: negocioId },
       include: { lineas: { include: { producto: true, lote: { include: { _count: { select: { consumos: true, ajustes: true, salidas_inventario: true } } } } } } },
@@ -915,7 +961,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
       },
     });
     return { id: Number(compraId), total, vence_at: iso(sumarDias(nuevaFecha, 14)) };
-  }, { isolationLevel: 'Serializable' });
+  });
 }
 
 /**
@@ -925,7 +971,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
  * operación posterior correspondiente.
  */
 export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint) {
-  return prisma.$transaction(async (tx) => {
+  return transaccionSerializable(async (tx) => {
     const compra = await tx.compras.findFirst({
       where: { id: compraId, negocio_id: negocioId },
       include: {
@@ -1029,7 +1075,7 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
       });
     }
     return { ok: true, total_revertido: num0(compra.total), lineas_revertidas: compra.lineas.length };
-  }, { isolationLevel: 'Serializable' });
+  });
 }
 
 export async function guardarInventarioFinal(
@@ -1076,7 +1122,7 @@ export async function guardarInventarioFinal(
     throw new HttpError(400, 'Explica la diferencia de conteo antes de guardar el inventario físico final.');
   }
   let ajustes = 0;
-  const conteo = await prisma.$transaction(async (tx) => {
+  const conteo = await transaccionSerializable(async (tx) => {
     const registro = await tx.conteos.create({
       data: {
         negocio_id: negocioId,
@@ -1161,7 +1207,7 @@ export async function guardarInventarioFinal(
       }
     }
     return registro;
-  }, { isolationLevel: 'Serializable' });
+  });
   return { ok: true, ajustes, inventario_id: Number(conteo.id) };
 }
 
@@ -1227,7 +1273,7 @@ export async function eliminarInventarioFinal(negocioId: bigint, token: string, 
   const movimientos = await prisma.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, documento_tipo: 'inventario_final', documento_id: null, idempotency_key: { startsWith: `${clave}:` } },
   });
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     for (const movimiento of movimientos) {
       const ubicacion = movimiento.ubicacion_destino_id ?? movimiento.ubicacion_origen_id;
       if (!ubicacion) continue;
@@ -1245,7 +1291,7 @@ export async function eliminarInventarioFinal(negocioId: bigint, token: string, 
         datos: { clave, fecha: fechaInventario ?? null, movimientos: movimientos.length },
       },
     });
-  }, { isolationLevel: 'Serializable' });
+  });
   return { ok: true, ajustes_revertidos: movimientos.length };
 }
 
@@ -1264,7 +1310,12 @@ export interface ProduccionInput {
   fecha: string;
   cajas_materia_prima: number;
   notas?: string | null;
+  idempotency_key?: string;
   salidas: { product_id: number; cajas: number }[];
+}
+
+function firmaSalidasProduccion(salidas: ProduccionInput['salidas']): string[] {
+  return salidas.map((salida) => `${salida.product_id}:${r3(salida.cajas)}`).sort();
 }
 
 async function registrarProduccionEnTransaccion(
@@ -1296,6 +1347,32 @@ async function registrarProduccionEnTransaccion(
     if (esSubproductoSinCosto && p.precio_venta_fijo == null) throw new HttpError(400, `${p.nombre} requiere un precio fijo de venta en Configuración`);
   }
   const semanaProduccion = rangoSemana(input.fecha);
+
+  const produccionReciente = input.idempotency_key
+    ? await tx.producciones.findUnique({ where: { idempotency_key: input.idempotency_key }, include: { salidas: true } })
+    : null;
+  if (produccionReciente) {
+    const coincide = produccionReciente.negocio_id === negocioId
+      && produccionReciente.registrado_por === usuarioId
+      && produccionReciente.ubicacion_id === ubicId
+      && produccionReciente.materia_prima_id === materiaId
+      && produccionReciente.fecha.getTime() === fechaProduccion.getTime()
+      && num0(produccionReciente.cajas_materia_prima) === r3(input.cajas_materia_prima)
+      && (produccionReciente.notas ?? null) === (input.notas ?? null)
+      && JSON.stringify(firmaSalidasProduccion(produccionReciente.salidas.map((salida) => ({ product_id: Number(salida.product_id), cajas: num0(salida.cajas) })))) === JSON.stringify(firmaSalidasProduccion(input.salidas));
+    if (!coincide) throw new HttpError(409, 'Esta llave de captura ya fue usada por una producción diferente. Recarga la pantalla antes de continuar.');
+    return {
+      p: produccionReciente,
+      pesoEntrada: num0(produccionReciente.peso_entrada_lb),
+      pesoSalida: num0(produccionReciente.peso_salida_lb),
+      desperdicio: num0(produccionReciente.desperdicio_lb),
+      yieldPct: num0(produccionReciente.yield_porcentaje),
+      costoEntrada: num0(produccionReciente.costo_entrada),
+      semanaProduccion,
+      productIds: produccionReciente.salidas.map((s) => s.product_id),
+    };
+  }
+
   const lotes = await tx.lotes_materia_prima.findMany({
     where: { negocio_id: negocioId, ubicacion_id: ubicId, product_id: materiaId, congelado: false, fecha: { lte: fecha(semanaProduccion.hasta) }, cajas_disponibles: { gt: 0 } },
     orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
@@ -1334,7 +1411,7 @@ async function registrarProduccionEnTransaccion(
   const yieldPct = pesoEntrada > 0 ? r4((pesoSalida / pesoEntrada) * 100) : 0;
 
   const p = await tx.producciones.create({
-    data: { negocio_id: negocioId, ubicacion_id: ubicId, materia_prima_id: materiaId, fecha: fechaProduccion, cajas_materia_prima: r3(input.cajas_materia_prima), peso_entrada_lb: pesoEntrada, costo_entrada: costoEntrada, peso_salida_lb: pesoSalida, desperdicio_lb: desperdicio, yield_porcentaje: yieldPct, registrado_por: usuarioId, notas: input.notas },
+    data: { negocio_id: negocioId, ubicacion_id: ubicId, materia_prima_id: materiaId, fecha: fechaProduccion, cajas_materia_prima: r3(input.cajas_materia_prima), peso_entrada_lb: pesoEntrada, costo_entrada: costoEntrada, peso_salida_lb: pesoSalida, desperdicio_lb: desperdicio, yield_porcentaje: yieldPct, registrado_por: usuarioId, notas: input.notas, idempotency_key: input.idempotency_key },
   });
   for (const c of consumos) {
     await tx.produccion_consumos_lote.create({ data: { produccion_id: p.id, lote_id: c.lote.id, cajas: c.cajas, peso_lb: c.peso, costo: c.costo } });
@@ -1342,7 +1419,7 @@ async function registrarProduccionEnTransaccion(
   }
   await aplicarMovimiento(tx, {
     negocioId, productId: materiaId, tipo: 'consumo', cantidad: input.cajas_materia_prima, usuarioId,
-    origenId: ubicId, costoUnitario: costoEntrada / input.cajas_materia_prima, documentoTipo: 'produccion', documentoId: p.id,
+    origenId: ubicId, costoUnitario: r4(costoEntrada / input.cajas_materia_prima), documentoTipo: 'produccion', documentoId: p.id,
     comentario: `Materia prima · yield ${yieldPct}%`, idempotencyKey: `produccion:${p.id}:entrada`,
     deltas: [{ ubicacionId: ubicId, productId: materiaId, disponible: -input.cajas_materia_prima }],
   });
@@ -1390,11 +1467,18 @@ export async function registrarProducciones(negocioId: bigint, usuarioId: bigint
 
   // Disponibilidad, consumo FIFO y movimientos viven en una única transacción serializable:
   // dos filas de la misma captura nunca gastan la misma compra ni quedan guardadas a medias.
-  const resultados = await prisma.$transaction(async (tx) => {
+  const ejecutar = () => transaccionSerializable(async (tx) => {
     const creadas = [];
     for (const input of inputs) creadas.push(await registrarProduccionEnTransaccion(tx, negocioId, usuarioId, input));
     return creadas;
-  }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 20_000 });
+  });
+  let resultados;
+  try {
+    resultados = await ejecutar();
+  } catch (error) {
+    if (!inputs.every((input) => input.idempotency_key) || !esErrorPrisma(error, 'P2002')) throw error;
+    resultados = await ejecutar();
+  }
 
   const preciosPorSemana = new Map<string, { desde: string; hasta: string; productos: Set<bigint> }>();
   for (const resultado of resultados) {
@@ -1446,7 +1530,7 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
     const actual = porProducto.get(clave) ?? { cajas: 0, costo: 0, actualizarCosto: salida.producto.tipo_operativo === 'proteina' };
     porProducto.set(clave, { ...actual, cajas: r3(actual.cajas + num0(salida.cajas)), costo: r2(actual.costo + num0(salida.costo_total)) });
   }
-  await prisma.$transaction(async (tx) => {
+  await transaccionSerializable(async (tx) => {
     for (const consumo of produccion.consumos) {
       await tx.lotes_materia_prima.update({
         where: { id: consumo.lote_id },
@@ -1498,7 +1582,7 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
         },
       },
     });
-  }, { isolationLevel: 'Serializable' });
+  });
   await sincronizarPreciosPedidosSemana(negocioId, [...porProducto.keys()].map(BigInt), semana.desde, semana.hasta);
   return { ok: true, produccion_id: Number(produccion.id), salidas_revertidas: produccion.salidas.length };
 }

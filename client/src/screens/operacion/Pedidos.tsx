@@ -77,9 +77,31 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [cargandoImpresion, setCargandoImpresion] = useState(false);
   const [estado, setEstado] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const [cantidadesGuardadas, setCantidadesGuardadas] = useState<Record<number, string>>({});
+  const [notasGuardadas, setNotasGuardadas] = useState('');
+  const restauradoRef = useRef<string | null>(null);
+  const [clavePedidoHidratado, setClavePedidoHidratado] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [refrescoHistorial, setRefrescoHistorial] = useState(0);
+
+  // Captura individual (encargado_sucursal): a diferencia del modo semanal de admin, este
+  // formulario no tenía protección de cambios sin guardar ni borrador local — se perdía todo
+  // si el usuario navegaba por accidente antes de guardar.
+  const claveBorradorIndividual = ubicacionId && fecha ? `bpm-borrador-pedido:${ubicacionId}:${linea}:${fecha}` : null;
+  const hayCambiosIndividual = useMemo(() => {
+    if (vista !== 'captura' || (admin && modoCaptura === 'semana')) return false;
+    if (notas !== notasGuardadas) return true;
+    const claves = new Set([...Object.keys(cantidades), ...Object.keys(cantidadesGuardadas)].map(Number));
+    for (const k of claves) if ((cantidades[k] || '0') !== (cantidadesGuardadas[k] || '0')) return true;
+    return false;
+  }, [cantidades, cantidadesGuardadas, notas, notasGuardadas, vista, admin, modoCaptura]);
+  useUnsavedChanges(hayCambiosIndividual);
+
+  useEffect(() => {
+    if (!claveBorradorIndividual || clavePedidoHidratado !== claveBorradorIndividual) return;
+    guardarBorradorLocal(claveBorradorIndividual, hayCambiosIndividual ? { cantidades, notas } : null);
+  }, [claveBorradorIndividual, clavePedidoHidratado, hayCambiosIndividual, cantidades, notas]);
 
   useEffect(() => {
     api<Catalogo>(`/operacion/catalogo?fecha_referencia=${semana.inicio}`).then((c) => {
@@ -88,6 +110,20 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       if (asignada) setUbicacionId(String(asignada.id));
     }).catch(() => setError('No se pudo cargar el catálogo de pedidos.'));
   }, [admin, usuario, semana.inicio]);
+
+  // El estado de la semana (abierta/cerrada) se carga una sola vez; si el admin cierra la
+  // semana desde otro dispositivo mientras esta pestaña sigue abierta, se refresca al volver
+  // a primer plano en vez de dejar la UI editable hasta que el usuario recargue a mano.
+  useEffect(() => {
+    function alVolverVisible() {
+      if (document.visibilityState !== 'visible') return;
+      api<Catalogo>(`/operacion/catalogo?fecha_referencia=${semana.inicio}`)
+        .then((c) => setCatalogo((actual) => (actual ? { ...actual, semanas: c.semanas } : c)))
+        .catch(() => { /* silencioso: es solo un refresco de fondo */ });
+    }
+    document.addEventListener('visibilitychange', alVolverVisible);
+    return () => document.removeEventListener('visibilitychange', alVolverVisible);
+  }, [semana.inicio]);
 
   const ubicaciones = useMemo(() => {
     if (!catalogo) return [];
@@ -117,20 +153,23 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
 
   useEffect(() => {
     if (vista !== 'captura' || (admin && modoCaptura === 'semana') || !ubicacionId || !fecha) {
-      setEstado(null); setVersion(null); setNotas(''); setCantidades({}); setCargandoPedido(false);
+      setEstado(null); setVersion(null); setNotas(''); setCantidades({});
+      setCantidadesGuardadas({}); setNotasGuardadas(''); setCargandoPedido(false);
+      setClavePedidoHidratado(null);
       return;
     }
     let vigente = true;
     setCargandoPedido(true);
+    setClavePedidoHidratado(null);
     setEstado(null); setVersion(null); setNotas(''); setCantidades({});
     setError('');
+    const clave = `bpm-borrador-pedido:${ubicacionId}:${linea}:${fecha}`;
     api<Pedido[]>(`/operacion/pedidos?ubicacion_id=${ubicacionId}&linea=${linea}&desde=${fecha}&hasta=${fecha}`)
       .then((rows) => {
         if (!vigente) return;
         const p = rows[0];
         setEstado(p?.estado ?? null);
         setVersion(p?.actualizado_at ?? null);
-        setNotas(p?.notas ?? '');
         const cargadas = Object.fromEntries((p?.lineas ?? []).map((l) => [l.product_id, String(l.cantidad)]));
         const pastorBpm = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-BPM');
         const pastorTap = catalogo?.productos.find((x) => x.sku === 'MEAT-PASTOR-TAP');
@@ -141,7 +180,18 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
           if (cargadas[origen] && !cargadas[destino]) cargadas[destino] = cargadas[origen];
           delete cargadas[origen];
         }
-        setCantidades(cargadas);
+        setCantidadesGuardadas(cargadas);
+        setNotasGuardadas(p?.notas ?? '');
+        const borrador = leerBorradorLocal<{ cantidades: Record<number, string>; notas: string }>(clave);
+        if (borrador?.valor && restauradoRef.current !== clave) {
+          setCantidades(borrador.valor.cantidades);
+          setNotas(borrador.valor.notas);
+          restauradoRef.current = clave;
+        } else {
+          setCantidades(cargadas);
+          setNotas(p?.notas ?? '');
+        }
+        setClavePedidoHidratado(clave);
       })
       .catch((e) => { if (vigente) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el pedido.'); })
       .finally(() => { if (vigente) setCargandoPedido(false); });
@@ -173,6 +223,9 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       }
       setEstado(r.estado);
       setVersion(r.actualizado_at);
+      setCantidadesGuardadas(cantidades);
+      setNotasGuardadas(notas);
+      if (claveBorradorIndividual) guardarBorradorLocal(claveBorradorIndividual, null);
       toast.ok(confirmar ? 'Pedido confirmado.' : 'Avance guardado.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar.'); }
     finally { setBusy(false); }

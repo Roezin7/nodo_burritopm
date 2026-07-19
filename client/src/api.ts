@@ -3,6 +3,14 @@ import { encolar } from './offline';
 
 const TOKEN_KEY = 'bpm_token';
 
+/** Llave estable para reintentar una mutación sin duplicarla en el servidor. */
+export function nuevaClaveIdempotencia(alcance: string): string {
+  const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return `${alcance}:${uuid}`;
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
