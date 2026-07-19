@@ -49,6 +49,7 @@ existenciasRouter.post(
       where: { id: BigInt(b.product_id), negocio_id: negocioId },
     });
     if (!producto) throw new HttpError(404, 'Producto no encontrado');
+    if (producto.es_cargo_compra) throw new HttpError(409, 'Este concepto es únicamente contable y no tiene inventario.');
     if (producto.tipo_operativo === 'materia_prima') throw new HttpError(409, 'La materia prima solo se corrige desde Compras, Producción o Inventario final para conservar sus lotes.');
     const bodega = await bodegaDeProducto(negocioId, producto.linea_operacion);
     if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, 'No tienes acceso a este almacén');
@@ -135,6 +136,7 @@ existenciasRouter.post(
       where: { id: BigInt(b.product_id), negocio_id: negocioId },
     });
     if (!producto) throw new HttpError(404, 'Producto no encontrado');
+    if (producto.es_cargo_compra) throw new HttpError(409, 'Este concepto es únicamente contable y no tiene inventario.');
     if (producto.tipo_operativo === 'materia_prima') throw new HttpError(409, 'Registra la materia prima en Compras para crear el lote con cajas, peso y costo.');
     const bodega = await bodegaDeProducto(negocioId, producto.linea_operacion);
     if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, 'No tienes acceso a este almacén');
@@ -287,6 +289,7 @@ existenciasRouter.get(
         where: {
           negocio_id: req.auth!.negocioId,
           linea_operacion: linea,
+          es_cargo_compra: false,
           OR: snapshotIds.length ? [{ activo: true }, { id: { in: snapshotIds } }] : [{ activo: true }],
         },
         include: { unidad_distribucion: true },

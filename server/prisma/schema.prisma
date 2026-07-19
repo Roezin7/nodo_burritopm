@@ -286,6 +286,9 @@ model products {
   ultimo_costo   Decimal? @db.Decimal(12, 4)
 
   administrado_bodega    Boolean                @default(true)
+  // Renglones contables de compra (p. ej. Grocery and Disposables). Se guardan en
+  // la factura y cuentas por pagar, pero nunca crean existencias, lotes ni costos.
+  es_cargo_compra        Boolean                @default(false)
   requiere_refrigeracion Boolean                @default(false)
   stock_min_bodega       Decimal?               @db.Decimal(12, 3)
   stock_seguridad_bodega Decimal?               @db.Decimal(12, 3)

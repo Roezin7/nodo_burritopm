@@ -627,7 +627,7 @@ export async function listarCartera(negocioId: bigint) {
       include: {
         proveedor: { select: { nombre: true } },
         ubicacion: { select: { nombre: true } },
-        lineas: { include: { producto: { select: { nombre: true, unidad_distribucion: { select: { nombre: true } } } } } },
+        lineas: { include: { producto: { select: { nombre: true, es_cargo_compra: true, unidad_distribucion: { select: { nombre: true } } } } } },
       },
       orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
     }),
@@ -681,7 +681,13 @@ export async function listarCartera(negocioId: bigint) {
     total: num0(c.total),
     saldo: c.estado === 'pendiente' ? num0(c.total) : 0,
     pagado_at: c.pagado_at ? iso(c.pagado_at) : null,
-    lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cantidad: num0(l.cajas), unidad: l.producto.unidad_distribucion.nombre, peso_lb: num0(l.peso_total_lb), importe: num0(l.costo_total) })),
+    lineas: c.lineas.map((l) => ({
+      producto: l.producto.nombre,
+      cantidad: l.producto.es_cargo_compra ? 1 : num0(l.cajas),
+      unidad: l.producto.es_cargo_compra ? 'Cargo contable' : l.producto.unidad_distribucion.nombre,
+      peso_lb: l.producto.es_cargo_compra ? 0 : num0(l.peso_total_lb),
+      importe: num0(l.costo_total),
+    })),
   }));
   const pendientesEmitidas = emitidas.filter((f) => f.en_ciclo && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');

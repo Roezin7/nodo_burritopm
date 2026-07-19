@@ -478,7 +478,7 @@ function SucursalesOverview({ sucursales, onElegir }: { sucursales: UbicacionAsi
   );
 }
 
-interface ProdCat { id: number; nombre: string; sku: string; unidad_distribucion: string; ultimo_costo: number | null; activo: boolean }
+interface ProdCat { id: number; nombre: string; sku: string; unidad_distribucion: string; ultimo_costo: number | null; activo: boolean; es_cargo_compra: boolean }
 
 /** Tres acciones claras de la bodega: entrada (suma), salida (resta) y contar (conteo físico). */
 function AccionesBodega({ busy, entradaAbierta, salidaAbierta, onToggleEntrada, onToggleSalida, onTomarInventario }: {
@@ -529,7 +529,7 @@ function RegistrarSalida({ abierto, sucursales, onClose, onHecho }: {
 
   useEffect(() => {
     if (!abierto || productos.length) return;
-    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo)))
+    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo && !p.es_cargo_compra)))
       .catch((e) => toast.error(mensajeError(e, 'No se pudo cargar el catálogo de productos.')));
   }, [abierto, productos.length, toast]);
 
@@ -642,7 +642,7 @@ function AgregarEntrada({ abierto, onClose, onHecho }: { abierto: boolean; onClo
 
   useEffect(() => {
     if (!abierto || productos.length) return;
-    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo)))
+    api<ProdCat[]>('/catalogo/productos').then((ps) => setProductos(ps.filter((p) => p.activo && !p.es_cargo_compra)))
       .catch((e) => toast.error(mensajeError(e, 'No se pudo cargar el catálogo de productos.')));
   }, [abierto, productos.length, toast]);
 

@@ -144,6 +144,26 @@ async function main() {
   }
 
   await seedDesechables(org.id, catDesechables.id, caja.id);
+  await prisma.products.upsert({
+    where: { negocio_id_sku: { negocio_id: org.id, sku: 'EXP-GROCERY-DISPOSABLES' } },
+    update: { es_cargo_compra: true },
+    create: {
+      negocio_id: org.id,
+      nombre: 'Grocery and Disposables',
+      sku: 'EXP-GROCERY-DISPOSABLES',
+      categoria_id: catCarne.id,
+      unidad_distribucion_id: pieza.id,
+      unidad_compra_id: pieza.id,
+      unidad_almacen_id: pieza.id,
+      linea_operacion: 'carne',
+      tipo_operativo: 'servicio',
+      administrado_bodega: false,
+      es_cargo_compra: true,
+      requiere_refrigeracion: false,
+      markup_caja: 0,
+      orden_operativo: 1000,
+    },
+  });
   const ordenCarne: Record<string, number> = {
     'MEAT-STEAK': 1, 'MEAT-CHICKEN': 2, 'MEAT-PASTOR-BPM': 3, 'MEAT-PASTOR-TAP': 3,
     'MEAT-ASADA': 4, 'MEAT-FAJITAS': 5, 'MEAT-MILANESA': 6, 'MEAT-TAMAL': 7,

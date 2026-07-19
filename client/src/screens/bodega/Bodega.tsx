@@ -191,6 +191,17 @@ function esRutaTapatios(ruta: RutaDetalle) {
   return ruta.nombre.toLowerCase().includes('tapat');
 }
 
+function ordenarDestinosTapatios(destinos: DestinoDocumento[]) {
+  const prioridad = (nombre: string) => {
+    const normalizado = nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (normalizado.includes('glen ellyn')) return 0;
+    if (normalizado.includes('streamwood')) return 1;
+    if (normalizado.includes('lombard')) return 2;
+    return 3;
+  };
+  return [...destinos].sort((a, b) => prioridad(a.nombre) - prioridad(b.nombre) || a.nombre.localeCompare(b.nombre, 'es'));
+}
+
 function destinosDeRuta(ruta: RutaDetalle): DestinoDocumento[] {
   const destinos = new Map<string, DestinoDocumento>();
   for (const parada of [...ruta.paradas].sort((a, b) => a.orden - b.orden)) {
@@ -452,7 +463,8 @@ function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
   fecha: string | null;
 }) {
   const fechaRuta = ruta.fecha_entrega || fecha;
-  const totalesPorFila = filas.map((fila) => destinos.reduce((total, destino) => total + cantidadFila(destino, fila), 0));
+  const destinosOrdenados = ordenarDestinosTapatios(destinos);
+  const totalesPorFila = filas.map((fila) => destinosOrdenados.reduce((total, destino) => total + cantidadFila(destino, fila), 0));
   const totalRuta = totalesPorFila.reduce((total, cantidad) => total + cantidad, 0);
 
   return <div className="dispatch-tapatios-document">
@@ -462,10 +474,10 @@ function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
       <span>{fechaDocumento(fechaRuta)}</span>
     </header>
     <div className="dispatch-tapatios-grid">
-      {destinos.map((destino, indiceDestino) => {
+      {destinosOrdenados.map((destino, indiceDestino) => {
         const cantidades = filas.map((fila) => cantidadFila(destino, fila));
         const totalDestino = cantidades.reduce((total, cantidad) => total + cantidad, 0);
-        const incluyeTotalRuta = indiceDestino === 0;
+        const incluyeTotalRuta = indiceDestino === destinosOrdenados.length - 1;
         return <section className={`dispatch-tapatios-stop ${incluyeTotalRuta ? 'dispatch-tapatios-stop--route-total' : ''}`} key={destino.clave}>
           <header>
             <strong>{destino.nombre}</strong>
@@ -473,18 +485,18 @@ function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
           </header>
           <div className="dispatch-tapatios-date">{fechaDocumento(fechaRuta)}</div>
           <table className="dispatch-tapatios-table">
-            <thead><tr>{incluyeTotalRuta && <th>TOTAL</th>}<th>ITEM</th><th>QTY</th></tr></thead>
+            <thead><tr><th>ITEM</th><th>QTY</th>{incluyeTotalRuta && <th>TOTAL</th>}</tr></thead>
             <tbody>{filas.map((fila, indiceFila) => <tr key={`${destino.clave}:${fila.nombre}`}>
-              {incluyeTotalRuta && <td>{numero(totalesPorFila[indiceFila])}</td>}
               <td>{fila.nombre}</td>
-              <td>{numero(cantidades[indiceFila])}</td>
+              <td>{cantidades[indiceFila] > 0 ? numero(cantidades[indiceFila]) : ''}</td>
+              {incluyeTotalRuta && <td>{totalesPorFila[indiceFila] > 0 ? numero(totalesPorFila[indiceFila]) : ''}</td>}
             </tr>)}</tbody>
-            <tfoot><tr>{incluyeTotalRuta && <th>{numero(totalRuta)}</th>}<th>TOTAL</th><th>{numero(totalDestino)}</th></tr></tfoot>
+            <tfoot><tr><th>TOTAL</th><th>{totalDestino > 0 ? numero(totalDestino) : ''}</th>{incluyeTotalRuta && <th>{totalRuta > 0 ? numero(totalRuta) : ''}</th>}</tr></tfoot>
           </table>
         </section>;
       })}
     </div>
-    <footer>{ruta.conductor || 'CHOFER'} · {ruta.nombre} · {destinos.map((destino) => destino.nombre).join(' → ')}</footer>
+    <footer>{ruta.conductor || 'CHOFER'} · {ruta.nombre} · {destinosOrdenados.map((destino) => destino.nombre).join(' → ')}</footer>
   </div>;
 }
 

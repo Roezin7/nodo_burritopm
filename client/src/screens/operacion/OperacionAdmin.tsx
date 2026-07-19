@@ -11,7 +11,7 @@ import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../.
 export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
   ubicaciones: { id: number; nombre: string; tipo: string; empresa: { nombre: string } | null }[];
-  productos: { id: number; nombre: string; sku: string; linea: string; tipo: string; unidad: string; costo: number | null; precio: number | null; peso_caja_lb: number | null; produccion_dias: number[] }[];
+  productos: { id: number; nombre: string; sku: string; linea: string; tipo: string; unidad: string; costo: number | null; precio: number | null; peso_caja_lb: number | null; produccion_dias: number[]; es_cargo_compra: boolean }[];
   proveedores: { id: number; nombre: string }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: string; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
   recetas_produccion: { materia_prima_id: number; producto_salida_id: number; sin_costo: boolean; orden: number }[];
@@ -20,7 +20,7 @@ interface Resumen {
   total_compras: number;
   cantidad_compras: number;
   resumen_proteinas: { product_id: number; producto: string; cajas: number; costo_total: number; costo_caja: number; markup_caja: number; precio_venta_caja: number; venta_total: number }[];
-  compras: { id: number; fecha: string; vence_at: string; proveedor_id: number; ubicacion_id: number; proveedor: string; referencia: string | null; total: number; estado: string; lineas: { product_id: number; producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean }[] }[];
+  compras: { id: number; fecha: string; vence_at: string; proveedor_id: number; ubicacion_id: number; proveedor: string; referencia: string | null; total: number; estado: string; lineas: { product_id: number; producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean; es_cargo_compra: boolean }[] }[];
   producciones: { id: number; fecha: string; materia_prima: string; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; salidas: { producto: string; sku: string; unidad: string; tipo: string | null; cajas: number; costo_caja: number; precio: number }[] }[];
   lotes: { id: number; fecha: string; producto: string; product_id: number; cajas: number; peso_lb: number; costo: number; congelado: boolean }[];
 }
@@ -112,8 +112,8 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
   const productosCompra = useMemo(
     () => catalogo.productos
-      .filter((p) => p.linea === linea && (linea === 'desechables' || ['materia_prima', 'precio_fijo'].includes(p.tipo)))
-      .sort((a, b) => Number(b.tipo === 'materia_prima') - Number(a.tipo === 'materia_prima')),
+      .filter((p) => p.es_cargo_compra || (p.linea === linea && (linea === 'desechables' || ['materia_prima', 'precio_fijo'].includes(p.tipo))))
+      .sort((a, b) => Number(a.es_cargo_compra) - Number(b.es_cargo_compra) || Number(b.tipo === 'materia_prima') - Number(a.tipo === 'materia_prima')),
     [catalogo.productos, linea],
   );
   const [proveedor, setProveedor] = useState(String(catalogo.proveedores[0]?.id ?? ''));
@@ -152,17 +152,20 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     if (capturaPendiente && editandoId == null) guardarBorradorLocal(claveBorradorCompra, { linea, proveedor, fecha, referencia, totalFactura, lineas, idempotencyKey });
   }, [capturaPendiente, claveBorradorCompra, borradorHidratado, editandoId, linea, proveedor, fecha, referencia, totalFactura, lineas, idempotencyKey]);
   const almacen = linea === 'carne' ? carniceria : bodega;
-  const costoInventario = lineas.reduce((total, l) => total + Number(l.costo || 0), 0);
-  const totalCompra = totalFactura === '' ? costoInventario : Number(totalFactura || 0);
+  const costoInventario = lineas.reduce((total, l) => total + (productosCompra.find((p) => String(p.id) === l.producto)?.es_cargo_compra ? 0 : Number(l.costo || 0)), 0);
+  const cargosContables = lineas.reduce((total, l) => total + (productosCompra.find((p) => String(p.id) === l.producto)?.es_cargo_compra ? Number(l.costo || 0) : 0), 0);
+  const totalRenglones = costoInventario + cargosContables;
+  const totalCompra = totalFactura === '' ? totalRenglones : Number(totalFactura || 0);
   const lineasValidas = lineas.length > 0 && lineas.every((l) => {
     const producto = productosCompra.find((p) => String(p.id) === l.producto);
+    if (producto?.es_cargo_compra) return Number(l.costo) > 0;
     return Boolean(l.producto && Number(l.cajas) > 0 && Number(l.costo) > 0 && (producto?.tipo !== 'materia_prima' || Number(l.peso) > 0));
   });
   async function guardar() {
     if (!almacen) { setError('Falta configurar el almacén de esta línea.'); return; }
     setBusy(true); setError('');
     try {
-      const body = { proveedor_id: Number(proveedor), ubicacion_id: almacen.id, fecha, referencia: referencia || null, total_factura: totalFactura === '' ? null : Number(totalFactura), ...(editandoId == null ? { idempotency_key: idempotencyKey } : {}), lineas: lineas.map((l) => { const p = productosCompra.find((producto) => String(producto.id) === l.producto); const materiaPrima = p?.tipo === 'materia_prima'; return { product_id: Number(l.producto), cajas: Number(l.cajas), peso_total_lb: materiaPrima ? Number(l.peso) : 0, costo_total: Number(l.costo), congelado: materiaPrima && l.congelado }; }) };
+      const body = { proveedor_id: Number(proveedor), ubicacion_id: almacen.id, fecha, referencia: referencia || null, total_factura: totalFactura === '' ? null : Number(totalFactura), ...(editandoId == null ? { idempotency_key: idempotencyKey } : {}), lineas: lineas.map((l) => { const p = productosCompra.find((producto) => String(producto.id) === l.producto); const materiaPrima = p?.tipo === 'materia_prima'; return { product_id: Number(l.producto), cajas: p?.es_cargo_compra ? 1 : Number(l.cajas), peso_total_lb: materiaPrima ? Number(l.peso) : 0, costo_total: Number(l.costo), congelado: materiaPrima && l.congelado }; }) };
       await api(editandoId == null ? '/operacion/compras' : `/operacion/compras/${editandoId}`, { method: editandoId == null ? 'POST' : 'PATCH', body });
       const fueEdicion = editandoId != null;
       setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setReferencia(''); setTotalFactura(''); setEditandoId(null); setIdempotencyKey(nuevaClaveIdempotencia('compra'));
@@ -170,15 +173,21 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
       await onDone(fueEdicion ? 'Compra actualizada e inventario recalculado.' : undefined);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar la compra.'); } finally { setBusy(false); }
   }
+  function lineaDeCompra(compra: Resumen['compras'][number]): 'carne' | 'desechables' {
+    const productoInventariable = compra.lineas
+      .map((lineaCompra) => catalogo.productos.find((producto) => producto.id === lineaCompra.product_id))
+      .find((producto) => producto && !producto.es_cargo_compra);
+    if (productoInventariable) return productoInventariable.linea === 'desechables' ? 'desechables' : 'carne';
+    return compra.ubicacion_id === bodega?.id ? 'desechables' : 'carne';
+  }
   function editarCompra(compra: Resumen['compras'][number]) {
-    const primera = catalogo.productos.find((p) => p.id === compra.lineas[0]?.product_id);
-    setLinea(primera?.linea === 'desechables' ? 'desechables' : 'carne');
+    setLinea(lineaDeCompra(compra));
     setProveedor(String(compra.proveedor_id));
     setFecha(compra.fecha);
     setReferencia(compra.referencia ?? '');
     const costoLineas = compra.lineas.reduce((total, lineaCompra) => total + lineaCompra.costo, 0);
     setTotalFactura(Math.abs(costoLineas - compra.total) > 0.009 ? String(compra.total) : '');
-    setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
+    setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: l.es_cargo_compra ? '1' : String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
     setEditandoId(compra.id);
     setError('');
     requestAnimationFrame(() => editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -194,13 +203,13 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     guardarBorradorLocal(claveBorradorCompra, null);
   }
   function repetirUltima() {
-    const compra = resumen.compras.find((c) => catalogo.productos.find((p) => p.id === c.lineas[0]?.product_id)?.linea === linea);
+    const compra = resumen.compras.find((c) => lineaDeCompra(c) === linea);
     if (!compra) { setError(`No hay una compra anterior de ${linea}.`); return; }
     setProveedor(String(compra.proveedor_id));
     setReferencia('');
     setTotalFactura('');
     setIdempotencyKey(nuevaClaveIdempotencia('compra'));
-    setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
+    setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: l.es_cargo_compra ? '1' : String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
     setError('');
   }
   function cambiarLineaCompra(siguiente: 'carne' | 'desechables') {
@@ -237,13 +246,13 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
           <label className="field"><span>Proveedor</span><select data-purchase-entry value={proveedor} onKeyDown={avanzarConEnter} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
           <label className="field"><span>Fecha</span><input data-purchase-entry type="date" min={semana.inicio} max={semana.fin} value={fecha} onKeyDown={avanzarConEnter} onChange={(e) => setFecha(e.target.value)} /></label>
           <label className="field field--wide"><span>Factura / referencia</span><input data-purchase-entry value={referencia} onKeyDown={avanzarConEnter} onChange={(e) => setReferencia(e.target.value)} /></label>
-          <label className="field"><span>Total de factura <em>opcional</em></span><div className="input-prefix"><span>$</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder={costoInventario.toFixed(2)} value={totalFactura} onKeyDown={avanzarConEnter} onChange={(e) => setTotalFactura(e.target.value)} /></div><small>Solo si incluye flete u otros cargos.</small></label>
+          <label className="field"><span>Total de factura <em>opcional</em></span><div className="input-prefix"><span>$</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder={totalRenglones.toFixed(2)} value={totalFactura} onKeyDown={avanzarConEnter} onChange={(e) => setTotalFactura(e.target.value)} /></div><small>Los groceries se capturan como un renglón.</small></label>
         </div>
         <div className="purchase-lines">
-          {lineas.map((l, indice) => { const seleccionado = productosCompra.find((p) => String(p.id) === l.producto); const requierePeso = seleccionado?.tipo === 'materia_prima'; const pesoCaja = Number(l.cajas) > 0 ? Number(l.peso) / Number(l.cajas) : 0; return <div className="purchase-line" key={l.clave}>
+          {lineas.map((l, indice) => { const seleccionado = productosCompra.find((p) => String(p.id) === l.producto); const requierePeso = seleccionado?.tipo === 'materia_prima'; const esCargo = Boolean(seleccionado?.es_cargo_compra); const pesoCaja = Number(l.cajas) > 0 ? Number(l.peso) / Number(l.cajas) : 0; return <div className="purchase-line" key={l.clave}>
             <span className="purchase-line__number">{indice + 1}</span>
-            <label className="field"><span>Producto</span><select data-purchase-entry value={l.producto} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { producto: e.target.value })}>{productosCompra.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
-            <label className="field field--number"><span>{seleccionado?.unidad ?? 'Cantidad'}</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={l.cajas} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { cajas: e.target.value })} /></label>
+            <label className="field"><span>Producto</span><select data-purchase-entry value={l.producto} onKeyDown={avanzarConEnter} onChange={(e) => { const siguiente = productosCompra.find((p) => String(p.id) === e.target.value); editarLinea(l.clave, { producto: e.target.value, cajas: siguiente?.es_cargo_compra ? '1' : esCargo ? '' : l.cajas, peso: '', congelado: false }); }}>{productosCompra.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
+            {esCargo ? <div className="field field--number"><span>Tipo</span><strong>Cargo contable</strong><small>Sin inventario</small></div> : <label className="field field--number"><span>{seleccionado?.unidad ?? 'Cantidad'}</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" value={l.cajas} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { cajas: e.target.value })} /></label>}
             {requierePeso ? <label className="field field--number"><span>Peso total</span><div className="input-suffix"><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.peso} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { peso: e.target.value })} /><span>lb</span></div><small>{pesoCaja.toFixed(2)} lb/caja</small></label> : <span />}
             <label className="field field--number"><span>Total</span><div className="input-prefix"><span>$</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.costo} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { costo: e.target.value })} /></div></label>
             {requierePeso && <label className="check-card"><input type="checkbox" checked={l.congelado} onChange={(e) => editarLinea(l.clave, { congelado: e.target.checked })} /><span><strong>Congelado</strong></span></label>}
@@ -251,7 +260,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
           </div>; })}
           <button type="button" className="btn btn-secondary btn-sm purchase-add" onClick={() => setLineas((actuales) => [...actuales, nuevaLinea(String(productosCompra[0]?.id ?? ''))])}>+ Agregar producto</button>
         </div>
-        <div className="form-submit form-submit--summary"><div className="form-summary"><span>{lineas.length} renglón{lineas.length === 1 ? '' : 'es'}</span><span>{totalFactura === '' ? 'Total' : `Inventario ${usd(costoInventario)} · Factura`} <strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={limpiarCompra}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
+        <div className="form-submit form-submit--summary"><div className="form-summary"><span>{lineas.length} renglón{lineas.length === 1 ? '' : 'es'}</span><span>{cargosContables > 0 ? `Inventario ${usd(costoInventario)} · Cargos ${usd(cargosContables)} · ` : ''}{totalFactura === '' ? 'Total ' : 'Factura '}<strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={limpiarCompra}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
     </section>
 
     {semana.actual && resumen.lotes.length > 0 && <CollapsibleSection title="Materia prima disponible" count={`${resumen.lotes.length} lotes`} defaultOpen={false}>
@@ -259,7 +268,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     </CollapsibleSection>}
 
     <CollapsibleSection title="Compras registradas" count={resumen.cantidad_compras} summary={`Total ${usd(resumen.total_compras)}`}>
-      <div className="record-list">{resumen.compras.map((c) => { const costoLineas = c.lineas.reduce((total, lineaCompra) => total + lineaCompra.costo, 0); return <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha}{c.referencia ? ` · ${c.referencia}` : ''} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}{Math.abs(c.total - costoLineas) > 0.009 && <small>Factura {usd(c.total)} · costo de inventario {usd(costoLineas)}</small>}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>; })}</div>
+      <div className="record-list">{resumen.compras.map((c) => { const costoInventarioCompra = c.lineas.reduce((total, lineaCompra) => total + (lineaCompra.es_cargo_compra ? 0 : lineaCompra.costo), 0); const cargosCompra = c.lineas.reduce((total, lineaCompra) => total + (lineaCompra.es_cargo_compra ? lineaCompra.costo : 0), 0); const totalLineas = costoInventarioCompra + cargosCompra; return <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha}{c.referencia ? ` · ${c.referencia}` : ''} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.es_cargo_compra ? 'cargo contable' : `${l.cajas} cajas${l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''}`} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}{cargosCompra > 0 && <small>Inventario {usd(costoInventarioCompra)} · cargos sin inventario {usd(cargosCompra)}</small>}{Math.abs(c.total - totalLineas) > 0.009 && <small>Factura {usd(c.total)} · suma de renglones {usd(totalLineas)}</small>}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>; })}</div>
     </CollapsibleSection>
   </div>;
 }

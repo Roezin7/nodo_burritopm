@@ -69,7 +69,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   const corte = sumarDias(inicio, 3);
   const enPrimerCorte = (d: Date) => d <= corte;
   const productos = await prisma.products.findMany({
-    where: { negocio_id: negocioId, activo: true, linea_operacion: 'carne' },
+    where: { negocio_id: negocioId, activo: true, linea_operacion: 'carne', es_cargo_compra: false },
     include: { unidad_distribucion: { select: { nombre: true } } },
     orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
   });

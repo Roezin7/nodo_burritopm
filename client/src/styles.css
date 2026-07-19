@@ -3698,8 +3698,8 @@ form > .form-actions .btn,
 .dispatch-tapatios-table thead th { font-weight: 900; text-decoration: underline; }
 .dispatch-tapatios-table th:first-child:last-child { width: auto; }
 .dispatch-tapatios-table th:last-child, .dispatch-tapatios-table td:last-child { width: 48px; font-weight: 800; }
-.dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:first-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:first-child { width: 48px; }
-.dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:nth-child(2), .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:nth-child(2) { width: auto; }
+.dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:last-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:last-child { width: 48px; }
+.dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:first-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:first-child { width: auto; }
 .dispatch-tapatios-table tbody td:nth-last-child(2) { font-weight: 650; }
 .dispatch-tapatios-table tfoot th { border-top: 4px double #111; font-size: 0.82rem; }
 .dispatch-tapatios-document > footer { margin-top: 6px; font-size: 0.55rem; font-weight: 750; text-transform: uppercase; }
@@ -4098,7 +4098,7 @@ form > .form-actions .btn,
   .dispatch-tapatios-date { min-height: 6mm; padding-top: 1.2mm; font-size: 7.5pt; }
   .dispatch-tapatios-table { margin-top: 2mm; font-size: 7.5pt; }
   .dispatch-tapatios-table th, .dispatch-tapatios-table td { height: 6mm; padding: 0 1mm; border-color: #000; }
-  .dispatch-tapatios-table th:last-child, .dispatch-tapatios-table td:last-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:first-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:first-child { width: 12mm; }
+  .dispatch-tapatios-table th:last-child, .dispatch-tapatios-table td:last-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table th:last-child, .dispatch-tapatios-stop--route-total .dispatch-tapatios-table td:last-child { width: 12mm; }
   .dispatch-tapatios-table tfoot th { font-size: 9pt; }
   .dispatch-tapatios-document > footer { font-size: 6pt; }
   .dispatch-print-page > footer { font-size: 6pt; }

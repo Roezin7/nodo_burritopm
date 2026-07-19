@@ -182,6 +182,7 @@ function productoDTO(p: ProductoConRel) {
     costo_promedio: num(p.costo_promedio),
     ultimo_costo: num(p.ultimo_costo),
     administrado_bodega: p.administrado_bodega,
+    es_cargo_compra: p.es_cargo_compra,
     requiere_refrigeracion: p.requiere_refrigeracion,
     stock_min_bodega: num(p.stock_min_bodega),
     stock_seguridad_bodega: num(p.stock_seguridad_bodega),
@@ -394,7 +395,7 @@ catalogoRouter.get(
 
     const [productos, params] = await Promise.all([
       prisma.products.findMany({
-        where: { negocio_id: req.auth!.negocioId, activo: true },
+        where: { negocio_id: req.auth!.negocioId, activo: true, es_cargo_compra: false },
         include: { categorias: true, unidad_distribucion: true },
         orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
       }),

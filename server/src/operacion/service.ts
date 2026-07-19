@@ -27,6 +27,11 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
 const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029']);
 
+/** Un cargo de compra forma parte de la factura, pero no representa mercancía. */
+export function esCargoContableCompra(producto: { es_cargo_compra: boolean }) {
+  return producto.es_cargo_compra;
+}
+
 export function precioVentaProducto(p: {
   tipo_operativo: string | null;
   precio_venta_fijo: Prisma.Decimal | null;
@@ -188,6 +193,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       precio_pendiente: Boolean(rangoPrecio && p.tipo_operativo === 'proteina' && preciosSemana?.get(p.id.toString()) == null),
       precio_fijo: esAdmin ? num(p.precio_venta_fijo) : undefined, markup: esAdmin ? (p.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : num0(p.markup_caja)) : undefined,
       peso_caja_lb: num(p.peso_caja_lb), produccion_dias: p.produccion_dias,
+      es_cargo_compra: esAdmin ? p.es_cargo_compra : undefined,
     })),
     proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre })) : [],
     plantillas: esAdmin ? plantillas.map((p) => ({
@@ -262,6 +268,7 @@ async function prepararPedido(negocioId: bigint, input: GuardarPedidoInput, esAd
     where: { id: { in: productIds }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true },
   });
   if (productos.length !== productIds.length) throw new HttpError(400, 'Hay productos que no pertenecen a la operación');
+  if (productos.some(esCargoContableCompra)) throw new HttpError(400, 'Los cargos contables de compra no se pueden incluir en una venta');
   const fueraDeFormato = productos.some((p) => p.linea_operacion !== input.linea && !(input.linea === 'carne' && consumiblesEnOrdenCarne.has(p.sku)));
   if (fueraDeFormato) throw new HttpError(400, 'Hay productos fuera del formato de esta orden');
   if (input.linea === 'carne') {
@@ -1090,13 +1097,16 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
   if (productos.length !== new Set(ids.map(String)).size) throw new HttpError(400, 'La compra contiene un producto no válido');
   for (const l of input.lineas) {
     const p = productos.find((x) => x.id === BigInt(l.product_id))!;
+    if (esCargoContableCompra(p)) continue;
     if (p.tipo_operativo === 'materia_prima' && (l.peso_total_lb ?? 0) <= 0) throw new HttpError(400, `${p.nombre} requiere peso total`);
     if (p.linea_operacion === 'carne' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${p.nombre} debe recibirse en Carnicería`);
     if (p.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${p.nombre} debe recibirse en Bodega Adison`);
   }
-  if (ubicacion.codigo === 'CARN') await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
-  const costoInventario = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
-  const total = r2(input.total_factura ?? costoInventario);
+  if (ubicacion.codigo === 'CARN' && productos.some((p) => !esCargoContableCompra(p))) {
+    await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
+  }
+  const totalRenglones = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
+  const total = r2(input.total_factura ?? totalRenglones);
   if (total < 0) throw new HttpError(400, 'El total de la factura no puede ser negativo');
   const f = fecha(input.fecha);
 
@@ -1116,10 +1126,14 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     });
     for (const [i, l] of input.lineas.entries()) {
       const pid = BigInt(l.product_id);
-      const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacion.id, product_id: pid } } });
       const prod = productos.find((p) => p.id === pid)!;
       const pesoTotal = l.peso_total_lb ?? 0;
       const esMateriaPrima = prod.tipo_operativo === 'materia_prima';
+      const cl = await tx.compra_lineas.create({ data: { compra_id: c.id, product_id: pid, cajas: r3(l.cajas), peso_total_lb: r3(pesoTotal), costo_total: r2(l.costo_total), congelado: esMateriaPrima && (l.congelado ?? false) } });
+      // El importe queda en compra_lineas y en compras.total para CxP. Al no generar
+      // movimientos ni lotes, jamás altera el costo de la materia prima de la factura.
+      if (esCargoContableCompra(prod)) continue;
+      const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacion.id, product_id: pid } } });
       const manejaLote = esMateriaPrima || prod.linea_operacion === 'desechables';
       // El peso promedio de materia prima se deriva de lotes comprados, nunca de un
       // ajuste manual de existencias. Así una captura física no contamina producción.
@@ -1137,7 +1151,6 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
         : cajasPrev * (num(prod.peso_caja_lb) ?? (pesoTotal > 0 ? pesoTotal / l.cajas : 0));
       const pesoCaja = esMateriaPrima ? r3((pesoPrev + pesoTotal) / (cajasPrev + l.cajas)) : num(prod.peso_caja_lb);
       const costoCaja = r4(l.costo_total / l.cajas);
-      const cl = await tx.compra_lineas.create({ data: { compra_id: c.id, product_id: pid, cajas: r3(l.cajas), peso_total_lb: r3(pesoTotal), costo_total: r2(l.costo_total), congelado: esMateriaPrima && (l.congelado ?? false) } });
       if (manejaLote) {
         await tx.lotes_materia_prima.create({
           data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: pid, compra_linea_id: cl.id, fecha: f, congelado: esMateriaPrima && (l.congelado ?? false), cajas_iniciales: r3(l.cajas), cajas_disponibles: r3(l.cajas), peso_inicial_lb: esMateriaPrima ? r3(pesoTotal) : 0, peso_disponible_lb: esMateriaPrima ? r3(pesoTotal) : 0, costo_inicial: r2(l.costo_total), costo_disponible: r2(l.costo_total) },
@@ -1186,13 +1199,17 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
   if (productos.length !== new Set(input.lineas.map((l) => String(l.product_id))).size) throw new HttpError(400, 'La compra contiene un producto no válido');
   for (const linea of input.lineas) {
     const producto = productos.find((p) => p.id === BigInt(linea.product_id))!;
+    if (esCargoContableCompra(producto)) continue;
     if (producto.tipo_operativo === 'materia_prima' && (linea.peso_total_lb ?? 0) <= 0) throw new HttpError(400, `${producto.nombre} requiere peso total`);
     if (producto.linea_operacion === 'carne' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${producto.nombre} debe recibirse en Carnicería`);
     if (producto.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${producto.nombre} debe recibirse en Bodega Adison`);
   }
+  if (ubicacion.codigo === 'CARN' && productos.some((producto) => !esCargoContableCompra(producto))) {
+    await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
+  }
 
-  const costoInventario = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
-  const total = r2(input.total_factura ?? costoInventario);
+  const totalRenglones = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
+  const total = r2(input.total_factura ?? totalRenglones);
   if (total < 0) throw new HttpError(400, 'El total de la factura no puede ser negativo');
   const nuevaFecha = fecha(input.fecha);
   return transaccionSerializable(async (tx) => {
@@ -1206,6 +1223,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
 
     const gruposAnteriores = new Map<string, { productId: bigint; cajas: number; costo: number; materiaPrima: boolean; manejaLote: boolean; nombre: string }>();
     for (const linea of anterior.lineas) {
+      if (esCargoContableCompra(linea.producto)) continue;
       const materiaPrima = linea.producto.tipo_operativo === 'materia_prima';
       const manejaLote = materiaPrima || linea.producto.linea_operacion === 'desechables';
       if (manejaLote) {
@@ -1249,8 +1267,12 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
       const productId = BigInt(linea.product_id);
       const producto = productos.find((p) => p.id === productId)!;
       const materiaPrima = producto.tipo_operativo === 'materia_prima';
-      const manejaLote = materiaPrima || producto.linea_operacion === 'desechables';
       const pesoTotal = linea.peso_total_lb ?? 0;
+      const compraLinea = await tx.compra_lineas.create({
+        data: { compra_id: compraId, product_id: productId, cajas: r3(linea.cajas), peso_total_lb: r3(pesoTotal), costo_total: r2(linea.costo_total), congelado: materiaPrima && (linea.congelado ?? false) },
+      });
+      if (esCargoContableCompra(producto)) continue;
+      const manejaLote = materiaPrima || producto.linea_operacion === 'desechables';
       const lotesPrevios = manejaLote ? await tx.lotes_materia_prima.findMany({
         where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: productId, cajas_disponibles: { gt: 0 } },
         select: { cajas_disponibles: true, peso_disponible_lb: true },
@@ -1258,9 +1280,6 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
       const cajasPrevias = lotesPrevios.reduce((suma, lote) => suma + num0(lote.cajas_disponibles), 0);
       const pesoPrevio = lotesPrevios.reduce((suma, lote) => suma + num0(lote.peso_disponible_lb), 0);
       const costoCaja = r4(linea.costo_total / linea.cajas);
-      const compraLinea = await tx.compra_lineas.create({
-        data: { compra_id: compraId, product_id: productId, cajas: r3(linea.cajas), peso_total_lb: r3(pesoTotal), costo_total: r2(linea.costo_total), congelado: materiaPrima && (linea.congelado ?? false) },
-      });
       if (manejaLote) await tx.lotes_materia_prima.create({
         data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: productId, compra_linea_id: compraLinea.id, fecha: nuevaFecha, congelado: materiaPrima && (linea.congelado ?? false), cajas_iniciales: r3(linea.cajas), cajas_disponibles: r3(linea.cajas), peso_inicial_lb: materiaPrima ? r3(pesoTotal) : 0, peso_disponible_lb: materiaPrima ? r3(pesoTotal) : 0, costo_inicial: r2(linea.costo_total), costo_disponible: r2(linea.costo_total) },
       });
@@ -1342,6 +1361,7 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
 
     const grupos = new Map<string, { productId: bigint; cajas: number; costo: number; materiaPrima: boolean; manejaLote: boolean; nombre: string }>();
     for (const linea of compra.lineas) {
+      if (esCargoContableCompra(linea.producto)) continue;
       const materiaPrima = linea.producto.tipo_operativo === 'materia_prima';
       const manejaLote = materiaPrima || linea.producto.linea_operacion === 'desechables';
       if (manejaLote) {
@@ -1442,12 +1462,12 @@ export async function guardarInventarioFinal(
   const ids = [...new Set(input.lineas.map((l) => BigInt(l.product_id)))];
   const lineaEsperada = ubicacion.codigo === 'CARN' ? 'carne' : ubicacion.codigo === 'BOD' ? 'desechables' : undefined;
   const productos = await prisma.products.findMany({
-    where: { id: { in: ids }, negocio_id: negocioId, activo: true, linea_operacion: lineaEsperada },
+    where: { id: { in: ids }, negocio_id: negocioId, activo: true, linea_operacion: lineaEsperada, es_cargo_compra: false },
   });
   if (productos.length !== ids.length) throw new HttpError(400, 'El inventario contiene productos no válidos');
   if (lineaEsperada) {
     const esperados = await prisma.products.findMany({
-      where: { negocio_id: negocioId, activo: true, linea_operacion: lineaEsperada },
+      where: { negocio_id: negocioId, activo: true, linea_operacion: lineaEsperada, es_cargo_compra: false },
       select: { id: true, nombre: true },
     });
     const capturados = new Set(ids.map(String));
@@ -1961,7 +1981,7 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
     resumen_proteinas: resumenProteinas,
-    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado })) })),
+    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
     // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.
