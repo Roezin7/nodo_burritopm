@@ -65,7 +65,7 @@ async function main() {
   for (const numeroSemana of [27, 28]) {
     const semana = await prisma.semanas_operativas.findFirst({ where: { negocio_id: negocio.id, anio: 2026, semana: numeroSemana, estado: 'cerrada' } });
     if (!semana) continue;
-    const filas = new Map<string, { ubicacion_id: bigint; product_id: bigint; disponible: number; transito: number; costo: number | null }>();
+    const filas = new Map<string, { ubicacion_id: bigint; product_id: bigint; disponible: number; transito: number; costo: number | null; pesoTotal?: number; costoTotal?: number }>();
     for (const producto of productos) {
       filas.set(producto.id.toString(), {
         ubicacion_id: producto.linea_operacion === 'carne' ? carniceria.id : bodega.id,
@@ -93,8 +93,9 @@ async function main() {
     for (const [sku, row] of Object.entries(raw)) {
       const producto = porSku.get(sku); if (!producto) continue;
       const disponible = numero(pw.getCell(row, 13).value); // M: full cases
+      const pesoTotal = numero(pw.getCell(row, 15).value); // O: closing weight
       const valor = numero(pw.getCell(row, 17).value); // Q: closing cost
-      filas.set(producto.id.toString(), { ubicacion_id: carniceria.id, product_id: producto.id, disponible, transito: 0, costo: disponible > 0 ? valor / disponible : null });
+      filas.set(producto.id.toString(), { ubicacion_id: carniceria.id, product_id: producto.id, disponible, transito: 0, costo: disponible > 0 ? valor / disponible : null, pesoTotal, costoTotal: valor });
     }
     for (const [sku, row] of Object.entries(terminado)) {
       const producto = porSku.get(sku); if (!producto) continue;
@@ -109,6 +110,7 @@ async function main() {
         data: [...filas.values()].map((f) => ({
           semana_id: semana.id, negocio_id: negocio.id, ubicacion_id: f.ubicacion_id, product_id: f.product_id,
           cantidad_disponible: f.disponible, cantidad_reservada: 0, cantidad_transito: f.transito, costo_promedio: f.costo,
+          peso_total_lb: f.pesoTotal ?? null, costo_total: f.costoTotal ?? null,
         })),
       });
     });

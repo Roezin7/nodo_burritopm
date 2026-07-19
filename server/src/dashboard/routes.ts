@@ -237,8 +237,8 @@ dashboardRouter.get(
     const provisionales = existencias.filter((e) => num0(e.cantidad_disponible) < -0.0001).length;
 
     const alertas: { tipo: 'cobro' | 'pago' | 'inventario' | 'pedido' | 'reparto'; titulo: string; detalle: string; ruta: string }[] = [];
-    if (vencidoCobrar > 0) alertas.push({ tipo: 'cobro', titulo: 'Facturas vencidas', detalle: `${facturasPendientes.filter((f) => f.vence_at < hoy).length} facturas · $${r2(vencidoCobrar).toLocaleString('en-US')}`, ruta: '/semana/cierre' });
-    if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/semana/compras' });
+    if (vencidoCobrar > 0) alertas.push({ tipo: 'cobro', titulo: 'Facturas vencidas', detalle: `${facturasPendientes.filter((f) => f.vence_at < hoy).length} facturas · $${r2(vencidoCobrar).toLocaleString('en-US')}`, ruta: '/facturacion' });
+    if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/facturacion' });
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
     if (provisionales > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Inventario por conciliar', detalle: `${provisionales} saldos provisionales negativos`, ruta: '/semana/inventario' });
     if (!usarFacturas && proteinasSinPrecio.length > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Venta pendiente de producción', detalle: `Falta calcular costo + $15 de ${proteinasSinPrecio.map((p) => p.nombre).join(', ')}`, ruta: '/semana/produccion' });

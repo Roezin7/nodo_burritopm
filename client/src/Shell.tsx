@@ -32,6 +32,7 @@ const ITEMS: Item[] = [
   { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'proceso', roles: ['admin', 'encargado_sucursal'] },
   { ruta: '/semana/inventario', label: 'Inventario', icono: 'boxes', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/semana/cierre', label: 'Cierre', icono: 'checks', grupo: 'proceso', soloAdmin: true },
+  { ruta: '/facturacion', label: 'Facturación', icono: 'wallet', grupo: 'sistema', soloAdmin: true },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
 ];
 

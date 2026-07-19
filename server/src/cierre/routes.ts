@@ -13,6 +13,10 @@ cierreRouter.use(requireAuth, soloAdmin);
 
 cierreRouter.get('/', asyncHandler(async (req, res) => res.json(await svc.listarCierres(req.auth!.negocioId))));
 
+cierreRouter.get('/cartera', asyncHandler(async (req, res) => {
+  res.json(await svc.listarCartera(req.auth!.negocioId));
+}));
+
 cierreRouter.post('/cerrar', asyncHandler(async (req, res) => {
   const { fecha_cierre } = z.object({ fecha_cierre: fecha }).parse(req.body);
   res.status(201).json(await svc.cerrarSemana(req.auth!.negocioId, req.auth!.usuarioId, fecha_cierre));

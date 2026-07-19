@@ -332,6 +332,27 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       return siguientes;
     });
   }
+  const produccionesPorDia = useMemo(() => {
+    const grupos = new Map<string, Resumen['producciones']>();
+    for (const produccion of resumen.producciones) {
+      const grupo = grupos.get(produccion.fecha) ?? [];
+      grupo.push(produccion);
+      grupos.set(produccion.fecha, grupo);
+    }
+    return [...grupos.entries()]
+      .sort(([fechaA], [fechaB]) => fechaA.localeCompare(fechaB))
+      .map(([fechaGrupo, producciones]) => {
+        const fechaLocal = new Date(`${fechaGrupo}T12:00:00`);
+        return {
+          fecha: fechaGrupo,
+          dia: diasLargos[fechaLocal.getDay()],
+          fechaCorta: fechaLocal.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }).replace('.', ''),
+          producciones,
+          cajasEntrada: producciones.reduce((total, produccion) => total + produccion.cajas_entrada, 0),
+          costo: producciones.reduce((total, produccion) => total + produccion.costo, 0),
+        };
+      });
+  }, [resumen.producciones]);
   const todasProduccionesAbiertas = resumen.producciones.length > 0 && resumen.producciones.every((p) => produccionesAbiertas.has(p.id));
   return <div className="operation-stack">
     <section className="workspace-card production-capture">
@@ -373,15 +394,18 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       </div>}
     </CollapsibleSection>
 
-    <section className="workspace-card"><div className="workspace-card-head batch-list-heading"><div><h2>Producción registrada</h2><p>{resumen.producciones.length} batch{resumen.producciones.length === 1 ? '' : 'es'} esta semana</p></div>{resumen.producciones.length > 0 && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProduccionesAbiertas(todasProduccionesAbiertas ? new Set() : new Set(resumen.producciones.map((p) => p.id)))}>{todasProduccionesAbiertas ? 'Colapsar todo' : 'Expandir todo'}</button>}</div>
-      <div className="batch-list">{resumen.producciones.map((p) => {
-        const abierta = produccionesAbiertas.has(p.id);
-        const resumenSalidas = p.salidas.map((s) => `${s.producto}: ${s.cajas}`).join(' · ');
-        return <article className={`batch-card ${abierta ? 'is-open' : 'is-collapsed'}`} key={p.id}>
-          <header><button type="button" className="batch-collapse-button" aria-expanded={abierta} aria-controls={`batch-${p.id}`} onClick={() => alternarProduccion(p.id)}><span><strong>{p.materia_prima}</strong><small>{p.fecha}{resumenSalidas ? ` · ${resumenSalidas}` : ''}</small></span><i aria-hidden="true">⌄</i></button><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header>
-          {abierta && <div id={`batch-${p.id}`} className="batch-card-detail"><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / subproductos</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo total del batch</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => { const esProteina = s.tipo === 'proteina'; const precioCaja = esProteina ? s.costo_caja + MARKUP_PROTEINA : s.precio; return <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span className="batch-output-prices"><small>Costo por {s.unidad.toLowerCase()}</small><strong>{usd(s.costo_caja)}</strong><small>Venta por {s.unidad.toLowerCase()}</small><strong>{usd(precioCaja)}</strong>{esProteina && <em>+{usd(MARKUP_PROTEINA)} por caja</em>}</span></div>; })}</div></div>}
-        </article>;
-      })}</div>
+    <section className="workspace-card"><div className="workspace-card-head batch-list-heading"><div><h2>Producción registrada</h2><p>{resumen.producciones.length} batch{resumen.producciones.length === 1 ? '' : 'es'} en {produccionesPorDia.length} día{produccionesPorDia.length === 1 ? '' : 's'}</p></div>{resumen.producciones.length > 0 && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setProduccionesAbiertas(todasProduccionesAbiertas ? new Set() : new Set(resumen.producciones.map((p) => p.id)))}>{todasProduccionesAbiertas ? 'Colapsar todo' : 'Expandir todo'}</button>}</div>
+      {produccionesPorDia.length === 0 ? <div className="empty-state"><strong>Sin producción registrada</strong><span>Los batches guardados aparecerán separados por día.</span></div> : <div className="batch-day-list">{produccionesPorDia.map((grupo) => <section className="batch-day" key={grupo.fecha}>
+        <header className="batch-day-heading"><div><span>{grupo.dia}</span><strong>{grupo.fechaCorta}</strong></div><p>{grupo.producciones.length} batch{grupo.producciones.length === 1 ? '' : 'es'} · {grupo.cajasEntrada.toLocaleString('es-MX')} cajas de materia prima · {usd(grupo.costo)}</p></header>
+        <div className="batch-list">{grupo.producciones.map((p) => {
+          const abierta = produccionesAbiertas.has(p.id);
+          const resumenSalidas = p.salidas.map((s) => `${s.producto}: ${s.cajas}`).join(' · ');
+          return <article className={`batch-card ${abierta ? 'is-open' : 'is-collapsed'}`} key={p.id}>
+            <header><button type="button" className="batch-collapse-button" aria-expanded={abierta} aria-controls={`batch-${p.id}`} onClick={() => alternarProduccion(p.id)}><span><strong>{p.materia_prima}</strong><small>{resumenSalidas || 'Sin salidas registradas'}</small></span><i aria-hidden="true">⌄</i></button><div className="batch-card-actions"><span className="yield-pill">Yield {p.yield.toFixed(1)}%</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p.id)}>Eliminar</button></div></header>
+            {abierta && <div id={`batch-${p.id}`} className="batch-card-detail"><div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / subproductos</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo total del batch</small><strong>{usd(p.costo)}</strong></span></div><div className="batch-outputs">{p.salidas.map((s, i) => { const esProteina = s.tipo === 'proteina'; const precioCaja = esProteina ? s.costo_caja + MARKUP_PROTEINA : s.precio; return <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span className="batch-output-prices"><small>Costo por {s.unidad.toLowerCase()}</small><strong>{usd(s.costo_caja)}</strong><small>Venta por {s.unidad.toLowerCase()}</small><strong>{usd(precioCaja)}</strong>{esProteina && <em>+{usd(MARKUP_PROTEINA)} por caja</em>}</span></div>; })}</div></div>}
+          </article>;
+        })}</div>
+      </section>)}</div>}
     </section>
   </div>;
 }

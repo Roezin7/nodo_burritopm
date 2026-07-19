@@ -8,7 +8,7 @@ const EXCEL_DIR = process.env.BPM_EXCEL_DIR ?? fileURLToPath(new URL('./data/3q'
 const APPLY = process.env.APPLY_EXCEL_IMPORT === '1';
 const ONLY_ONCE = process.env.IMPORT_EXCEL_ONCE === '1';
 const PREVIOUS_IMPORT_KEYS = ['excel-3q-2026-semana-28-v2', 'excel-3q-2026-semana-28-v3'];
-// v4 fuerza el backfill de los 122 pedidos y sus renglones aun cuando una versión
+// v4 fuerza el backfill de todos los pedidos y sus renglones aun cuando una versión
 // anterior ya hubiera importado únicamente inventarios, facturas o cierres.
 const IMPORT_KEY = 'excel-3q-2026-pedidos-completos-v4';
 const date = (v: Date | string) => new Date(`${v instanceof Date ? v.toISOString().slice(0, 10) : v.slice(0, 10)}T00:00:00.000Z`);
@@ -41,7 +41,9 @@ const productoCarne: Record<string, string> = {
   'TAPATIOS TACO M': 'MEAT-TAPATIOS-TACO',
 };
 const bpmDesechables = ['LOMBA', 'NAPER', 'CAROL', 'LISLE', 'GLEND', 'WESTC', 'BATAV', 'ALGON', 'NAPER2', 'ROLLI', 'SCHAU', 'CRYST', 'LAKEZ', 'PLAIN', 'FRANK'];
-const lbtDesechables = ['TGE', 'TLO', 'TST', 'TNA'];
+// Columnas AO, AQ, AS y AU del libro: Glen Ellyn, Streamwood, Lombard y Naperville.
+// La versión anterior intercambiaba Streamwood y Lombard al importar el histórico.
+const lbtDesechables = ['TGE', 'TST', 'TLO', 'TNA'];
 const semanas = [
   { numero: 27, carne: 'Meat Order 27', desechables: 'Week (27)', lunes: '2026-06-29', miercoles: '2026-07-01', sabado: '2026-07-04', cerrada: true },
   { numero: 28, carne: 'Meat Order (28)', desechables: 'Week (28)', lunes: '2026-07-06', miercoles: '2026-07-08', sabado: '2026-07-11', cerrada: true },
@@ -84,6 +86,8 @@ async function main() {
   await meatBook.xlsx.readFile(path.join(EXCEL_DIR, '1. Weekly Order 2026 3Q.xlsx'));
   const dispBook = new ExcelJS.Workbook();
   await dispBook.xlsx.readFile(path.join(EXCEL_DIR, '2. Disposables 2026 3Q.xlsx'));
+  const lbtBook = new ExcelJS.Workbook();
+  await lbtBook.xlsx.readFile(path.join(EXCEL_DIR, '5. LBT 2026 3Q.xlsx'));
   const pedidos: PedidoImportado[] = [];
 
   for (const sem of semanas) {
@@ -106,6 +110,18 @@ async function main() {
           if (esTapatios && nombre === 'ALPASTOR') sku = 'MEAT-PASTOR-TAP';
           const cantidad = n(ws.getCell(row, col).value);
           if (!sku || cantidad <= 0) continue;
+          if (esTapatios && nombre === 'TAPATIOS TACO M' && sem.numero <= 28) {
+            const detalle = detalleTacoTapatios(lbtBook.getWorksheet(`Week (${sem.numero})`), codigo, entrega);
+            if (detalle && Math.abs(detalle.pulpa + detalle.tapatios - cantidad) <= 0.001) {
+              for (const [productoSku, qty] of [['MEAT-PULPA', detalle.pulpa], ['MEAT-TAPATIOS-TACO', detalle.tapatios]] as const) {
+                if (qty <= 0) continue;
+                const producto = porSku.get(productoSku);
+                if (!producto) throw new Error(`Falta producto ${productoSku}`);
+                lineas.push({ productId: producto.id, cantidad: qty, precio: precioImportado(producto) });
+              }
+              continue;
+            }
+          }
           const p = porSku.get(sku);
           if (!p) throw new Error(`Falta producto ${sku}`);
           lineas.push({ productId: p.id, cantidad, precio: precioImportado(p) });
@@ -171,6 +187,26 @@ async function main() {
   });
   console.log(`✅ Backfill completo: ${pedidos.length} pedidos y ${pedidos.reduce((a, p) => a + p.lineas.length, 0)} renglones por sucursal.`);
   if (baseAnteriorAplicada) console.log('   Inventario y saldos existentes se conservaron sin cambios.');
+}
+
+function detalleTacoTapatios(ws: ExcelJS.Worksheet | undefined, codigo: string, entrega: string) {
+  if (!ws) return null;
+  const basePorCodigo: Record<string, number> = { TGE: 1, TST: 10, TLO: 19, TNA: 28, TBO: 37 };
+  const base = basePorCodigo[codigo];
+  if (!base || base > ws.actualColumnCount) return null;
+  let pulpa = 0; let tapatios = 0;
+  for (let row = 10; row <= 26; row += 1) {
+    const valorFecha = ws.getCell(row, base).value;
+    const fechaDetalle = valorFecha instanceof Date ? iso(valorFecha) : text(valorFecha);
+    if (fechaDetalle !== entrega) continue;
+    const descripcion = text(ws.getCell(row, base + 2).value).toUpperCase();
+    if (!descripcion.includes('TACO MEAT')) continue;
+    const precio = n(ws.getCell(row, base + 4).value);
+    const cantidad = n(ws.getCell(row, base + 6).value);
+    if (precio <= 100) pulpa += cantidad;
+    else tapatios += cantidad;
+  }
+  return pulpa + tapatios > 0 ? { pulpa, tapatios } : null;
 }
 
 async function actualizarCierresHistoricos(negocioId: bigint) {

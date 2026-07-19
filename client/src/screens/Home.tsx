@@ -90,7 +90,7 @@ const MODULOS: Modulo[] = [
   { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'], requiereReparto: true },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['admin', 'encargado_sucursal'] },
-  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cierre semanal, cobros y Excel', ruta: '/semana/cierre', soloAdmin: true },
+  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cobros, pagos y facturas pendientes', ruta: '/facturacion', soloAdmin: true },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];

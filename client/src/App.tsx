@@ -12,6 +12,7 @@ import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
 import OperacionAdmin from './screens/operacion/OperacionAdmin';
 import SemanaOperacion from './screens/operacion/SemanaOperacion';
+import Facturacion from './screens/Facturacion';
 import { Component, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
 import { OperacionConfigProvider } from './operacion-config';
 import { SemanaProvider } from './semana-context';
@@ -71,7 +72,7 @@ function AppBody() {
         <Route path="/compras" element={<Navigate to="/semana/compras" replace />} />
         <Route path="/produccion" element={<Navigate to="/semana/produccion" replace />} />
         <Route path="/rutas" element={<SoloRol roles={['admin']}><OperacionAdmin seccion="rutas" /></SoloRol>} />
-        <Route path="/facturacion" element={<Navigate to="/semana/cierre" replace />} />
+        <Route path="/facturacion" element={<SoloRol roles={['admin']}><Facturacion /></SoloRol>} />
         <Route path="/operacion" element={<Navigate to="/semana" replace />} />
         <Route path="/distribucion" element={<Navigate to="/semana/ventas" replace />} />
         <Route path="/bodega" element={<Navigate to="/semana/despacho" replace />} />

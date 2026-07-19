@@ -217,15 +217,28 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       for (const l of p.lineas) await tx.pedido_operativo_lineas.update({ where: { id: l.id }, data: { precio_unitario: precios.get(l.product_id.toString()) ?? l.precio_unitario } });
     }
     await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'cerrado' } });
-    const existencias = await tx.existencias.findMany({ where: { negocio_id: negocioId } });
+    const [existencias, lotesCierre] = await Promise.all([
+      tx.existencias.findMany({ where: { negocio_id: negocioId } }),
+      tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
+    ]);
+    const totalesLote = new Map<string, { peso: number; costo: number }>();
+    for (const lote of lotesCierre) {
+      const key = `${lote.ubicacion_id}:${lote.product_id}`;
+      const previo = totalesLote.get(key) ?? { peso: 0, costo: 0 };
+      totalesLote.set(key, { peso: previo.peso + num0(lote.peso_disponible_lb), costo: previo.costo + num0(lote.costo_disponible) });
+    }
     await tx.inventario_semanal.deleteMany({ where: { semana_id: semana.id } });
     if (existencias.length) {
       await tx.inventario_semanal.createMany({
-        data: existencias.map((e) => ({
+        data: existencias.map((e) => {
+          const lote = totalesLote.get(`${e.ubicacion_id}:${e.product_id}`);
+          return {
           semana_id: semana.id, negocio_id: negocioId, ubicacion_id: e.ubicacion_id, product_id: e.product_id,
           cantidad_disponible: e.cantidad_disponible, cantidad_reservada: e.cantidad_reservada,
           cantidad_transito: e.cantidad_transito, costo_promedio: e.costo_promedio,
-        })),
+          peso_total_lb: lote?.peso ?? null,
+          costo_total: lote?.costo ?? r2((num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * num0(e.costo_promedio)),
+        }; }),
       });
     }
     await tx.semanas_operativas.update({ where: { id: semana.id }, data: { estado: 'cerrada', cerrado_por: usuarioId, cerrado_at: new Date() } });
@@ -307,9 +320,88 @@ export async function listarCierres(negocioId: bigint) {
   }));
 }
 
+/** Cartera completa para Control: facturas emitidas y facturas recibidas de proveedores. */
+export async function listarCartera(negocioId: bigint) {
+  const [facturas, compras] = await Promise.all([
+    prisma.facturas.findMany({
+      where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } },
+      include: {
+        semana: { select: { anio: true, semana: true } },
+        empresa: { select: { nombre: true } },
+        ubicacion: { select: { nombre: true } },
+        pagos: { orderBy: { pagado_at: 'desc' } },
+        lineas: { orderBy: { descripcion: 'asc' } },
+      },
+      orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
+    }),
+    prisma.compras.findMany({
+      where: { negocio_id: negocioId, estado: { in: ['pendiente', 'pagada'] } },
+      include: {
+        proveedor: { select: { nombre: true } },
+        ubicacion: { select: { nombre: true } },
+        lineas: { include: { producto: { select: { nombre: true, unidad_distribucion: { select: { nombre: true } } } } } },
+      },
+      orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
+    }),
+  ]);
+
+  const emitidas = facturas.map((f) => {
+    const pagado = r2(f.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
+    return {
+      id: Number(f.id),
+      numero: f.numero,
+      version: f.version,
+      empresa: f.empresa.nombre,
+      ubicacion: f.ubicacion.nombre,
+      linea: f.linea_operacion,
+      anio: f.semana.anio,
+      semana: f.semana.semana,
+      emitida_at: iso(f.emitida_at),
+      vence_at: iso(f.vence_at),
+      estado: f.estado,
+      total: num0(f.total),
+      pagado,
+      saldo: r2(Math.max(0, num0(f.total) - pagado)),
+      pagado_at: f.pagos[0] ? iso(f.pagos[0].pagado_at) : null,
+      lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })),
+    };
+  });
+  const recibidas = compras.map((c) => ({
+    id: Number(c.id),
+    referencia: c.referencia,
+    proveedor: c.proveedor.nombre,
+    ubicacion: c.ubicacion.nombre,
+    recibida_at: iso(c.fecha),
+    vence_at: iso(c.vence_at),
+    estado: c.estado,
+    total: num0(c.total),
+    saldo: c.estado === 'pendiente' ? num0(c.total) : 0,
+    pagado_at: c.pagado_at ? iso(c.pagado_at) : null,
+    lineas: c.lineas.map((l) => ({ producto: l.producto.nombre, cantidad: num0(l.cajas), unidad: l.producto.unidad_distribucion.nombre, peso_lb: num0(l.peso_total_lb), importe: num0(l.costo_total) })),
+  }));
+  const pendientesEmitidas = emitidas.filter((f) => f.estado === 'emitida');
+  const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
+  const hoy = hoyChicago();
+
+  return {
+    resumen: {
+      por_cobrar: r2(pendientesEmitidas.reduce((total, f) => total + f.saldo, 0)),
+      vencido_cobrar: r2(pendientesEmitidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
+      facturas_por_cobrar: pendientesEmitidas.length,
+      por_pagar: r2(pendientesRecibidas.reduce((total, f) => total + f.saldo, 0)),
+      vencido_pagar: r2(pendientesRecibidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
+      facturas_por_pagar: pendientesRecibidas.length,
+    },
+    emitidas,
+    recibidas,
+  };
+}
+
 export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuarioId: bigint, fechaPago: string) {
   const f = await prisma.facturas.findFirst({ where: { id: facturaId, negocio_id: negocioId, estado: 'emitida' }, include: { pagos: true } });
   if (!f) throw new HttpError(404, 'Factura pendiente no encontrada');
+  if (fechaPago < iso(f.emitida_at)) throw new HttpError(400, 'La fecha de cobro no puede ser anterior a la emisión');
+  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
   const saldo = r2(num0(f.total) - f.pagos.reduce((a, p) => a + num0(p.monto), 0));
   await prisma.$transaction([
     prisma.pagos_cliente.create({ data: { factura_id: f.id, monto: saldo, pagado_at: fecha(fechaPago), registrado_por: usuarioId } }),
@@ -322,6 +414,8 @@ export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuario
 export async function pagarCompra(negocioId: bigint, compraId: bigint, fechaPago: string) {
   const c = await prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId, estado: 'pendiente' } });
   if (!c) throw new HttpError(404, 'Compra pendiente no encontrada');
+  if (fechaPago < iso(c.fecha)) throw new HttpError(400, 'La fecha de pago no puede ser anterior a la compra');
+  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
   await prisma.compras.update({ where: { id: c.id }, data: { estado: 'pagada', pagado_at: fecha(fechaPago) } });
   await actualizarUltimoBalance(negocioId);
   return { ok: true, monto: num0(c.total) };
