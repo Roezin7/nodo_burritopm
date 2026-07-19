@@ -143,7 +143,7 @@ dashboardRouter.get(
         where: { semana_id: semana.id },
         include: { producto: true, ubicacion: { select: { id: true, nombre: true } } },
       }) : Promise.resolve([]),
-      prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
+      prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 }, producto: { tipo_operativo: 'materia_prima' } } }),
       prisma.facturas.findMany({ where: { negocio_id: negocioId, estado: 'emitida' }, include: { pagos: true } }),
       prisma.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' } }),
       prisma.producciones.findMany({

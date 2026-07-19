@@ -308,8 +308,9 @@ function OperacionView({
     </div>}
 
     <div className="action-bar dispatch-final-actions">
-      {op.estado === 'aprobada' && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
-      {(op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>{repartoHabilitado ? 'Confirmar salida a ruta →' : 'Confirmar despacho →'}</button>}
+      {repartoHabilitado && op.estado === 'aprobada' && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
+      {repartoHabilitado && (op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>Confirmar salida a ruta →</button>}
+      {!repartoHabilitado && ['aprobada', 'verificada'].includes(op.estado) && <span className="muted">El despacho se completará automáticamente; no requiere confirmación.</span>}
       {enRuta && <span className="muted">{repartoHabilitado ? 'Salida confirmada · en ruta.' : 'Despacho confirmado.'}</span>}
       {completado && <span className="muted">Despacho completado. Usa Auditoría únicamente si se reporta un faltante.</span>}
     </div>

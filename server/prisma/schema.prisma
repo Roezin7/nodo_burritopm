@@ -594,6 +594,7 @@ model movimientos_inventario {
   products          products     @relation(fields: [product_id], references: [id])
   ubicacion_origen  ubicaciones? @relation("mov_origen", fields: [ubicacion_origen_id], references: [id])
   ubicacion_destino ubicaciones? @relation("mov_destino", fields: [ubicacion_destino_id], references: [id])
+  consumos_lote    consumos_lote_inventario[]
 
   @@index([negocio_id])
   @@index([product_id])
@@ -807,8 +808,9 @@ model compra_lineas {
   @@index([product_id])
 }
 
-// Cada compra conserva su peso real. Producción consume lotes frescos por antigüedad;
-// congelar/descongelar cambia disponibilidad operativa, nunca reescribe el costo.
+// Cada compra conserva su propia capa de costo. En materia prima guarda además el peso
+// real para Producción; en desechables permite costear cada despacho en orden FIFO.
+// Congelar/descongelar solo aplica a materia prima y nunca reescribe el costo.
 model lotes_materia_prima {
   id                 BigInt   @id @default(autoincrement())
   negocio_id         BigInt
@@ -830,9 +832,26 @@ model lotes_materia_prima {
   compra_linea compra_lineas?             @relation(fields: [compra_linea_id], references: [id], onDelete: SetNull)
   consumos     produccion_consumos_lote[]
   ajustes      conteo_ajustes_lote[]
+  salidas_inventario consumos_lote_inventario[]
 
   @@index([negocio_id, product_id, congelado])
   @@index([ubicacion_id, fecha])
+}
+
+// Asignación FIFO de una salida de inventario a las compras que realmente consumió.
+// Se usa en desechables; materia prima conserva su vínculo especializado con Producción.
+model consumos_lote_inventario {
+  movimiento_id BigInt
+  lote_id       BigInt
+  cajas         Decimal @db.Decimal(12, 3)
+  peso_lb       Decimal @default(0) @db.Decimal(12, 3)
+  costo         Decimal @db.Decimal(12, 2)
+
+  movimiento movimientos_inventario @relation(fields: [movimiento_id], references: [id], onDelete: Cascade)
+  lote       lotes_materia_prima   @relation(fields: [lote_id], references: [id])
+
+  @@id([movimiento_id, lote_id])
+  @@index([lote_id])
 }
 
 model producciones {

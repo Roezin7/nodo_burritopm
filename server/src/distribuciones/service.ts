@@ -8,6 +8,7 @@ import { avisarPedidoEnCamino } from '../push/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 import { asegurarInventarioInicialSemanal, repararPedidosHuerfanos } from '../operacion/conciliacion.js';
 import type { Prisma } from '@prisma/client';
+import { prepararSalidaFifo, registrarSalidaFifo, restaurarSalidaFifo } from '../inventario/fifo.js';
 
 async function pedidosVinculados(tx: Prisma.TransactionClient, distribucionId: bigint) {
   const lineas = await tx.distribucion_lineas.findMany({
@@ -338,6 +339,11 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
       const costo = num(l.costo_unitario);
       const recibida = num(l.cantidad_recibida);
       const cargada = num(l.cantidad_cargada);
+      const movimientoCarga = await tx.movimientos_inventario.findUnique({
+        where: { idempotency_key: `carga:${l.id}` },
+        include: { consumos_lote: { select: { lote_id: true } } },
+      });
+      const tieneFifo = (movimientoCarga?.consumos_lote.length ?? 0) > 0;
 
       if (recibida != null) {
         // Ya está en la sucursal: devolvemos a bodega lo que físicamente siga allí.
@@ -346,6 +352,9 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
         });
         const enSuc = Math.max(0, num0(sucEx?.cantidad_disponible));
         const devolver = redondear3(Math.min(recibida, enSuc));
+        if (tieneFifo && cargada != null && devolver + 0.0001 < cargada) {
+          throw new HttpError(409, 'Este despacho de desechables ya fue consumido o reportó faltantes. Corrige el inventario posterior antes de eliminarlo.');
+        }
         if (devolver > 0) {
           await aplicarMovimiento(tx, {
             negocioId,
@@ -373,6 +382,9 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
         });
         const enTransito = Math.max(0, num0(bodEx?.cantidad_transito));
         const devolver = redondear3(Math.min(cargada, enTransito));
+        if (tieneFifo && devolver + 0.0001 < cargada) {
+          throw new HttpError(409, 'El tránsito de este despacho ya cambió y no puede devolverse completo a sus lotes FIFO.');
+        }
         if (devolver > 0) {
           await aplicarMovimiento(tx, {
             negocioId,
@@ -390,6 +402,9 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
             deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: devolver, transito: -devolver }],
           });
         }
+      }
+      if (tieneFifo && movimientoCarga) {
+        await restaurarSalidaFifo(tx, { movimientoId: movimientoCarga.id, ubicacionId: bodega.id, productId: l.product_id });
       }
     }
     // Incidencias atadas a esta distribución (no tienen FK, se borran a mano).
@@ -647,7 +662,8 @@ export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuario
       data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
     }),
   ]);
-  return { ok: true };
+  const despachoDirecto = await completarDistribucionDirectaSiAplica(negocioId, id, usuarioId);
+  return { ok: true, despacho_directo: despachoDirecto };
 }
 
 /** Aprueba juntas todas las preparaciones editables de un rango semanal. */
@@ -692,11 +708,16 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
     where: { id: negocioId },
     select: { verificacion_carga: true, reparto_habilitado: true },
   });
-  if (negocio?.verificacion_carga && dist.estado !== 'verificada') {
+  if (negocio?.reparto_habilitado && negocio.verificacion_carga && dist.estado !== 'verificada') {
     throw new HttpError(409, 'La verificación de carga está activa: verifica antes de cargar');
   }
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
+  const productos = await prisma.products.findMany({
+    where: { negocio_id: negocioId, id: { in: lineas.map((l) => l.product_id) } },
+    select: { id: true, nombre: true, linea_operacion: true },
+  });
+  const productoDe = new Map(productos.map((producto) => [producto.id.toString(), producto]));
 
   if (dist.fecha_entrega) {
     for (const bodega of [...new Map([...bodegas.values()].filter((b) => b.codigo === 'CARN').map((b) => [b.id.toString(), b])).values()]) {
@@ -717,14 +738,22 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       const solicitada = num(l.cantidad_cargada) ?? num(l.cantidad_verificada) ?? aprobada;
       const pedida = Math.max(0, Math.min(solicitada, aprobada));
       const cargada = pedida;
-      const costo = num(l.costo_unitario);
+      const producto = productoDe.get(l.product_id.toString());
+      let costo = num(l.costo_unitario);
+      let salidaFifo: Awaited<ReturnType<typeof prepararSalidaFifo>> | null = null;
+      if (cargada > 0 && producto?.linea_operacion === 'desechables') {
+        salidaFifo = await prepararSalidaFifo(tx, {
+          negocioId, ubicacionId: bodega.id, productId: l.product_id, cantidad: cargada, producto: producto.nombre,
+        });
+        costo = salidaFifo.costo_unitario;
+      }
 
       // Con reparto activo queda en tránsito. Sin reparto, Despacho es el último evento normal:
       // la existencia llega directamente al restaurante y Auditoría queda solo para excepciones.
       if (cargada > 0) {
         totalCargado = redondear3(totalCargado + cargada);
         sucursalesConCarga.add(l.ubicacion_destino_id.toString());
-        await aplicarMovimiento(tx, {
+        const aplicada = await aplicarMovimiento(tx, {
           negocioId,
           productId: l.product_id,
           tipo: 'transferencia',
@@ -745,6 +774,13 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
               ],
           permitirDisponibleNegativo: bodega.codigo === 'CARN',
         });
+        if (aplicada && salidaFifo) {
+          const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: `carga:${l.id}` }, select: { id: true } });
+          if (!movimiento) throw new HttpError(500, 'No se pudo vincular el consumo FIFO del despacho');
+          await registrarSalidaFifo(tx, {
+            movimientoId: movimiento.id, ubicacionId: bodega.id, productId: l.product_id, consumos: salidaFifo.consumos,
+          });
+        }
       }
       if (cargada + 0.0001 < aprobada) {
         await tx.incidencias.create({
@@ -769,6 +805,8 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           cantidad_cargada: cargada,
           cantidad_recibida: cargada <= 0 || entregaDirecta ? cargada : null,
           estado_linea: cargada <= 0 ? 'no_surtido' : entregaDirecta ? 'recibido' : null,
+          costo_unitario: costo,
+          costo_total: costo != null ? redondear2(cargada * costo) : null,
         },
       });
     }
@@ -795,6 +833,20 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
     void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
   }
   return { ok: true };
+}
+
+/** Sin seguimiento de reparto, aprobar equivale a despachar y entregar. */
+async function completarDistribucionDirectaSiAplica(
+  negocioId: bigint,
+  id: bigint,
+  usuarioId: bigint,
+) {
+  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
+  if (negocio?.reparto_habilitado) return false;
+  const distribucion = await prisma.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
+  if (!distribucion || !['aprobada', 'verificada'].includes(distribucion.estado)) return false;
+  await confirmarCarga(negocioId, id, usuarioId);
+  return true;
 }
 
 /** Distribuciones en tránsito con líneas destinadas a una sucursal (para recepción). */

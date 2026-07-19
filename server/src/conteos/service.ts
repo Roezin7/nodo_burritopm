@@ -264,7 +264,10 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
     where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId },
     select: { product_id: true, tipo: true, cantidad: true },
   });
-  const ajustesLote = await tx.conteo_ajustes_lote.findMany({ where: { conteo_id: conteoId } });
+  const ajustesLote = await tx.conteo_ajustes_lote.findMany({
+    where: { conteo_id: conteoId },
+    include: { lote: { select: { product_id: true } } },
+  });
   // Neto firmado que el conteo aplicó a existencias por producto (+ sumó, − restó).
   const neto = new Map<string, number>();
   for (const m of movs) {
@@ -294,6 +297,21 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
         peso_disponible_lb: { increment: ajuste.peso_lb },
         costo_disponible: { increment: ajuste.costo },
       },
+    });
+  }
+  // Restaurar las cantidades del conteo también debe restaurar el costo exacto
+  // de las capas FIFO visibles en bodega.
+  const productosConLote = [...new Set(ajustesLote.map((ajuste) => ajuste.lote.product_id.toString()))];
+  for (const productId of productosConLote) {
+    const lotes = await tx.lotes_materia_prima.findMany({
+      where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(productId), cajas_disponibles: { gt: 0 } },
+      select: { cajas_disponibles: true, costo_disponible: true },
+    });
+    const cajas = lotes.reduce((total, lote) => total + num0(lote.cajas_disponibles), 0);
+    const costo = lotes.reduce((total, lote) => total + num0(lote.costo_disponible), 0);
+    await tx.existencias.updateMany({
+      where: { ubicacion_id: conteo.ubicacion_id, product_id: BigInt(productId) },
+      data: { costo_promedio: cajas > 0 ? Math.round((costo / cajas) * 10_000) / 10_000 : null },
     });
   }
   await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId } });

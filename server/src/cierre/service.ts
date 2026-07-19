@@ -54,6 +54,43 @@ export function numeroFactura(anio: number, semana: number, empresa: string, ubi
   return `${anio}-${String(semana).padStart(2, '0')}-${limpio(empresa, 8)}-${limpio(ubicacion, 12)}-${linea === 'carne' ? 'M' : 'D'}`;
 }
 
+async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) {
+  const pedidos = await prisma.pedidos_operativos.findMany({
+    where: { negocio_id: negocioId, fecha_entrega: { gte: desde, lte: hasta }, estado: { notIn: ['borrador', 'cancelado'] } },
+    include: {
+      empresa: true, ubicacion: true,
+      lineas: { include: { producto: true, distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } } } },
+    },
+  });
+  if (!pedidos.length) throw new HttpError(400, 'No hay pedidos confirmados para cerrar esta semana');
+
+  const productosVendidos = [...new Map(pedidos.flatMap((o) => o.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
+  const preciosCalculados = await preciosVentaSemana(negocioId, productosVendidos, iso(desde), iso(hasta));
+  const proteinasSinProduccion = productosVendidos.filter((p) => p.tipo_operativo === 'proteina' && preciosCalculados.get(p.id.toString()) == null);
+  if (proteinasSinProduccion.length) {
+    throw new HttpError(409, `Falta registrar producción semanal para calcular costo + $15 de: ${proteinasSinProduccion.map((p) => p.nombre).join(', ')}.`);
+  }
+  const precios = new Map([...preciosCalculados].map(([id, precio]) => [id, precio ?? 0]));
+  type Grupo = { empresa: (typeof pedidos)[number]['empresa']; ubicacion: (typeof pedidos)[number]['ubicacion']; linea: LineaOperacion; items: Map<string, { productId: bigint; descripcion: string; cantidad: number; precio: number }> };
+  const grupos = new Map<string, Grupo>();
+  for (const pedido of pedidos) {
+    for (const l of pedido.lineas) {
+      // La ruta puede ser de carne y llevar consumibles solicitados en la misma hoja.
+      // La factura se separa por la línea real del producto, como en los libros actuales.
+      const linea = l.producto.linea_operacion ?? pedido.linea_operacion;
+      const k = `${pedido.ubicacion_id}:${linea}`;
+      if (!grupos.has(k)) grupos.set(k, { empresa: pedido.empresa, ubicacion: pedido.ubicacion, linea, items: new Map() });
+      const g = grupos.get(k)!;
+      const cantidad = await cantidadFacturable(l);
+      if (cantidad <= 0) continue;
+      const precio = precios.get(l.product_id.toString()) ?? 0;
+      const previo = g.items.get(l.product_id.toString());
+      g.items.set(l.product_id.toString(), { productId: l.product_id, descripcion: l.producto.nombre, cantidad: r3((previo?.cantidad ?? 0) + cantidad), precio });
+    }
+  }
+  return { pedidos, precios, grupos };
+}
+
 type Db = Prisma.TransactionClient | typeof prisma;
 
 async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
@@ -62,7 +99,7 @@ async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
       where: { negocio_id: negocioId, OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }] },
       include: { products: { select: { linea_operacion: true, tipo_operativo: true } }, ubicaciones: { select: { nombre: true } } },
     }),
-    db.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
+    db.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 }, producto: { tipo_operativo: 'materia_prima' } } }),
   ]);
   let desechables = 0;
   let terminada = 0;
@@ -97,15 +134,11 @@ async function actualizarUltimoBalance(negocioId: bigint) {
   if (semana) await calcularBalance(negocioId, semana.id, semana.termina_at);
 }
 
-export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCierre: string) {
-  const periodoSolicitado = semanaDeFecha(fecha(fechaCierre));
-  if (iso(periodoSolicitado.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
-  const semana = await asegurarSemana(negocioId, fechaCierre);
-  if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
+type SemanaCierre = Awaited<ReturnType<typeof asegurarSemana>>;
 
-  // La valuación de cierre parte del ledger vivo; por eso los cierres operativos se hacen
-  // en orden. Si ya se capturó una semana posterior, cerrar ésta con el saldo actual
-  // produciría una fotografía históricamente falsa.
+async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
+  // La valuación parte del ledger vivo; una operación posterior haría que la fotografía
+  // histórica de esta semana fuera incorrecta.
   const [comprasPosteriores, produccionesPosteriores, pedidosPosteriores] = await Promise.all([
     prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at }, estado: { not: 'cancelada' } } }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at } } }),
@@ -115,8 +148,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
     throw new HttpError(409, 'Hay operación capturada en una semana posterior. Cierra las semanas en orden para que la fotografía de inventario sea correcta.');
   }
 
-  // El cierre factura lo que realmente salió. No debe convertir silenciosamente una venta
-  // confirmada pero nunca preparada/entregada en una factura ni congelar una ruta activa.
+  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
   const [pedidosSinPreparar, borradoresConVenta, distribucionesActivas, coberturaCarne, coberturaDesechables] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: {
@@ -132,13 +164,13 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
         estado: 'borrador', lineas: { some: {} },
       },
     }),
-    prisma.distribuciones.count({
+    negocio?.reparto_habilitado ? prisma.distribuciones.count({
       where: {
         negocio_id: negocioId,
         fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at },
-        estado: { notIn: ['cerrada', 'cerrada_con_incidencias', 'cancelada'] },
+        estado: { notIn: ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'] },
       },
-    }),
+    }) : Promise.resolve(0),
     coberturaPedidosBpm(negocioId, 'carne', iso(semana.inicia_at), iso(semana.termina_at)),
     coberturaPedidosBpm(negocioId, 'desechables', iso(semana.inicia_at), iso(semana.termina_at)),
   ]);
@@ -155,40 +187,80 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   if (distribucionesActivas) {
     throw new HttpError(409, `Faltan ${distribucionesActivas} despacho(s) por completar antes del cierre.`);
   }
-  const alertaInventario = await validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
-  const pedidos = await prisma.pedidos_operativos.findMany({
-    where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['borrador', 'cancelado'] } },
-    include: {
-      empresa: true, ubicacion: true,
-      lineas: { include: { producto: true, distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } } } },
-    },
-  });
-  if (!pedidos.length) throw new HttpError(400, 'No hay pedidos confirmados para cerrar esta semana');
+  return validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
+}
 
-  const productosVendidos = [...new Map(pedidos.flatMap((o) => o.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
-  const preciosCalculados = await preciosVentaSemana(negocioId, productosVendidos, iso(semana.inicia_at), iso(semana.termina_at));
-  const proteinasSinProduccion = productosVendidos.filter((p) => p.tipo_operativo === 'proteina' && preciosCalculados.get(p.id.toString()) == null);
-  if (proteinasSinProduccion.length) {
-    throw new HttpError(409, `Falta registrar producción semanal para calcular costo + $15 de: ${proteinasSinProduccion.map((p) => p.nombre).join(', ')}.`);
-  }
-  const precios = new Map([...preciosCalculados].map(([id, precio]) => [id, precio ?? 0]));
-  type Grupo = { empresa: (typeof pedidos)[number]['empresa']; ubicacion: (typeof pedidos)[number]['ubicacion']; linea: LineaOperacion; items: Map<string, { productId: bigint; descripcion: string; cantidad: number; precio: number }> };
-  const grupos = new Map<string, Grupo>();
-  for (const pedido of pedidos) {
-    for (const l of pedido.lineas) {
-      // La ruta puede ser de carne y llevar consumibles solicitados en la misma hoja.
-      // La factura se separa por la línea real del producto, como en los libros actuales.
-      const linea = l.producto.linea_operacion ?? pedido.linea_operacion;
-      const k = `${pedido.ubicacion_id}:${linea}`;
-      if (!grupos.has(k)) grupos.set(k, { empresa: pedido.empresa, ubicacion: pedido.ubicacion, linea, items: new Map() });
-      const g = grupos.get(k)!;
-      const cantidad = await cantidadFacturable(l);
-      if (cantidad <= 0) continue;
-      const precio = precios.get(l.product_id.toString()) ?? 0;
-      const previo = g.items.get(l.product_id.toString());
-      g.items.set(l.product_id.toString(), { productId: l.product_id, descripcion: l.producto.nombre, cantidad: r3((previo?.cantidad ?? 0) + cantidad), precio });
-    }
-  }
+/** Calcula el resultado del cierre sin crear facturas, incidencias ni fotografías. */
+export async function vistaPreviaCierre(negocioId: bigint, fechaCierre: string) {
+  const periodo = semanaDeFecha(fecha(fechaCierre));
+  if (iso(periodo.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
+  const semana = await asegurarSemana(negocioId, fechaCierre);
+  if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
+
+  const alertaInventario = await validarSemanaCerrable(negocioId, semana);
+  const { grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
+  const facturas = [...grupos.values()].flatMap((g) => {
+    const lineas = [...g.items.values()].filter((item) => item.cantidad > 0);
+    if (!lineas.length) return [];
+    const total = r2(lineas.reduce((suma, item) => suma + item.cantidad * item.precio, 0));
+    const diasCredito = g.linea === 'carne' ? g.empresa.dias_credito_carne : g.empresa.dias_credito_desechables;
+    return [{
+      numero: numeroFactura(semana.anio, semana.semana, g.empresa.codigo, g.ubicacion.codigo, g.linea),
+      empresa: g.empresa.nombre,
+      ubicacion: g.ubicacion.nombre,
+      linea: g.linea,
+      vence_at: iso(sumarDias(semana.termina_at, diasCredito)),
+      productos: lineas.length,
+      unidades: r3(lineas.reduce((suma, item) => suma + item.cantidad, 0)),
+      total,
+    }];
+  }).sort((a, b) => a.ubicacion.localeCompare(b.ubicacion, 'es') || a.linea.localeCompare(b.linea));
+
+  const [inventario, facturasAnteriores, comprasPendientes] = await Promise.all([
+    valuacionInventario(negocioId),
+    prisma.facturas.findMany({
+      where: {
+        negocio_id: negocioId,
+        estado: { in: ['emitida', 'pagada'] },
+        emitida_at: { lte: semana.termina_at },
+        NOT: { semana_id: semana.id },
+      },
+      include: { pagos: true },
+    }),
+    prisma.compras.findMany({
+      where: { negocio_id: negocioId, estado: 'pendiente', fecha: { lte: semana.termina_at } },
+      select: { total: true },
+    }),
+  ]);
+  const porCobrarActual = r2(facturasAnteriores.reduce((total, factura) => total + Math.max(0, num0(factura.total) - factura.pagos.reduce((suma, pago) => suma + num0(pago.monto), 0)), 0));
+  const ventaCarne = r2(facturas.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
+  const ventaDesechables = r2(facturas.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
+  const ventaTotal = r2(ventaCarne + ventaDesechables);
+  const porCobrar = r2(porCobrarActual + ventaTotal);
+  const porPagar = r2(comprasPendientes.reduce((total, compra) => total + num0(compra.total), 0));
+  const inventarioTotal = r2(inventario.valor_carne + inventario.valor_congelado + inventario.valor_desechables);
+
+  return {
+    semana: { anio: semana.anio, numero: semana.semana, inicia_at: iso(semana.inicia_at), termina_at: iso(semana.termina_at) },
+    generado_at: new Date().toISOString(),
+    ventas: { carne: ventaCarne, desechables: ventaDesechables, total: ventaTotal },
+    inventario: { ...inventario, total: inventarioTotal },
+    cartera: { por_cobrar_actual: porCobrarActual, por_cobrar_al_cierre: porCobrar, por_pagar: porPagar },
+    balance_estimado: r2(inventarioTotal + porCobrar - porPagar),
+    facturas,
+    cajas_perdidas: alertaInventario.cajas_perdidas,
+    productos_con_faltante: alertaInventario.saldos.length,
+  };
+}
+
+export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCierre: string) {
+  const periodoSolicitado = semanaDeFecha(fecha(fechaCierre));
+  if (iso(periodoSolicitado.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
+  const semana = await asegurarSemana(negocioId, fechaCierre);
+  if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
+
+  const alertaInventario = await validarSemanaCerrable(negocioId, semana);
+  const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
   const cierre = await prisma.$transaction(async (tx) => {
     const vigente = await tx.semanas_operativas.findUnique({ where: { id: semana.id }, select: { estado: true } });

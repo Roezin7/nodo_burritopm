@@ -3729,6 +3729,20 @@ form > .form-actions .btn,
 .close-week-card p { max-width: 680px; margin: 0.35rem 0 0; opacity: 0.68; }
 .close-week-action { display: grid; grid-template-columns: minmax(150px, 1fr) auto; align-items: end; gap: 0.65rem; }
 .close-week-action .field > span { color: color-mix(in srgb, var(--bg) 70%, transparent); }
+.close-preview-modal { width: min(980px, 100%); }
+.close-preview-modal .card-head { align-items: flex-start; margin-bottom: 1rem; }
+.close-preview-modal .card-head h2 { margin: 0.15rem 0 0.2rem; font-size: 1.25rem; }
+.close-preview-modal .card-head p { margin: 0; color: var(--ink-3); font-size: 0.75rem; }
+.close-preview-total { display: flex; flex-direction: column; margin-bottom: 0.8rem; padding: 1rem 1.1rem; border-radius: 14px; background: var(--ink); color: var(--bg); }
+.close-preview-total span { font-size: 0.72rem; opacity: 0.7; }
+.close-preview-total strong { margin: 0.15rem 0; font-size: clamp(1.7rem, 4vw, 2.4rem); letter-spacing: -0.04em; }
+.close-preview-total small { opacity: 0.7; }
+.close-preview-modal .metric-strip small { color: var(--ink-3); font-size: 0.65rem; }
+.close-preview-balance { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.8rem 0; padding: 0.85rem 1rem; border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--brand) 7%, var(--surface)); }
+.close-preview-balance span { color: var(--ink-2); font-weight: 700; }
+.close-preview-balance strong { color: var(--brand); font-size: 1.35rem; }
+.close-preview-invoices .invoice-row { grid-template-columns: minmax(165px, 1.2fr) minmax(175px, 1.3fr) 95px 90px 100px; min-width: 720px; }
+.close-preview-actions { position: sticky; bottom: -1.2rem; display: flex; justify-content: flex-end; gap: 0.65rem; margin: 1rem -1.2rem -1.2rem; padding: 0.85rem 1.2rem; border-top: 1px solid var(--border); background: var(--surface); }
 .week-list { display: flex; flex-direction: column; gap: 1rem; }
 .week-card { overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--sh-sm); }
 .week-card > header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.2rem; }

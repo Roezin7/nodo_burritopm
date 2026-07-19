@@ -17,6 +17,11 @@ cierreRouter.get('/cartera', asyncHandler(async (req, res) => {
   res.json(await svc.listarCartera(req.auth!.negocioId));
 }));
 
+cierreRouter.post('/vista-previa', asyncHandler(async (req, res) => {
+  const { fecha_cierre } = z.object({ fecha_cierre: fecha }).parse(req.body);
+  res.json(await svc.vistaPreviaCierre(req.auth!.negocioId, fecha_cierre));
+}));
+
 cierreRouter.post('/cerrar', asyncHandler(async (req, res) => {
   const { fecha_cierre } = z.object({ fecha_cierre: fecha }).parse(req.body);
   res.status(201).json(await svc.cerrarSemana(req.auth!.negocioId, req.auth!.usuarioId, fecha_cierre));

@@ -5,6 +5,7 @@ import { num, num0 } from '../lib/num.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
 import { requireAuth, requireRole, usuarioPuedeUbicacion } from '../auth/middleware.js';
 import { aplicarMovimiento } from '../ledger/service.js';
+import { prepararSalidaFifo, registrarSalidaFifo } from '../inventario/fifo.js';
 
 export const existenciasRouter = Router();
 
@@ -59,11 +60,14 @@ existenciasRouter.post(
       destino = d;
     }
 
-    const costo = num(existencia?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
     const key = `retiro:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
-    await prisma.$transaction((tx) =>
-      aplicarMovimiento(tx, {
+    await prisma.$transaction(async (tx) => {
+      const fifo = producto.linea_operacion === 'desechables'
+        ? await prepararSalidaFifo(tx, { negocioId, ubicacionId: bodega.id, productId: producto.id, cantidad: b.cantidad, producto: producto.nombre })
+        : null;
+      const costo = fifo?.costo_unitario ?? num(existencia?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+      const aplicada = await aplicarMovimiento(tx, {
         negocioId,
         productId: producto.id,
         tipo: destino ? 'transferencia' : 'consumo',
@@ -81,8 +85,13 @@ existenciasRouter.post(
               { ubicacionId: destino.id, productId: producto.id, disponible: b.cantidad, costoUnitario: costo },
             ]
           : [{ ubicacionId: bodega.id, productId: producto.id, disponible: -b.cantidad }],
-      }),
-    );
+      });
+      if (aplicada && fifo) {
+        const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: key }, select: { id: true } });
+        if (!movimiento) throw new HttpError(500, 'No se pudo vincular el retiro a sus lotes FIFO');
+        await registrarSalidaFifo(tx, { movimientoId: movimiento.id, ubicacionId: bodega.id, productId: producto.id, consumos: fifo.consumos });
+      }
+    });
 
     res.status(201).json({ ok: true, destino: destino?.nombre ?? null });
   }),
@@ -118,6 +127,9 @@ existenciasRouter.post(
     const existencia = await prisma.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: producto.id } } });
 
     const costo = b.costo_unitario ?? num(existencia?.costo_promedio) ?? num(producto.ultimo_costo);
+    if (producto.linea_operacion === 'desechables' && costo == null) {
+      throw new HttpError(400, 'Indica el costo unitario para crear el lote FIFO de desechables.');
+    }
     const key = `ingreso:${negocioId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
     await prisma.$transaction(async (tx) => {
@@ -134,6 +146,18 @@ existenciasRouter.post(
         idempotencyKey: key,
         deltas: [{ ubicacionId: bodega.id, productId: producto.id, disponible: b.cantidad, costoUnitario: costo }],
       });
+      if (producto.linea_operacion === 'desechables') {
+        await tx.lotes_materia_prima.create({
+          data: {
+            negocio_id: negocioId, ubicacion_id: bodega.id, product_id: producto.id,
+            fecha: new Date(), congelado: false,
+            cajas_iniciales: b.cantidad, cajas_disponibles: b.cantidad,
+            peso_inicial_lb: 0, peso_disponible_lb: 0,
+            costo_inicial: Math.round(b.cantidad * costo! * 100) / 100,
+            costo_disponible: Math.round(b.cantidad * costo! * 100) / 100,
+          },
+        });
+      }
       if (b.costo_unitario != null) {
         // El precio del producto sigue a la compra: último costo = lo que se pagó ahora,
         // y el costo promedio del catálogo se alinea con el promedio ponderado de bodega.

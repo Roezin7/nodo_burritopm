@@ -58,7 +58,12 @@ async function datos(negocioId: bigint, semanaId: bigint) {
     }),
     prisma.inventario_semanal.findMany({ where: { semana_id: semana.id }, include: { producto: true, ubicacion: true } }),
     prisma.existencias.findMany({ where: { negocio_id: negocioId }, include: { products: true, ubicaciones: true } }),
-    prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
+    // Esta colección alimenta exclusivamente las secciones de materia prima
+    // fresca/congelada. Los lotes FIFO de desechables ya se valúan mediante la
+    // existencia o el snapshot semanal y no deben sumarse como carne fresca.
+    prisma.lotes_materia_prima.findMany({
+      where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 }, producto: { tipo_operativo: 'materia_prima' } },
+    }),
     // Los libros históricos también deben conservar productos que se hayan desactivado después.
     prisma.products.findMany({ where: { negocio_id: negocioId, linea_operacion: { not: null } }, orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }] }),
     prisma.ubicaciones.findMany({ where: { negocio_id: negocioId }, include: { empresa_cliente: true }, orderBy: { orden_operativo: 'asc' } }),
