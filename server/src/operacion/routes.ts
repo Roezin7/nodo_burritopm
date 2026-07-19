@@ -139,6 +139,7 @@ operacionRouter.post('/conciliacion/inicializar', soloAdmin, asyncHandler(async 
 operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     proveedor_id: id, ubicacion_id: id, fecha, referencia: z.string().trim().max(120).nullable().optional(),
+    total_factura: z.coerce.number().nonnegative().nullable().optional(),
     idempotency_key: idempotencyKey.optional(),
     lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
@@ -149,6 +150,7 @@ operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
 operacionRouter.patch('/compras/:id', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     proveedor_id: id, ubicacion_id: id, fecha, referencia: z.string().trim().max(120).nullable().optional(),
+    total_factura: z.coerce.number().nonnegative().nullable().optional(),
     lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
   res.json(await svc.editarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, b));

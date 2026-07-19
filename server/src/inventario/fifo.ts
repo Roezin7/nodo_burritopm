@@ -34,7 +34,15 @@ export function calcularConsumoFifo(lotes: LoteFifoCalculable[], cajasSolicitada
 
 export async function prepararSalidaFifo(
   tx: Prisma.TransactionClient,
-  input: { negocioId: bigint; ubicacionId: bigint; productId: bigint; cantidad: number; producto: string },
+  input: {
+    negocioId: bigint;
+    ubicacionId: bigint;
+    productId: bigint;
+    cantidad: number;
+    producto: string;
+    permitirFaltante?: boolean;
+    costoFaltante?: number | null;
+  },
 ) {
   const lotes = await tx.lotes_materia_prima.findMany({
     where: {
@@ -49,13 +57,16 @@ export async function prepararSalidaFifo(
     lotes.map((lote) => ({ cajas: num0(lote.cajas_disponibles), peso_lb: num0(lote.peso_disponible_lb), costo: num0(lote.costo_disponible) })),
     input.cantidad,
   );
-  if (calculo.cajas_faltantes > 0.0001) {
+  if (calculo.cajas_faltantes > 0.0001 && !input.permitirFaltante) {
     throw new HttpError(409, `${input.producto}: faltan ${calculo.cajas_faltantes} unidades respaldadas por compras FIFO. Registra la compra antes de despachar.`);
   }
+  const costoFaltante = calculo.cajas_faltantes * (input.costoFaltante ?? 0);
+  const costoTotal = r2(calculo.costo_total + costoFaltante);
   return {
     consumos: calculo.consumos.map((consumo) => ({ ...consumo, lote: lotes[consumo.indice]! })),
-    costo_total: calculo.costo_total,
-    costo_unitario: input.cantidad > 0 ? r4(calculo.costo_total / input.cantidad) : null,
+    cajas_faltantes: calculo.cajas_faltantes,
+    costo_total: costoTotal,
+    costo_unitario: input.cantidad > 0 ? r4(costoTotal / input.cantidad) : null,
   };
 }
 
@@ -126,4 +137,76 @@ export async function restaurarSalidaFifo(
     data: { costo_promedio: cajas > 0 ? r4(costo / cajas) : null },
   });
   return consumos;
+}
+
+/** Restaura solo una parte de una o varias salidas FIFO. Se usa al disminuir una venta
+ * ya despachada sin deshacer el resto de la ruta. Los movimientos se recorren en el orden
+ * indicado (normalmente, correcciones recientes primero y la carga original al final). */
+export async function restaurarCantidadSalidaFifo(
+  tx: Prisma.TransactionClient,
+  input: {
+    movimientoIds: bigint[];
+    ubicacionId: bigint;
+    productId: bigint;
+    cantidad: number;
+  },
+) {
+  let pendiente = r3(input.cantidad);
+  let costoRestaurado = 0;
+  let cantidadRestaurada = 0;
+  const orden = new Map(input.movimientoIds.map((id, indice) => [id.toString(), indice]));
+  const consumos = await tx.consumos_lote_inventario.findMany({
+    where: { movimiento_id: { in: input.movimientoIds }, lote: { product_id: input.productId, ubicacion_id: input.ubicacionId } },
+  });
+  consumos.sort((a, b) => {
+    const porMovimiento = (orden.get(a.movimiento_id.toString()) ?? 0) - (orden.get(b.movimiento_id.toString()) ?? 0);
+    return porMovimiento || Number(b.lote_id - a.lote_id);
+  });
+
+  for (const consumo of consumos) {
+    if (pendiente <= 0.0001) break;
+    const disponibles = num0(consumo.cajas);
+    if (disponibles <= 0) continue;
+    const cajas = r3(Math.min(pendiente, disponibles));
+    const proporcion = cajas / disponibles;
+    const peso = r3(num0(consumo.peso_lb) * proporcion);
+    const costo = r2(num0(consumo.costo) * proporcion);
+    await tx.lotes_materia_prima.update({
+      where: { id: consumo.lote_id },
+      data: {
+        cajas_disponibles: { increment: cajas },
+        peso_disponible_lb: { increment: peso },
+        costo_disponible: { increment: costo },
+      },
+    });
+    if (Math.abs(disponibles - cajas) <= 0.0001) {
+      await tx.consumos_lote_inventario.delete({
+        where: { movimiento_id_lote_id: { movimiento_id: consumo.movimiento_id, lote_id: consumo.lote_id } },
+      });
+    } else {
+      await tx.consumos_lote_inventario.update({
+        where: { movimiento_id_lote_id: { movimiento_id: consumo.movimiento_id, lote_id: consumo.lote_id } },
+        data: {
+          cajas: r3(disponibles - cajas),
+          peso_lb: r3(num0(consumo.peso_lb) - peso),
+          costo: r2(num0(consumo.costo) - costo),
+        },
+      });
+    }
+    pendiente = r3(pendiente - cajas);
+    cantidadRestaurada = r3(cantidadRestaurada + cajas);
+    costoRestaurado = r2(costoRestaurado + costo);
+  }
+
+  const restantes = await tx.lotes_materia_prima.findMany({
+    where: { ubicacion_id: input.ubicacionId, product_id: input.productId, cajas_disponibles: { gt: 0 } },
+    select: { cajas_disponibles: true, costo_disponible: true },
+  });
+  const cajas = restantes.reduce((total, lote) => total + num0(lote.cajas_disponibles), 0);
+  const costo = restantes.reduce((total, lote) => total + num0(lote.costo_disponible), 0);
+  await tx.existencias.updateMany({
+    where: { ubicacion_id: input.ubicacionId, product_id: input.productId },
+    data: { costo_promedio: cajas > 0 ? r4(costo / cajas) : null },
+  });
+  return { cantidad_restaurada: cantidadRestaurada, cantidad_sin_lote: Math.max(0, pendiente), costo_total: costoRestaurado };
 }

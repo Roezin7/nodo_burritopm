@@ -35,7 +35,7 @@ async function datos(negocioId: bigint, semanaId: bigint) {
     },
   });
   if (!semana) throw new HttpError(404, 'Semana no encontrada');
-  const [pedidos, compras, comprasPendientes, producciones, snapshot, existenciasVivas, lotesVivos, productos, ubicaciones, facturasHistoricas] = await Promise.all([
+  const [pedidos, compras, comprasPendientes, producciones, snapshot, existenciasVivas, lotesVivos, productos, ubicaciones, facturasHistoricas, ajustes] = await Promise.all([
     prisma.pedidos_operativos.findMany({
       where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['borrador', 'cancelado'] } },
       include: { ubicacion: true, empresa: true, lineas: { include: { producto: true, distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } } },
@@ -71,11 +71,15 @@ async function datos(negocioId: bigint, semanaId: bigint) {
       where: { negocio_id: negocioId, emitida_at: { lte: semana.termina_at }, estado: { not: 'anulada' } },
       include: { semana: true, pagos: true }, orderBy: [{ emitida_at: 'asc' }, { id: 'asc' }],
     }),
+    prisma.ajustes_facturacion.findMany({
+      where: { negocio_id: negocioId, semana_id: semana.id, estado: { in: ['abierto', 'aplicado'] } },
+      include: { ubicacion: true }, orderBy: { id: 'asc' },
+    }),
   ]);
   const existencias = snapshot.length
     ? snapshot.map((e) => ({ ...e, products: e.producto, ubicaciones: e.ubicacion }))
     : existenciasVivas.map((e) => ({ ...e, peso_total_lb: null, costo_total: null }));
-  return { semana, pedidos, compras, comprasPendientes, producciones, existencias, usaSnapshot: snapshot.length > 0, lotesVivos, productos, ubicaciones, facturasHistoricas };
+  return { semana, pedidos, compras, comprasPendientes, producciones, existencias, usaSnapshot: snapshot.length > 0, lotesVivos, productos, ubicaciones, facturasHistoricas, ajustes };
 }
 
 type Datos = Awaited<ReturnType<typeof datos>>;
@@ -203,9 +207,10 @@ function valoresInventario(d: Datos) {
     desechables: num0(d.semana.valor_desechables),
   };
   if (d.semana.estado === 'cerrada' || guardado.carne + guardado.congelado + guardado.desechables > 0) return guardado;
-  const terminado = d.existencias.filter((e) => e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima')
+  const inventarioCentral = d.existencias.filter((e) => e.ubicaciones.tipo === 'bodega');
+  const terminado = inventarioCentral.filter((e) => e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima')
     .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
-  const desechables = d.existencias.filter((e) => e.products.linea_operacion === 'desechables')
+  const desechables = inventarioCentral.filter((e) => e.products.linea_operacion === 'desechables')
     .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
   const fresca = d.lotesVivos.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   const congelado = d.lotesVivos.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
@@ -458,7 +463,7 @@ const FILA_BILLING: Record<string, number> = {
   'MEAT-STEAK': 3, 'MEAT-CHICKEN': 4, 'MEAT-PASTOR-BPM': 5, 'MEAT-PASTOR-TAP': 5,
   'MEAT-ASADA': 6, 'MEAT-FAJITAS': 7, 'MEAT-MILANESA': 8, 'MEAT-TAMAL': 9,
   'MEAT-CHILE': 10, 'MEAT-DORADO': 11, 'MEAT-ADOBO': 12, 'MEAT-CARNITAS': 13,
-  'MEAT-CATERING': 15, 'MEAT-PULPA': 16, 'MEAT-TAPATIOS-TACO': 17,
+  'MEAT-PULPA': 16, 'MEAT-TAPATIOS-TACO': 17,
 };
 const COLUMNA_BILLING: Record<string, number> = {
   LOMBA: 5, NAPER: 8, CAROL: 11, LISLE: 14, GLEND: 17, WESTC: 20, BATAV: 23, ALGON: 26,
@@ -469,9 +474,9 @@ const COLUMNA_BILLING: Record<string, number> = {
 function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const ws = hojaSemana(wb, /^Billing \(/, d.semana.semana, `Billing (${d.semana.semana})`);
   if (esCierreHistoricoSinDetalle(d)) return;
-  const carne = d.productos.filter((x) => x.linea_operacion === 'carne' && FILA_BILLING[x.sku]);
+  const carne = d.productos.filter((x) => x.linea_operacion === 'carne' && x.tipo_operativo !== 'servicio' && FILA_BILLING[x.sku]);
   const sinCelda = d.pedidos.flatMap((pedido) => pedido.lineas
-    .filter((l) => l.producto.linea_operacion === 'carne' && cantidadLinea(l) > 0
+    .filter((l) => l.producto.linea_operacion === 'carne' && l.producto.tipo_operativo !== 'servicio' && cantidadLinea(l) > 0
       && (!FILA_BILLING[l.producto.sku] || !COLUMNA_BILLING[pedido.ubicacion.codigo]))
     .map((l) => `${pedido.ubicacion.nombre} / ${l.producto.nombre}`));
   errorCobertura('Billing', sinCelda);
@@ -480,7 +485,11 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   ws.getCell('F1').value = excelDate(sumarDias(d.semana.inicia_at, 6));
   ws.getCell('A14').value = null;
   ws.getCell('C14').value = null;
-  ws.getCell('A15').value = 'CATERING';
+  const creditoLisle = d.ajustes
+    .filter((ajuste) => ajuste.linea_operacion === 'carne' && ajuste.tipo === 'credito' && ajuste.ubicacion.codigo === 'LISLE')
+    .reduce((total, ajuste) => total + num0(ajuste.monto), 0);
+  ws.getCell('A15').value = 'CREDIT LISLE (PRODUCTION)';
+  ws.getCell('C15').value = creditoLisle ? -creditoLisle : null;
   const filas = carne.map((p) => FILA_BILLING[p.sku]).filter((row): row is number => row != null);
   const precios = new Map<string, number>();
   for (const row of [...new Set(filas)]) {
@@ -498,6 +507,15 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     }
   }
   for (const [codigo, col] of Object.entries(COLUMNA_BILLING)) {
+    const ajustesUbicacion = d.ajustes.filter((ajuste) => ajuste.ubicacion.codigo === codigo && ajuste.linea_operacion === 'carne');
+    const ajusteNeto = ajustesUbicacion.reduce((total, ajuste) => total + num0(ajuste.monto) * (ajuste.tipo === 'credito' ? -1 : 1), 0);
+    if (codigo === 'LISLE' && creditoLisle) {
+      ws.getCell(15, col).value = 1;
+      formula(ws, ws.getCell(15, col + 1).address, `${ws.getCell(15, col).address}*C15`, -creditoLisle);
+    } else {
+      ws.getCell(15, col).value = null;
+      ws.getCell(15, col + 1).value = null;
+    }
     const facturas = d.semana.facturas.filter((f) => f.ubicacion.codigo === codigo);
     const facturasCarne = facturas.filter((f) => f.linea_operacion === 'carne');
     let totalCarne = facturasCarne.reduce((a, f) => a + num0(f.total), 0);
@@ -518,6 +536,8 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
           totalCarne += cantidad * precio;
         }
       }
+      base += ajusteNeto;
+      totalCarne += ajusteNeto;
     }
     ws.getCell(20, col).value = r2(base);
     ws.getCell(20, col + 1).value = r2(base);
@@ -544,9 +564,14 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const saldoAlCierre = (f: Datos['facturasHistoricas'][number]) => Math.max(0, num0(f.total)
     - f.pagos.filter((p) => p.pagado_at <= d.semana.termina_at).reduce((a, p) => a + num0(p.monto), 0));
   const semanasCobro = [d.semana.semana - 2, d.semana.semana - 1, d.semana.semana];
-  const saldos = semanasCobro.map((numero, i) => d.facturasHistoricas
-    .filter((f) => i === 0 ? f.semana.semana <= numero : f.semana.semana === numero)
-    .reduce((a, f) => a + saldoAlCierre(f), 0));
+  const saldos = semanasCobro.map((numero, i) => {
+    const facturasPeriodo = d.facturasHistoricas
+      .filter((f) => i === 0 ? f.semana.semana <= numero : f.semana.semana === numero);
+    // Mientras la semana está abierta/reabierta todavía no existe una factura vigente,
+    // pero Billing sí debe mostrar la venta calculada de Closing Week (BW23).
+    if (numero === d.semana.semana && facturasPeriodo.length === 0) return meat + markup + paper;
+    return facturasPeriodo.reduce((a, f) => a + saldoAlCierre(f), 0);
+  });
   for (let i = 0; i < 3; i += 1) {
     ws.getCell(6 + i, 75).value = r2(saldos[i] ?? 0);
     ws.getCell(6 + i, 77).value = i === 0 && d.facturasHistoricas.some((f) => f.semana.semana < (semanasCobro[0] ?? 0) && saldoAlCierre(f) > 0)
@@ -708,7 +733,7 @@ function validarSalida(tipo: TipoExcel, wb: ExcelJS.Workbook, d: Datos) {
   } else if (tipo === 'billing') {
     if (esCierreHistoricoSinDetalle(d)) return;
     const ws = hojaSemana(wb, /^Billing \(/, d.semana.semana, `Billing (${d.semana.semana})`);
-    esperado = d.pedidos.flatMap((p) => p.lineas).filter((l) => l.producto.linea_operacion === 'carne').reduce((a, l) => a + cantidadLinea(l), 0);
+    esperado = d.pedidos.flatMap((p) => p.lineas).filter((l) => l.producto.linea_operacion === 'carne' && l.producto.tipo_operativo !== 'servicio').reduce((a, l) => a + cantidadLinea(l), 0);
     escrito = [...new Set(Object.values(FILA_BILLING))].reduce((total, row) => total
       + Object.values(COLUMNA_BILLING).reduce((a, col) => a + numeroCelda(ws.getCell(row, col)), 0), 0);
   } else return;

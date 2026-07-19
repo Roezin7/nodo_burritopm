@@ -7,7 +7,13 @@ import { eliminarConteo } from '../conteos/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 import { asegurarInventarioInicialSemanal, rangoSemana, repararPedidosHuerfanos } from './conciliacion.js';
 import { confirmarCarga } from '../distribuciones/service.js';
-import { calcularConsumoFifo, type LoteFifoCalculable } from '../inventario/fifo.js';
+import {
+  calcularConsumoFifo,
+  prepararSalidaFifo,
+  registrarSalidaFifo,
+  restaurarCantidadSalidaFifo,
+  type LoteFifoCalculable,
+} from '../inventario/fifo.js';
 import { esErrorPrisma, transaccionSerializable } from '../lib/transaccion.js';
 
 export { calcularConsumoFifo, type LoteFifoCalculable } from '../inventario/fifo.js';
@@ -283,7 +289,173 @@ async function prepararPedido(negocioId: bigint, input: GuardarPedidoInput, esAd
     if (!permitido) throw new HttpError(400, 'La fecha no corresponde a una entrega programada para este restaurante');
   }
 
-  return { input, ubicacion, empresaId, porId, preciosSemana };
+  return { input, ubicacion, empresaId, porId, preciosSemana, esAdmin };
+}
+
+async function bodegaProductoEnTx(
+  tx: Prisma.TransactionClient,
+  negocioId: bigint,
+  linea: LineaOperacion | null,
+) {
+  const nombre = linea === 'carne' ? 'Carnicer' : linea === 'desechables' ? 'Adison' : null;
+  const propia = nombre ? await tx.ubicaciones.findFirst({
+    where: { negocio_id: negocioId, tipo: 'bodega', activo: true, nombre: { contains: nombre, mode: 'insensitive' } },
+    orderBy: { id: 'asc' },
+  }) : null;
+  return propia ?? tx.ubicaciones.findFirst({
+    where: { negocio_id: negocioId, tipo: 'bodega', activo: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
+type LineaDistribuidaEditable = Prisma.distribucion_lineasGetPayload<{ include: { distribuciones: true } }>;
+
+/** Aplica solamente la diferencia física de una venta ya consolidada. La distribución
+ * conserva su estado y su ruta; cantidades, inventario, FIFO y costo facturable quedan
+ * alineados con la corrección del admin. */
+async function corregirLineaDistribuida(
+  tx: Prisma.TransactionClient,
+  input: {
+    negocioId: bigint;
+    usuarioId: bigint;
+    pedidoId: bigint;
+    lineaPedidoId: bigint;
+    producto: { id: bigint; nombre: string; linea_operacion: LineaOperacion | null; ultimo_costo: Prisma.Decimal | null; costo_promedio: Prisma.Decimal | null };
+    linea: LineaDistribuidaEditable;
+    cantidadNueva: number;
+    sello: number;
+  },
+) {
+  const anteriorPedido = num0(input.linea.cantidad_aprobada ?? input.linea.cantidad_sugerida);
+  const anteriorFisico = input.linea.cantidad_recibida != null
+    ? num0(input.linea.cantidad_recibida)
+    : input.linea.cantidad_cargada != null ? num0(input.linea.cantidad_cargada) : null;
+  const nueva = r3(input.cantidadNueva);
+  const bodega = await bodegaProductoEnTx(tx, input.negocioId, input.producto.linea_operacion);
+  if (!bodega) throw new HttpError(400, `No hay bodega configurada para ${input.producto.nombre}`);
+  if (input.linea.incidencia_id) {
+    throw new HttpError(409, `${input.producto.nombre} tiene una incidencia de recepción. Resuélvela antes de modificar la venta.`);
+  }
+
+  let costoUnitario = num(input.linea.costo_unitario)
+    ?? num(input.producto.ultimo_costo)
+    ?? num(input.producto.costo_promedio);
+  const costoAnterior = num(input.linea.costo_total)
+    ?? (costoUnitario != null ? r2((anteriorFisico ?? anteriorPedido) * costoUnitario) : 0);
+  let costoNuevo = costoAnterior;
+
+  if (anteriorFisico != null) {
+    const delta = r3(nueva - anteriorFisico);
+    if (Math.abs(delta) > 0.0001) {
+      const cantidad = Math.abs(delta);
+      const recibida = input.linea.cantidad_recibida != null;
+      const clave = `correccion-venta:${input.pedidoId}:${input.lineaPedidoId}:${input.sello}:${delta > 0 ? 'mas' : 'menos'}`;
+      if (delta > 0) {
+        let salidaFifo: Awaited<ReturnType<typeof prepararSalidaFifo>> | null = null;
+        if (input.producto.linea_operacion === 'desechables') {
+          salidaFifo = await prepararSalidaFifo(tx, {
+            negocioId: input.negocioId,
+            ubicacionId: bodega.id,
+            productId: input.producto.id,
+            cantidad,
+            producto: input.producto.nombre,
+            permitirFaltante: true,
+            costoFaltante: costoUnitario,
+          });
+          costoUnitario = salidaFifo.costo_unitario ?? costoUnitario;
+        }
+        const aplicada = await aplicarMovimiento(tx, {
+          negocioId: input.negocioId,
+          productId: input.producto.id,
+          tipo: 'correccion',
+          cantidad,
+          usuarioId: input.usuarioId,
+          origenId: bodega.id,
+          destinoId: input.linea.ubicacion_destino_id,
+          costoUnitario,
+          documentoTipo: 'correccion_venta',
+          documentoId: input.pedidoId,
+          comentario: recibida ? 'Aumento de venta ya entregada' : 'Aumento de venta ya cargada',
+          idempotencyKey: clave,
+          deltas: recibida ? [
+            { ubicacionId: bodega.id, productId: input.producto.id, disponible: -cantidad },
+            { ubicacionId: input.linea.ubicacion_destino_id, productId: input.producto.id, disponible: cantidad, costoUnitario },
+          ] : [{ ubicacionId: bodega.id, productId: input.producto.id, disponible: -cantidad, transito: cantidad }],
+          permitirDisponibleNegativo: true,
+        });
+        const costoDelta = salidaFifo?.costo_total ?? r2(cantidad * (costoUnitario ?? 0));
+        costoNuevo = r2(costoAnterior + costoDelta);
+        if (aplicada && salidaFifo) {
+          const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: clave }, select: { id: true } });
+          if (!movimiento) throw new HttpError(500, 'No se pudo vincular el ajuste FIFO de la venta');
+          await registrarSalidaFifo(tx, {
+            movimientoId: movimiento.id,
+            ubicacionId: bodega.id,
+            productId: input.producto.id,
+            consumos: salidaFifo.consumos,
+          });
+        }
+      } else {
+        let costoRestaurado = r2(cantidad * (costoUnitario ?? 0));
+        if (input.producto.linea_operacion === 'desechables') {
+          const movimientos = await tx.movimientos_inventario.findMany({
+            where: {
+              product_id: input.producto.id,
+              OR: [
+                { idempotency_key: `carga:${input.linea.id}` },
+                { idempotency_key: { startsWith: `correccion-venta:${input.pedidoId}:${input.lineaPedidoId}:` } },
+              ],
+              consumos_lote: { some: {} },
+            },
+            orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+            select: { id: true },
+          });
+          const restaurado = await restaurarCantidadSalidaFifo(tx, {
+            movimientoIds: movimientos.map((movimiento) => movimiento.id),
+            ubicacionId: bodega.id,
+            productId: input.producto.id,
+            cantidad,
+          });
+          costoRestaurado = r2(restaurado.costo_total + restaurado.cantidad_sin_lote * (costoUnitario ?? 0));
+        }
+        costoNuevo = Math.max(0, r2(costoAnterior - costoRestaurado));
+        await aplicarMovimiento(tx, {
+          negocioId: input.negocioId,
+          productId: input.producto.id,
+          tipo: 'correccion',
+          cantidad,
+          usuarioId: input.usuarioId,
+          origenId: input.linea.ubicacion_destino_id,
+          destinoId: bodega.id,
+          costoUnitario: cantidad > 0 ? r4(costoRestaurado / cantidad) : costoUnitario,
+          documentoTipo: 'correccion_venta',
+          documentoId: input.pedidoId,
+          comentario: recibida ? 'Disminución de venta ya entregada' : 'Disminución de venta ya cargada',
+          idempotencyKey: clave,
+          deltas: recibida ? [
+            { ubicacionId: input.linea.ubicacion_destino_id, productId: input.producto.id, disponible: -cantidad },
+            { ubicacionId: bodega.id, productId: input.producto.id, disponible: cantidad, costoUnitario },
+          ] : [{ ubicacionId: bodega.id, productId: input.producto.id, disponible: cantidad, transito: -cantidad, costoUnitario }],
+          permitirDisponibleNegativo: true,
+        });
+      }
+      costoUnitario = nueva > 0 ? r4(costoNuevo / nueva) : costoUnitario;
+    }
+  }
+
+  const data: Prisma.distribucion_lineasUpdateInput = {
+    cantidad_sugerida: nueva,
+    cantidad_aprobada: input.linea.cantidad_aprobada == null ? null : nueva,
+    cantidad_preparada: input.linea.cantidad_preparada == null ? null : nueva,
+    cantidad_verificada: input.linea.cantidad_verificada == null ? null : nueva,
+    cantidad_cargada: input.linea.cantidad_cargada == null ? null : nueva,
+    cantidad_recibida: input.linea.cantidad_recibida == null ? null : nueva,
+    costo_unitario: costoUnitario,
+    costo_total: anteriorFisico == null
+      ? (costoUnitario != null ? r2(nueva * costoUnitario) : null)
+      : (costoUnitario != null ? costoNuevo : null),
+  };
+  await tx.distribucion_lineas.update({ where: { id: input.linea.id }, data });
 }
 
 async function guardarPedidoEnTx(
@@ -292,27 +464,42 @@ async function guardarPedidoEnTx(
   usuarioId: bigint,
   preparado: Awaited<ReturnType<typeof prepararPedido>>,
 ) {
-  const { input, ubicacion, empresaId, porId, preciosSemana } = preparado;
+  const { input, ubicacion, empresaId, porId, preciosSemana, esAdmin } = preparado;
+  const idsEntrada = input.lineas.map((linea) => String(linea.product_id));
+  if (new Set(idsEntrada).size !== idsEntrada.length) throw new HttpError(400, 'La venta contiene productos repetidos');
   const positivas = input.lineas.filter((l) => l.cantidad > 0);
   const debeConfirmar = input.confirmar === true && positivas.length > 0;
-  let pedido = await tx.pedidos_operativos.findUnique({
+  const pedidoExistente = await tx.pedidos_operativos.findUnique({
       where: { ubicacion_id_linea_operacion_fecha_entrega: { ubicacion_id: ubicacion.id, linea_operacion: input.linea, fecha_entrega: fecha(input.fecha_entrega) } },
+      include: {
+        lineas: {
+          include: {
+            producto: true,
+            distribucion_lineas: { include: { distribuciones: true } },
+          },
+        },
+      },
     });
-    if (pedido && input.actualizado_at !== undefined
-      && (input.actualizado_at === null || pedido.actualizado_at.toISOString() !== input.actualizado_at)) {
+    if (pedidoExistente && input.actualizado_at !== undefined
+      && (input.actualizado_at === null || pedidoExistente.actualizado_at.toISOString() !== input.actualizado_at)) {
       throw new HttpError(409, 'Este pedido cambió en otro dispositivo. Recarga la venta antes de volver a guardar.');
     }
-    if (pedido && !['borrador', 'confirmado'].includes(pedido.estado)) {
-      throw new HttpError(409, pedido.estado === 'cerrado'
+    const consolidado = Boolean(pedidoExistente && !['borrador', 'confirmado'].includes(pedidoExistente.estado));
+    if (pedidoExistente && ['cerrado', 'cancelado'].includes(pedidoExistente.estado)) {
+      throw new HttpError(409, pedidoExistente.estado === 'cerrado'
         ? 'El pedido pertenece a un cierre. Reabre la semana antes de corregirlo.'
-        : 'La venta ya fue consolidada. Elimina ese consolidado para corregirla y volver a generarlo.');
+        : 'La venta está cancelada y no se puede modificar.');
     }
-    pedido = pedido
+    if (consolidado && !esAdmin) {
+      throw new HttpError(409, 'La venta ya fue procesada. Solicita al administrador que haga la corrección.');
+    }
+    const sello = pedidoExistente?.actualizado_at.getTime() ?? Date.now();
+    const pedido = pedidoExistente
       ? await tx.pedidos_operativos.update({
-          where: { id: pedido.id },
+          where: { id: pedidoExistente.id },
           data: {
-            estado: positivas.length === 0 ? 'borrador' : debeConfirmar ? 'confirmado' : pedido.estado,
-            confirmado_at: positivas.length === 0 ? null : debeConfirmar ? new Date() : pedido.confirmado_at,
+            estado: consolidado ? pedidoExistente.estado : positivas.length === 0 ? 'borrador' : debeConfirmar ? 'confirmado' : pedidoExistente.estado,
+            confirmado_at: consolidado ? pedidoExistente.confirmado_at : positivas.length === 0 ? null : debeConfirmar ? new Date() : pedidoExistente.confirmado_at,
             notas: input.notas,
           },
         })
@@ -324,13 +511,105 @@ async function guardarPedidoEnTx(
           },
         });
 
-    await tx.pedido_operativo_lineas.deleteMany({ where: { pedido_id: pedido.id } });
-    if (positivas.length) {
-      await tx.pedido_operativo_lineas.createMany({
-        data: positivas.map((l) => {
-          const p = porId.get(String(l.product_id))!;
-          return { pedido_id: pedido!.id, product_id: p.id, cantidad: r3(l.cantidad), precio_unitario: preciosSemana.get(p.id.toString()) ?? null, notas: l.notas };
-        }),
+    const nuevas = new Map(input.lineas.map((linea) => [String(linea.product_id), linea]));
+    const existentes = new Map((pedidoExistente?.lineas ?? []).map((linea) => [linea.product_id.toString(), linea]));
+    const distribucionesBase = (pedidoExistente?.lineas ?? [])
+      .flatMap((linea) => linea.distribucion_lineas)
+      .sort((a, b) => Number(b.distribucion_id - a.distribucion_id));
+
+    for (const lineaExistente of pedidoExistente?.lineas ?? []) {
+      const entrada = nuevas.get(lineaExistente.product_id.toString());
+      const cantidadNueva = r3(Math.max(0, entrada?.cantidad ?? 0));
+      const distribuida = lineaExistente.distribucion_lineas[0];
+      if (distribuida) {
+        await corregirLineaDistribuida(tx, {
+          negocioId,
+          usuarioId,
+          pedidoId: pedido.id,
+          lineaPedidoId: lineaExistente.id,
+          producto: lineaExistente.producto,
+          linea: distribuida,
+          cantidadNueva,
+          sello,
+        });
+      }
+      if (cantidadNueva > 0) {
+        await tx.pedido_operativo_lineas.update({
+          where: { id: lineaExistente.id },
+          data: {
+            cantidad: cantidadNueva,
+            precio_unitario: preciosSemana.get(lineaExistente.product_id.toString()) ?? lineaExistente.precio_unitario,
+            notas: entrada?.notas,
+          },
+        });
+      } else {
+        if (distribuida) await tx.distribucion_lineas.update({ where: { id: distribuida.id }, data: { pedido_linea_id: null } });
+        await tx.pedido_operativo_lineas.delete({ where: { id: lineaExistente.id } });
+      }
+    }
+
+    for (const entrada of positivas) {
+      if (existentes.has(String(entrada.product_id))) continue;
+      const producto = porId.get(String(entrada.product_id))!;
+      const lineaPedido = await tx.pedido_operativo_lineas.create({
+        data: {
+          pedido_id: pedido.id,
+          product_id: producto.id,
+          cantidad: r3(entrada.cantidad),
+          precio_unitario: preciosSemana.get(producto.id.toString()) ?? null,
+          notas: entrada.notas,
+        },
+      });
+      if (consolidado) {
+        const base = distribucionesBase[0];
+        if (!base) throw new HttpError(409, 'La venta procesada no conserva un despacho al cual agregar el producto');
+        const nuevaDistribuida = await tx.distribucion_lineas.create({
+          data: {
+            distribucion_id: base.distribucion_id,
+            ubicacion_destino_id: ubicacion.id,
+            product_id: producto.id,
+            pedido_linea_id: lineaPedido.id,
+            cantidad_sugerida: 0,
+            cantidad_aprobada: base.cantidad_aprobada == null ? null : 0,
+            cantidad_preparada: base.cantidad_preparada == null ? null : 0,
+            cantidad_verificada: base.cantidad_verificada == null ? null : 0,
+            cantidad_cargada: base.cantidad_cargada == null ? null : 0,
+            cantidad_recibida: base.cantidad_recibida == null ? null : 0,
+            costo_unitario: producto.ultimo_costo ?? producto.costo_promedio,
+            costo_total: 0,
+          },
+          include: { distribuciones: true },
+        });
+        await corregirLineaDistribuida(tx, {
+          negocioId,
+          usuarioId,
+          pedidoId: pedido.id,
+          lineaPedidoId: lineaPedido.id,
+          producto,
+          linea: nuevaDistribuida,
+          cantidadNueva: r3(entrada.cantidad),
+          sello,
+        });
+      }
+    }
+
+    if (consolidado) {
+      await tx.auditoria_operativa.create({
+        data: {
+          negocio_id: negocioId,
+          usuario_id: usuarioId,
+          accion: 'corregir_venta_procesada',
+          entidad: 'pedido_operativo',
+          entidad_id: pedido.id,
+          datos: {
+            estado: pedido.estado,
+            ubicacion_id: Number(ubicacion.id),
+            linea: input.linea,
+            fecha: input.fecha_entrega,
+            anterior: (pedidoExistente?.lineas ?? []).map((linea) => ({ product_id: Number(linea.product_id), cantidad: num0(linea.cantidad) })),
+            nuevo: positivas.map((linea) => ({ product_id: linea.product_id, cantidad: r3(linea.cantidad) })),
+          },
+        },
       });
     }
   return { id: Number(pedido.id), estado: pedido.estado, actualizado_at: pedido.actualizado_at.toISOString() };
@@ -745,6 +1024,9 @@ export interface CompraInput {
   ubicacion_id: number;
   fecha: string;
   referencia?: string | null;
+  // Importe real de la factura. Si se omite, coincide con la suma de renglones;
+  // así fletes/cargos no inventan cajas ni contaminan el costo FIFO.
+  total_factura?: number | null;
   idempotency_key?: string;
   lineas: { product_id: number; cajas: number; peso_total_lb?: number; costo_total: number; congelado?: boolean }[];
 }
@@ -794,7 +1076,9 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     if (p.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${p.nombre} debe recibirse en Bodega Adison`);
   }
   if (ubicacion.codigo === 'CARN') await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
-  const total = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
+  const costoInventario = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
+  const total = r2(input.total_factura ?? costoInventario);
+  if (total < 0) throw new HttpError(400, 'El total de la factura no puede ser negativo');
   const f = fecha(input.fecha);
 
   const ejecutar = () => transaccionSerializable(async (tx) => {
@@ -888,7 +1172,9 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
     if (producto.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${producto.nombre} debe recibirse en Bodega Adison`);
   }
 
-  const total = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
+  const costoInventario = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
+  const total = r2(input.total_factura ?? costoInventario);
+  if (total < 0) throw new HttpError(400, 'El total de la factura no puede ser negativo');
   const nuevaFecha = fecha(input.fecha);
   return transaccionSerializable(async (tx) => {
     const anterior = await tx.compras.findFirst({

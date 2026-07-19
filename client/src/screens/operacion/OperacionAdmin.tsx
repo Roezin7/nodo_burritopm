@@ -39,6 +39,7 @@ interface VistaPreviaCierre {
   balance_estimado: number;
   cajas_perdidas: number;
   productos_con_faltante: number;
+  ajustes: { id: number; tipo: string; descripcion: string; ubicacion: string; linea: string; monto: number }[];
   facturas: { numero: string; empresa: string; ubicacion: string; linea: string; vence_at: string; productos: number; unidades: number; total: number }[];
 }
 interface ConciliacionFila {
@@ -118,6 +119,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   const [proveedor, setProveedor] = useState(String(catalogo.proveedores[0]?.id ?? ''));
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
   const [referencia, setReferencia] = useState('');
+  const [totalFactura, setTotalFactura] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState(() => nuevaClaveIdempotencia('compra'));
   const [borradorHidratado, setBorradorHidratado] = useState<string | null>(null);
   const [editandoId, setEditandoId] = useState<number | null>(null);
@@ -125,7 +127,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   type LineaCompra = { clave: number; producto: string; cajas: string; peso: string; costo: string; congelado: boolean };
   const nuevaLinea = (productoId = ''): LineaCompra => ({ clave: Date.now() + Math.random(), producto: productoId, cajas: '', peso: '', costo: '', congelado: false });
   const [lineas, setLineas] = useState<LineaCompra[]>(() => [nuevaLinea(String(catalogo.productos.find((p) => p.tipo === 'materia_prima')?.id ?? ''))]);
-  const capturaPendiente = editandoId != null || Boolean(referencia.trim()) || lineas.some((l) => Boolean(l.cajas || l.peso || l.costo));
+  const capturaPendiente = editandoId != null || Boolean(referencia.trim() || totalFactura) || lineas.some((l) => Boolean(l.cajas || l.peso || l.costo));
   const claveBorradorCompra = `bpm-borrador-compra:${semana.inicio}`;
   useUnsavedChanges(capturaPendiente);
   const editarLinea = (clave: number, cambios: Partial<LineaCompra>) => setLineas((actuales) => actuales.map((l) => l.clave === clave ? { ...l, ...cambios } : l));
@@ -134,22 +136,24 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     setLineas((actuales) => actuales.map((l) => productosCompra.some((p) => String(p.id) === l.producto) ? l : { ...l, producto: primero, peso: '', congelado: false }));
   }, [linea, productosCompra]);
   useEffect(() => {
-    const guardado = leerBorradorLocal<{ linea: 'carne' | 'desechables'; proveedor: string; fecha: string; referencia: string; lineas: LineaCompra[]; idempotencyKey?: string }>(claveBorradorCompra);
+    const guardado = leerBorradorLocal<{ linea: 'carne' | 'desechables'; proveedor: string; fecha: string; referencia: string; totalFactura?: string; lineas: LineaCompra[]; idempotencyKey?: string }>(claveBorradorCompra);
     setLinea(guardado?.valor.linea ?? 'carne');
     setProveedor(guardado?.valor.proveedor ?? String(catalogo.proveedores[0]?.id ?? ''));
     setFecha(guardado?.valor.fecha ?? fechaDentroDeSemana(semana));
     setEditandoId(null);
     setReferencia(guardado?.valor.referencia ?? '');
+    setTotalFactura(guardado?.valor.totalFactura ?? '');
     setIdempotencyKey(guardado?.valor.idempotencyKey ?? nuevaClaveIdempotencia('compra'));
     setLineas(guardado?.valor.lineas?.length ? guardado.valor.lineas : [nuevaLinea(String(catalogo.productos.find((p) => p.linea === 'carne' && ['materia_prima', 'precio_fijo'].includes(p.tipo))?.id ?? ''))]);
     setBorradorHidratado(claveBorradorCompra);
   }, [semana.inicio, semana.fin, claveBorradorCompra]);
   useEffect(() => {
     if (borradorHidratado !== claveBorradorCompra) return;
-    if (capturaPendiente && editandoId == null) guardarBorradorLocal(claveBorradorCompra, { linea, proveedor, fecha, referencia, lineas, idempotencyKey });
-  }, [capturaPendiente, claveBorradorCompra, borradorHidratado, editandoId, linea, proveedor, fecha, referencia, lineas, idempotencyKey]);
+    if (capturaPendiente && editandoId == null) guardarBorradorLocal(claveBorradorCompra, { linea, proveedor, fecha, referencia, totalFactura, lineas, idempotencyKey });
+  }, [capturaPendiente, claveBorradorCompra, borradorHidratado, editandoId, linea, proveedor, fecha, referencia, totalFactura, lineas, idempotencyKey]);
   const almacen = linea === 'carne' ? carniceria : bodega;
-  const totalCompra = lineas.reduce((total, l) => total + Number(l.costo || 0), 0);
+  const costoInventario = lineas.reduce((total, l) => total + Number(l.costo || 0), 0);
+  const totalCompra = totalFactura === '' ? costoInventario : Number(totalFactura || 0);
   const lineasValidas = lineas.length > 0 && lineas.every((l) => {
     const producto = productosCompra.find((p) => String(p.id) === l.producto);
     return Boolean(l.producto && Number(l.cajas) > 0 && Number(l.costo) > 0 && (producto?.tipo !== 'materia_prima' || Number(l.peso) > 0));
@@ -158,10 +162,10 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     if (!almacen) { setError('Falta configurar el almacén de esta línea.'); return; }
     setBusy(true); setError('');
     try {
-      const body = { proveedor_id: Number(proveedor), ubicacion_id: almacen.id, fecha, referencia: referencia || null, ...(editandoId == null ? { idempotency_key: idempotencyKey } : {}), lineas: lineas.map((l) => { const p = productosCompra.find((producto) => String(producto.id) === l.producto); const materiaPrima = p?.tipo === 'materia_prima'; return { product_id: Number(l.producto), cajas: Number(l.cajas), peso_total_lb: materiaPrima ? Number(l.peso) : 0, costo_total: Number(l.costo), congelado: materiaPrima && l.congelado }; }) };
+      const body = { proveedor_id: Number(proveedor), ubicacion_id: almacen.id, fecha, referencia: referencia || null, total_factura: totalFactura === '' ? null : Number(totalFactura), ...(editandoId == null ? { idempotency_key: idempotencyKey } : {}), lineas: lineas.map((l) => { const p = productosCompra.find((producto) => String(producto.id) === l.producto); const materiaPrima = p?.tipo === 'materia_prima'; return { product_id: Number(l.producto), cajas: Number(l.cajas), peso_total_lb: materiaPrima ? Number(l.peso) : 0, costo_total: Number(l.costo), congelado: materiaPrima && l.congelado }; }) };
       await api(editandoId == null ? '/operacion/compras' : `/operacion/compras/${editandoId}`, { method: editandoId == null ? 'POST' : 'PATCH', body });
       const fueEdicion = editandoId != null;
-      setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setReferencia(''); setEditandoId(null); setIdempotencyKey(nuevaClaveIdempotencia('compra'));
+      setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setReferencia(''); setTotalFactura(''); setEditandoId(null); setIdempotencyKey(nuevaClaveIdempotencia('compra'));
       if (!fueEdicion) guardarBorradorLocal(claveBorradorCompra, null);
       await onDone(fueEdicion ? 'Compra actualizada e inventario recalculado.' : undefined);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar la compra.'); } finally { setBusy(false); }
@@ -172,18 +176,20 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     setProveedor(String(compra.proveedor_id));
     setFecha(compra.fecha);
     setReferencia(compra.referencia ?? '');
+    const costoLineas = compra.lineas.reduce((total, lineaCompra) => total + lineaCompra.costo, 0);
+    setTotalFactura(Math.abs(costoLineas - compra.total) > 0.009 ? String(compra.total) : '');
     setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
     setEditandoId(compra.id);
     setError('');
     requestAnimationFrame(() => editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
   function cancelarEdicion() {
-    setEditandoId(null); setReferencia(''); setFecha(fechaDentroDeSemana(semana));
+    setEditandoId(null); setReferencia(''); setTotalFactura(''); setFecha(fechaDentroDeSemana(semana));
     setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setIdempotencyKey(nuevaClaveIdempotencia('compra')); setError('');
   }
   function limpiarCompra() {
     if (capturaPendiente && !window.confirm('¿Limpiar toda la compra que estás capturando?')) return;
-    setReferencia(''); setFecha(fechaDentroDeSemana(semana)); setEditandoId(null);
+    setReferencia(''); setTotalFactura(''); setFecha(fechaDentroDeSemana(semana)); setEditandoId(null);
     setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setIdempotencyKey(nuevaClaveIdempotencia('compra')); setError('');
     guardarBorradorLocal(claveBorradorCompra, null);
   }
@@ -192,6 +198,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     if (!compra) { setError(`No hay una compra anterior de ${linea}.`); return; }
     setProveedor(String(compra.proveedor_id));
     setReferencia('');
+    setTotalFactura('');
     setIdempotencyKey(nuevaClaveIdempotencia('compra'));
     setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
     setError('');
@@ -199,7 +206,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   function cambiarLineaCompra(siguiente: 'carne' | 'desechables') {
     if (siguiente === linea) return;
     if (capturaPendiente && !window.confirm('Hay una compra sin guardar. ¿Descartarla y cambiar de línea?')) return;
-    setLinea(siguiente); setReferencia(''); setEditandoId(null);
+    setLinea(siguiente); setReferencia(''); setTotalFactura(''); setEditandoId(null);
     setIdempotencyKey(nuevaClaveIdempotencia('compra'));
     guardarBorradorLocal(claveBorradorCompra, null);
     const primero = catalogo.productos.find((p) => p.linea === siguiente && (siguiente === 'desechables' || ['materia_prima', 'precio_fijo'].includes(p.tipo)));
@@ -230,6 +237,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
           <label className="field"><span>Proveedor</span><select data-purchase-entry value={proveedor} onKeyDown={avanzarConEnter} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
           <label className="field"><span>Fecha</span><input data-purchase-entry type="date" min={semana.inicio} max={semana.fin} value={fecha} onKeyDown={avanzarConEnter} onChange={(e) => setFecha(e.target.value)} /></label>
           <label className="field field--wide"><span>Factura / referencia</span><input data-purchase-entry value={referencia} onKeyDown={avanzarConEnter} onChange={(e) => setReferencia(e.target.value)} /></label>
+          <label className="field"><span>Total de factura <em>opcional</em></span><div className="input-prefix"><span>$</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder={costoInventario.toFixed(2)} value={totalFactura} onKeyDown={avanzarConEnter} onChange={(e) => setTotalFactura(e.target.value)} /></div><small>Solo si incluye flete u otros cargos.</small></label>
         </div>
         <div className="purchase-lines">
           {lineas.map((l, indice) => { const seleccionado = productosCompra.find((p) => String(p.id) === l.producto); const requierePeso = seleccionado?.tipo === 'materia_prima'; const pesoCaja = Number(l.cajas) > 0 ? Number(l.peso) / Number(l.cajas) : 0; return <div className="purchase-line" key={l.clave}>
@@ -243,7 +251,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
           </div>; })}
           <button type="button" className="btn btn-secondary btn-sm purchase-add" onClick={() => setLineas((actuales) => [...actuales, nuevaLinea(String(productosCompra[0]?.id ?? ''))])}>+ Agregar producto</button>
         </div>
-        <div className="form-submit form-submit--summary"><div className="form-summary"><span>{lineas.length} renglón{lineas.length === 1 ? '' : 'es'}</span><span>Total <strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={limpiarCompra}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
+        <div className="form-submit form-submit--summary"><div className="form-summary"><span>{lineas.length} renglón{lineas.length === 1 ? '' : 'es'}</span><span>{totalFactura === '' ? 'Total' : `Inventario ${usd(costoInventario)} · Factura`} <strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={limpiarCompra}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
     </section>
 
     {semana.actual && resumen.lotes.length > 0 && <CollapsibleSection title="Materia prima disponible" count={`${resumen.lotes.length} lotes`} defaultOpen={false}>
@@ -251,7 +259,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     </CollapsibleSection>}
 
     <CollapsibleSection title="Compras registradas" count={resumen.cantidad_compras} summary={`Total ${usd(resumen.total_compras)}`}>
-      <div className="record-list">{resumen.compras.map((c) => <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha}{c.referencia ? ` · ${c.referencia}` : ''} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>)}</div>
+      <div className="record-list">{resumen.compras.map((c) => { const costoLineas = c.lineas.reduce((total, lineaCompra) => total + lineaCompra.costo, 0); return <article className="record-row" key={c.id}><div className="record-main"><strong>{c.proveedor}</strong><span>{c.fecha}{c.referencia ? ` · ${c.referencia}` : ''} · vence {c.vence_at}</span>{c.lineas.map((l, i) => <small key={i}>{l.producto} · {l.cajas} cajas{l.peso_lb > 0 ? ` · ${l.peso_lb} lb (${(l.peso_lb / l.cajas).toFixed(2)} lb/caja)` : ''} · {usd(l.costo)}{l.congelado ? ' · congelado' : ''}</small>)}{Math.abs(c.total - costoLineas) > 0.009 && <small>Factura {usd(c.total)} · costo de inventario {usd(costoLineas)}</small>}</div><div className="record-total"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span><div className="record-actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div></div></article>; })}</div>
     </CollapsibleSection>
   </div>;
 }
@@ -595,6 +603,7 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     {vistaPrevia && <div className="modal-backdrop" onClick={() => { if (!busy) setVistaPrevia(null); }}><div className="modal-card close-preview-modal" onClick={(e) => e.stopPropagation()}>
       <div className="card-head"><div><span className="eyebrow">Vista previa · Semana {vistaPrevia.semana.numero}</span><h2>Resultado estimado del cierre</h2><p>{vistaPrevia.semana.inicia_at} al {vistaPrevia.semana.termina_at}</p></div><button className="icon-btn" disabled={busy} aria-label="Cerrar" onClick={() => setVistaPrevia(null)}>×</button></div>
       <div className="close-preview-total"><span>Venta que se facturará</span><strong>{usd(vistaPrevia.ventas.total)}</strong><small>Carne {usd(vistaPrevia.ventas.carne)} · Desechables {usd(vistaPrevia.ventas.desechables)}</small></div>
+      {vistaPrevia.ajustes.length > 0 && <div className="notice"><strong>Ajustes incluidos:</strong> {vistaPrevia.ajustes.map((ajuste) => `${ajuste.ubicacion}: ${ajuste.descripcion} (${usd(ajuste.monto)})`).join(' · ')}</div>}
       <p className="notice"><strong>Inventario calculado automáticamente:</strong> saldo inicial + compras + producción − ventas. El conteo físico es opcional; los saldos negativos se reportan como cajas perdidas y se valúan en cero.</p>
       <div className="metric-strip metric-strip--three"><div><span>Inventario final</span><strong>{usd(vistaPrevia.inventario.total)}</strong><small>Incluye carne, congelado y desechables</small></div><div><span>Por cobrar al cierre</span><strong>{usd(vistaPrevia.cartera.por_cobrar_al_cierre)}</strong><small>Actual {usd(vistaPrevia.cartera.por_cobrar_actual)} + esta semana</small></div><div><span>Por pagar</span><strong>{usd(vistaPrevia.cartera.por_pagar)}</strong><small>Compras pendientes</small></div></div>
       <div className="close-preview-balance"><span>Balance estimado</span><strong>{usd(vistaPrevia.balance_estimado)}</strong></div>
