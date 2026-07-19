@@ -30,6 +30,7 @@ interface TotalCarga {
 
 interface Operacion {
   id: number;
+  distribuciones?: { id: number; estado: string }[];
   nombre: string;
   estado: string;
   linea: LineaOperacion;
@@ -72,6 +73,60 @@ interface RutaDetalle {
 interface Catalogo {
   productos: ProductoOrdenable[];
   plantillas: { linea: LineaOperacion; dia_semana: number; activo?: boolean }[];
+}
+
+const ESTADOS_COMPLETADOS = ['entregada', 'cerrada', 'cerrada_con_incidencias'];
+
+function estadoConsolidado(estados: string[]) {
+  if (estados.every((estado) => ESTADOS_COMPLETADOS.includes(estado))) {
+    return estados.includes('cerrada_con_incidencias') ? 'cerrada_con_incidencias' : 'cerrada';
+  }
+  const orden = ['borrador', 'esperando_conteos', 'calculada', 'en_revision', 'aprobada', 'en_preparacion', 'preparada', 'verificada', 'en_carga', 'cargada', 'en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias'];
+  return [...estados].sort((a, b) => orden.indexOf(a) - orden.indexOf(b))[0] ?? 'calculada';
+}
+
+function fusionarOperaciones(operaciones: Operacion[]): Operacion {
+  const principal = operaciones[0];
+  if (!principal) throw new Error('No hay despachos para consolidar');
+  const totales = new Map<number, TotalCarga>();
+  for (const operacion of operaciones) for (const carga of operacion.total_carga) {
+    const actual = totales.get(carga.product_id);
+    if (!actual) {
+      totales.set(carga.product_id, { ...carga });
+      continue;
+    }
+    actual.total_aprobada += carga.total_aprobada;
+    actual.total_a_cargar += carga.total_a_cargar;
+    actual.faltante = Math.max(0, actual.total_a_cargar - actual.bodega_disponible);
+  }
+  return {
+    ...principal,
+    distribuciones: operaciones.map((operacion) => ({ id: operacion.id, estado: operacion.estado })),
+    estado: estadoConsolidado(operaciones.map((operacion) => operacion.estado)),
+    nombre: operaciones.length === 1 ? principal.nombre : `${principal.linea === 'carne' ? 'Carne' : 'Desechables'} · ${principal.fecha_entrega}`,
+    total_carga: [...totales.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
+  };
+}
+
+function fusionarRutas(grupos: RutaDetalle[][]) {
+  const rutas = new Map<string, RutaDetalle>();
+  for (const grupo of grupos) for (const ruta of grupo) {
+    const clave = [ruta.linea, ruta.fecha_entrega ?? '', ruta.nombre, ruta.conductor ?? ''].join(':');
+    const existente = rutas.get(clave);
+    if (!existente) {
+      rutas.set(clave, { ...ruta, paradas: ruta.paradas.map((parada) => ({ ...parada, items: [...parada.items] })) });
+      continue;
+    }
+    for (const parada of ruta.paradas) {
+      const misma = existente.paradas.find((actual) => actual.ubicacion.id === parada.ubicacion.id);
+      if (misma) {
+        misma.items.push(...parada.items);
+        misma.orden = Math.min(misma.orden, parada.orden);
+      } else existente.paradas.push({ ...parada, items: [...parada.items] });
+    }
+    existente.paradas.sort((a, b) => a.orden - b.orden);
+  }
+  return [...rutas.values()].sort((a, b) => prioridadRuta(a) - prioridadRuta(b) || a.nombre.localeCompare(b.nombre, 'es'));
 }
 
 interface DestinoDocumento {
@@ -222,15 +277,14 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar la configuración de despacho.'));
   }, []);
 
-  async function abrir(id: number) {
+  async function abrir(ids: number | number[]) {
+    const distribucionIds = Array.isArray(ids) ? ids : [ids];
     setError(''); setCargandoDetalle(true);
     try {
-      const [detalle, rutasDetalle] = await Promise.all([
-        api<Operacion>(`/distribuciones/${id}/operacion`),
-        api<RutaDetalle[]>(`/distribuciones/${id}/rutas`),
-      ]);
-      setOp(detalle);
-      setRutas([...rutasDetalle].sort((a, b) => prioridadRuta(a) - prioridadRuta(b) || a.nombre.localeCompare(b.nombre, 'es')));
+      const detalles = await Promise.all(distribucionIds.map((id) => api<Operacion>(`/distribuciones/${id}/operacion`)));
+      const rutasDetalle = await Promise.all(distribucionIds.map((id) => api<RutaDetalle[]>(`/distribuciones/${id}/rutas`)));
+      setOp(fusionarOperaciones(detalles));
+      setRutas(fusionarRutas(rutasDetalle));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo abrir el despacho.');
     } finally {
@@ -246,14 +300,23 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
     repartoHabilitado={repartoHabilitado}
     integrado={integrado}
     onSalir={() => { setOp(null); setRutas([]); void cargar(); }}
-    onRecargar={() => void abrir(op.id)}
+    onRecargar={() => void abrir(op.distribuciones?.map((distribucion) => distribucion.id) ?? op.id)}
   />;
 
   const dias = diasDeSemana(semana);
   const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
-  const salidasPor = (fecha: string, linea: LineaOperacion) => lista
-    .filter((distribucion) => distribucion.fecha_entrega === fecha && distribucion.linea === linea)
-    .sort((a, b) => a.id - b.id);
+  const salidasPor = (fecha: string, linea: LineaOperacion) => {
+    const salidas = lista
+      .filter((distribucion) => distribucion.fecha_entrega === fecha && distribucion.linea === linea && distribucion.estado !== 'cancelada')
+      .sort((a, b) => a.id - b.id);
+    if (!salidas.length) return [];
+    return [{
+      ...salidas[0],
+      ids: salidas.map((salida) => salida.id),
+      estado: estadoConsolidado(salidas.map((salida) => salida.estado)),
+      total_lineas: salidas.reduce((total, salida) => total + salida.total_lineas, 0),
+    }];
+  };
   const estaProgramado = (diaSemana: number, linea: LineaOperacion) =>
     programacion.some((plantilla) => plantilla.dia_semana === diaSemana && plantilla.linea === linea);
 
@@ -274,7 +337,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
               const salidas = salidasPor(dia.fecha, linea);
               const programada = estaProgramado(dia.diaSemana, linea);
               return <div className={`dispatch-day-cell dispatch-day-cell--${linea}`} key={linea}>
-                {salidas.length ? salidas.map((salida) => <button className="dispatch-day-card" key={salida.id} onClick={() => void abrir(salida.id)}>
+                {salidas.length ? salidas.map((salida) => <button className="dispatch-day-card" key={salida.id} onClick={() => void abrir(salida.ids)}>
                   <div><strong>{salida.total_lineas} partidas</strong><span>Documentos por ruta</span></div><div><FaseChip estado={salida.estado} /><b>›</b></div>
                 </button>) : <div className={`dispatch-day-empty ${programada ? 'is-scheduled' : ''}`}><strong>{programada ? 'Salida programada' : 'Sin salida'}</strong>{programada && <span>Se generará al completar los pedidos</span>}</div>}
               </div>;
@@ -301,14 +364,20 @@ function OperacionView({
   const [impresion, setImpresion] = useState<AlcanceImpresion | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const enRuta = op.estado === 'en_transito' || op.estado === 'parcialmente_entregada';
-  const completado = ['entregada', 'cerrada', 'cerrada_con_incidencias'].includes(op.estado);
+  const distribuciones = op.distribuciones ?? [{ id: op.id, estado: op.estado }];
+  const enRuta = distribuciones.some((distribucion) => ['en_transito', 'parcialmente_entregada'].includes(distribucion.estado));
+  const completado = distribuciones.every((distribucion) => ESTADOS_COMPLETADOS.includes(distribucion.estado));
+  const puedeVerificar = distribuciones.some((distribucion) => distribucion.estado === 'aprobada');
+  const puedeCargar = distribuciones.some((distribucion) => distribucion.estado === 'verificada' || (distribucion.estado === 'aprobada' && !verificacionCarga));
   const totalFaltante = op.total_carga.filter((t) => t.faltante > 0).length;
 
   async function ejecutar(endpoint: string) {
     setBusy(true); setError('');
     try {
-      await api(`/distribuciones/${op.id}/${endpoint}`, { method: 'POST' });
+      const candidatas = distribuciones.filter((distribucion) => endpoint === 'verificada'
+        ? distribucion.estado === 'aprobada'
+        : distribucion.estado === 'verificada' || (distribucion.estado === 'aprobada' && !verificacionCarga));
+      for (const distribucion of candidatas) await api(`/distribuciones/${distribucion.id}/${endpoint}`, { method: 'POST' });
       onRecargar();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'No se pudo actualizar el despacho.');
@@ -342,9 +411,9 @@ function OperacionView({
     </div>}
 
     <div className="action-bar dispatch-final-actions">
-      {repartoHabilitado && op.estado === 'aprobada' && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
-      {repartoHabilitado && (op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>Confirmar salida a ruta →</button>}
-      {!repartoHabilitado && ['aprobada', 'verificada'].includes(op.estado) && <span className="muted">El despacho se completará automáticamente; no requiere confirmación.</span>}
+      {repartoHabilitado && puedeVerificar && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
+      {repartoHabilitado && puedeCargar && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>Confirmar salida a ruta →</button>}
+      {!repartoHabilitado && distribuciones.some((distribucion) => ['aprobada', 'verificada'].includes(distribucion.estado)) && <span className="muted">El despacho se completará automáticamente; no requiere confirmación.</span>}
       {enRuta && <span className="muted">{repartoHabilitado ? 'Salida confirmada · en ruta.' : 'Despacho confirmado.'}</span>}
       {completado && <span className="muted">Despacho completado. Usa Auditoría únicamente si se reporta un faltante.</span>}
     </div>
@@ -425,10 +494,12 @@ function TablaIndividual({ destino, filas, linea, fecha }: { destino: DestinoDoc
     <table className={`dispatch-sheet dispatch-sheet--individual dispatch-sheet--${linea}`}>
       <thead>
         <tr><th className="dispatch-sheet-title" colSpan={2}>{destino.nombre}<small>{destino.entregaEn !== destino.nombre ? `ENTREGA EN ${destino.entregaEn}` : destino.direccion || ''}</small></th></tr>
-        {linea === 'carne' ? <><tr className="dispatch-sheet-day"><th colSpan={2}>{diaDocumento(fecha)}</th></tr><tr className="dispatch-sheet-date"><th colSpan={2}>{fechaDocumento(fecha)}</th></tr><tr><th>ITEM</th><th>QTY</th></tr></> : <tr className="dispatch-sheet-date"><th colSpan={2}>{diaDocumento(fecha)} · {fechaDocumento(fecha)}</th></tr>}
+        <tr className="dispatch-sheet-day"><th colSpan={2}>{diaDocumento(fecha)}</th></tr>
+        <tr className="dispatch-sheet-date"><th colSpan={2}>{fechaDocumento(fecha)}</th></tr>
+        <tr><th>ITEM</th><th>QTY</th></tr>
       </thead>
-      <tbody>{filas.map((fila) => { const cantidad = cantidadFila(destino, fila); return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><td>{fila.nombre}</td><td>{cantidad > 0 ? numero(cantidad) : ''}</td></tr>; })}</tbody>
-      {linea === 'carne' && <tfoot><tr><th>TOTAL</th><th>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th></tr></tfoot>}
+      <tbody>{filas.map((fila) => { const cantidad = cantidadFila(destino, fila); return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><td>{fila.nombre}</td><td>{cantidad > 0 || linea === 'desechables' ? numero(cantidad) : ''}</td></tr>; })}</tbody>
+      <tfoot><tr><th>TOTAL</th><th>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th></tr></tfoot>
     </table>
   </div>;
 }

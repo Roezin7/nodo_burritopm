@@ -3675,7 +3675,12 @@ form > .form-actions .btn,
 .dispatch-print-page--desechables .dispatch-sheet th, .dispatch-print-page--desechables .dispatch-sheet td { height: 14px; }
 .dispatch-print-page--desechables .dispatch-sheet-title { height: 22px !important; }
 .dispatch-print-page--desechables .dispatch-sheet caption { padding-bottom: 3px; }
-.dispatch-individual-document--desechables { max-width: 560px; }
+.dispatch-individual-document--desechables { max-width: 620px; }
+.dispatch-individual-document--desechables .dispatch-sheet-title { border-top: 4px double #111; border-bottom: 4px double #111; font-size: 1rem; }
+.dispatch-individual-document--desechables .dispatch-sheet-day th, .dispatch-individual-document--desechables .dispatch-sheet-date th { border-top: 0; border-bottom: 4px double #111; }
+.dispatch-individual-document--desechables .dispatch-sheet tbody td:first-child { font-weight: 700; }
+.dispatch-individual-document--desechables .dispatch-sheet tbody td:last-child { font-weight: 800; }
+.dispatch-individual-document--desechables .dispatch-sheet tfoot th { border-top: 4px double #111; font-size: 0.78rem; }
 .dispatch-tapatios-document { width: 100%; color: #111; font-family: Arial, sans-serif; }
 .dispatch-tapatios-document > .dispatch-real-brand { min-height: 92px; justify-content: center; margin-bottom: 7px; }
 .dispatch-tapatios-title { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 40px; margin-bottom: 10px; border-top: 4px double #111; border-bottom: 4px double #111; text-transform: uppercase; }
@@ -4043,10 +4048,15 @@ form > .form-actions .btn,
   .dispatch-sheet { font-size: 6.5pt; }
   .dispatch-sheet th, .dispatch-sheet td { height: 15px; padding: 0 2px; border-color: #000; }
   .dispatch-sheet-title { height: 21px !important; }
-  .dispatch-print-page--desechables .dispatch-sheet { font-size: 5pt; }
-  .dispatch-print-page--desechables .dispatch-sheet th, .dispatch-print-page--desechables .dispatch-sheet td { height: 10px; padding: 0 1px; }
+  .dispatch-print-page--desechables .dispatch-sheet--matrix { font-size: 5.8pt; }
+  .dispatch-print-page--desechables .dispatch-sheet--matrix th, .dispatch-print-page--desechables .dispatch-sheet--matrix td { height: 3.05mm; padding: 0 0.4mm; }
   .dispatch-print-page--desechables .dispatch-sheet-title { height: 18px !important; }
   .dispatch-sheet--individual { max-width: 100%; font-size: 7.5pt; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual { width: 150mm; font-size: 6.8pt; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual th, .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual td { height: 4.05mm; padding: 0 1mm; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet-title { height: 8mm !important; font-size: 11pt; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet-day th, .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet-date th { height: 5mm; font-size: 7pt; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual tfoot th { height: 6mm; font-size: 9pt; }
   .dispatch-document-date { min-height: 7mm; margin-bottom: 1.5mm; }
   .dispatch-document-date span { font-size: 6pt; }
   .dispatch-document-date strong { font-size: 9pt; }
