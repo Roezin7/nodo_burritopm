@@ -160,6 +160,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     filas,
     resumen: {
       saldos_provisionales: filas.filter((f) => f.actual < -0.0001).length,
+      cajas_perdidas: r3(filas.filter((f) => f.actual < -0.0001).reduce((total, f) => total + Math.abs(f.actual), 0)),
       diferencias_fisicas: filas.filter((f) => f.diferenciaFinal != null && Math.abs(f.diferenciaFinal) > 0.0001).length,
       producciones: producciones.length,
       pedidos: pedidos.length,
@@ -214,10 +215,15 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
       include: { products: { select: { nombre: true } }, ubicaciones: { select: { nombre: true } } },
     }),
   ]);
-  if (negativos.length) {
-    throw new HttpError(409, `Hay saldos provisionales sin conciliar: ${negativos.map((e) => `${e.products.nombre} (${e.ubicaciones.nombre})`).join(', ')}.`);
-  }
-  if (!pedidosCarne && !producciones) return;
+  const alertaNegativos = {
+    cajas_perdidas: r3(negativos.reduce((total, e) => total + Math.abs(num0(e.cantidad_disponible)), 0)),
+    saldos: negativos.map((e) => ({
+      product_id: Number(e.product_id), ubicacion_id: Number(e.ubicacion_id),
+      producto: e.products.nombre, ubicacion: e.ubicaciones.nombre,
+      cantidad: r3(Math.abs(num0(e.cantidad_disponible))),
+    })),
+  };
+  if (!pedidosCarne && !producciones) return alertaNegativos;
   const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
   if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
   if (!reporte.final_capturado) throw new HttpError(409, 'Falta capturar el inventario físico final de Carnicería antes de cerrar.');
@@ -236,6 +242,7 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
   if (faltantes.length) {
     throw new HttpError(409, `El inventario final está incompleto. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
   }
+  return alertaNegativos;
 }
 
 /** Repara pedidos que dicen estar preparados pero ya no tienen ninguna línea vinculada. */

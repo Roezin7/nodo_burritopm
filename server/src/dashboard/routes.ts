@@ -198,12 +198,12 @@ dashboardRouter.get(
     let desechables = 0;
     for (const e of existencias) {
       if (e.products.tipo_operativo === 'materia_prima') continue; // los lotes conservan el costo exacto y el estado fresco/congelado
-      const valor = (num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * (num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0);
+      const valor = (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * (num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0);
       if (e.products.linea_operacion === 'carne') carneTerminada += valor;
       if (e.products.linea_operacion === 'desechables') desechables += valor;
     }
     const materiaTotalSnapshot = snapshot.filter((e) => e.producto.tipo_operativo === 'materia_prima')
-      .reduce((a, e) => a + (num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * num0(e.costo_promedio), 0);
+      .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
     const materiaCongelada = snapshot.length ? num0(semana?.valor_congelado) : lotes.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
     const materiaFresca = snapshot.length ? Math.max(0, materiaTotalSnapshot - materiaCongelada) : lotes.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
     if (snapshot.length && semana) {
@@ -234,13 +234,20 @@ dashboardRouter.get(
       : 0;
     const existenciaDe = new Map(existencias.map((e) => [`${e.ubicacion_id}:${e.product_id}`, num0(e.cantidad_disponible)]));
     const bajoMinimo = parametros.filter((p) => (existenciaDe.get(`${p.ubicacion_id}:${p.product_id}`) ?? 0) < num0(p.stock_min)).length;
-    const provisionales = existencias.filter((e) => num0(e.cantidad_disponible) < -0.0001).length;
+    const saldosNegativos = existencias.filter((e) => num0(e.cantidad_disponible) < -0.0001);
+    const provisionales = saldosNegativos.length;
+    const cajasPerdidas = r2(saldosNegativos.reduce((total, e) => total + Math.abs(num0(e.cantidad_disponible)), 0));
 
     const alertas: { tipo: 'cobro' | 'pago' | 'inventario' | 'pedido' | 'reparto'; titulo: string; detalle: string; ruta: string }[] = [];
     if (vencidoCobrar > 0) alertas.push({ tipo: 'cobro', titulo: 'Facturas vencidas', detalle: `${facturasPendientes.filter((f) => f.vence_at < hoy).length} facturas · $${r2(vencidoCobrar).toLocaleString('en-US')}`, ruta: '/facturacion' });
     if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/facturacion' });
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
-    if (provisionales > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Inventario por conciliar', detalle: `${provisionales} saldos provisionales negativos`, ruta: '/semana/inventario' });
+    if (provisionales > 0) alertas.unshift({
+      tipo: 'inventario',
+      titulo: 'Cajas perdidas',
+      detalle: `${cajasPerdidas.toLocaleString('es-MX')} cajas en ${provisionales} ${provisionales === 1 ? 'producto' : 'productos'}; no bloquean el cierre`,
+      ruta: '/semana/inventario',
+    });
     if (!usarFacturas && proteinasSinPrecio.length > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Venta pendiente de producción', detalle: `Falta calcular costo + $15 de ${proteinasSinPrecio.map((p) => p.nombre).join(', ')}`, ruta: '/semana/produccion' });
     const borradores = pedidos.filter((p) => p.estado === 'borrador').length;
     if (borradores > 0) alertas.push({ tipo: 'pedido', titulo: 'Pedidos sin confirmar', detalle: `${borradores} pedidos permanecen en borrador`, ruta: '/pedidos' });
@@ -299,7 +306,7 @@ dashboardRouter.get(
       let valor = 0;
       for (const e of existencias) {
         const costo = num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0;
-        valor += num0(e.cantidad_disponible) * costo;
+        valor += Math.max(0, num0(e.cantidad_disponible)) * costo;
       }
 
       // Bajo mínimo aplica al inventario operativo de bodega; sucursales ya piden directo.

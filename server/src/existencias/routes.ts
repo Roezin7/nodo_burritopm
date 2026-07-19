@@ -203,7 +203,7 @@ existenciasRouter.get(
       let valor = 0;
       let skus = 0;
       for (const e of u.existencias) {
-        const disp = num0(e.cantidad_disponible);
+        const disp = Math.max(0, num0(e.cantidad_disponible));
         if (disp > 0) skus++;
         const costo = num(e.costo_promedio);
         if (costo != null) valor += disp * costo;
@@ -249,8 +249,9 @@ existenciasRouter.get(
     const porProducto = new Map(filas.map((e) => [e.product_id.toString(), e]));
     const items = productos.map((producto) => {
       const e = porProducto.get(producto.id.toString());
-      const disp = num0(e?.cantidad_disponible);
-      const transito = num0(e?.cantidad_transito);
+      const saldoReal = num0(e?.cantidad_disponible);
+      const disp = Math.max(0, saldoReal);
+      const transito = Math.max(0, num0(e?.cantidad_transito));
       const costo = num(e?.costo_promedio) ?? (usarSnapshot ? null : num(producto.ultimo_costo) ?? num(producto.costo_promedio));
       return {
         product_id: Number(producto.id),
@@ -260,8 +261,9 @@ existenciasRouter.get(
         tipo: producto.tipo_operativo,
         unidad: producto.unidad_distribucion.nombre,
         disponible: disp,
-        reservada: num0(e?.cantidad_reservada),
+        reservada: Math.max(0, num0(e?.cantidad_reservada)),
         transito,
+        faltante: Math.max(0, -saldoReal),
         costo_promedio: costo,
         valor: costo != null ? Math.round((disp + transito) * costo * 100) / 100 : 0,
       };
@@ -269,6 +271,7 @@ existenciasRouter.get(
     res.json({
       items,
       valor_total: Math.round(items.reduce((a, i) => a + i.valor, 0) * 100) / 100,
+      cajas_perdidas: Math.round(items.reduce((a, i) => a + i.faltante, 0) * 1000) / 1000,
       fuente: usarSnapshot ? 'cierre_semanal' : 'actual',
       semana_estado: semana?.estado ?? null,
     });

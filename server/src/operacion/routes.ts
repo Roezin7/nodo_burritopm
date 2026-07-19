@@ -5,6 +5,7 @@ import { asyncHandler, HttpError } from '../middleware/error.js';
 import * as svc from './service.js';
 import { prisma } from '../db.js';
 import * as conciliacion from './conciliacion.js';
+import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
 
 export const operacionRouter = Router();
 const linea = z.enum(['carne', 'desechables']);
@@ -77,7 +78,12 @@ operacionRouter.post('/distribuciones/crear-todas', soloAdmin, asyncHandler(asyn
 /** Completa de forma idempotente los despachos de pedidos que ya estaban confirmados. */
 operacionRouter.post('/distribuciones/sincronizar', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({ desde: fecha, hasta: fecha }).refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.body);
-  res.json(await svc.sincronizarDespachosConfirmados(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta));
+  const despachos = await svc.sincronizarDespachosConfirmados(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta);
+  const negocio = await prisma.negocios.findUnique({ where: { id: req.auth!.negocioId }, select: { reparto_habilitado: true } });
+  const entregas = negocio?.reparto_habilitado
+    ? { confirmadas: 0 }
+    : await confirmarRecepcionesSinFaltantesEnRango(req.auth!.negocioId, req.auth!.usuarioId, b.desde, b.hasta);
+  res.json({ despachos, entregas });
 }));
 
 operacionRouter.patch('/plantillas/:id', soloAdmin, asyncHandler(async (req, res) => {

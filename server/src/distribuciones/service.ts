@@ -4,7 +4,7 @@ import { HttpError } from '../middleware/error.js';
 import { valor } from './logic.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { asegurarRutaEnCurso, sellarParadaPorRecepcion } from './rutas.service.js';
-import { avisarConfirmarRecepcion, avisarPedidoEnCamino } from '../push/service.js';
+import { avisarPedidoEnCamino } from '../push/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 import { asegurarInventarioInicialSemanal, repararPedidosHuerfanos } from '../operacion/conciliacion.js';
 import type { Prisma } from '@prisma/client';
@@ -676,8 +676,8 @@ export async function aprobarDistribucionesEnRango(
 }
 
 /**
- * Confirma la carga del camión: lo verificado (o lo cargado ajustado) sale de la bodega
- * y pasa a tránsito. Registra un movimiento de transferencia por línea (idempotente).
+ * Confirma la carga del camión. Con reparto activo pasa a tránsito; sin reparto, el despacho
+ * es también la entrega normal y queda cerrado sin exigir una confirmación administrativa.
  */
 export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: bigint) {
   const dist = await cargarDistribucion(negocioId, id);
@@ -719,7 +719,8 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       const cargada = pedida;
       const costo = num(l.costo_unitario);
 
-      // Lo realmente cargado sale de disponible y entra a tránsito (movimiento idempotente).
+      // Con reparto activo queda en tránsito. Sin reparto, Despacho es el último evento normal:
+      // la existencia llega directamente al restaurante y Auditoría queda solo para excepciones.
       if (cargada > 0) {
         totalCargado = redondear3(totalCargado + cargada);
         sucursalesConCarga.add(l.ubicacion_destino_id.toString());
@@ -734,9 +735,14 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           costoUnitario: costo,
           documentoTipo: 'distribucion',
           documentoId: id,
-          comentario: 'Carga al camión (salida de bodega)',
+          comentario: negocio?.reparto_habilitado ? 'Carga al camión (salida de bodega)' : 'Despacho y entrega directa al restaurante',
           idempotencyKey: `carga:${l.id}`,
-          deltas: [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }],
+          deltas: negocio?.reparto_habilitado
+            ? [{ ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada, transito: cargada }]
+            : [
+                { ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada },
+                { ubicacionId: l.ubicacion_destino_id, productId: l.product_id, disponible: cargada, costoUnitario: costo },
+              ],
           permitirDisponibleNegativo: bodega.codigo === 'CARN',
         });
       }
@@ -756,38 +762,37 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           },
         });
       }
-      // Una línea en cero no viaja ni debe obligar a la sucursal a "recibir cero" para poder
-      // cerrar la semana. Las líneas positivas quedan pendientes de recepción normal.
+      const entregaDirecta = !negocio?.reparto_habilitado;
       await tx.distribucion_lineas.update({
         where: { id: l.id },
-        data: { cantidad_cargada: cargada, cantidad_recibida: cargada <= 0 ? 0 : null, estado_linea: cargada <= 0 ? 'no_surtido' : null },
+        data: {
+          cantidad_cargada: cargada,
+          cantidad_recibida: cargada <= 0 || entregaDirecta ? cargada : null,
+          estado_linea: cargada <= 0 ? 'no_surtido' : entregaDirecta ? 'recibido' : null,
+        },
       });
     }
     // Una preparación completamente en cero no genera tránsito ni ruta.
     if (totalCargado <= 0) {
       throw new HttpError(409, 'El consolidado no tiene cantidades para cargar.');
     }
-    await tx.distribuciones.update({ where: { id }, data: { estado: 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
-    await marcarPedidosDeDistribucion(tx, id, 'despachado');
+    const entregaDirecta = !negocio?.reparto_habilitado;
+    await tx.distribuciones.update({ where: { id }, data: { estado: entregaDirecta ? 'cerrada' : 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
+    await marcarPedidosDeDistribucion(tx, id, entregaDirecta ? 'entregado' : 'despachado');
     if (negocio?.reparto_habilitado) {
       // Con seguimiento de reparto, el camión cargado pone las rutas planeadas en curso.
       await asegurarRutaEnCurso(tx, negocioId, id, usuarioId, sucursalesConCarga);
     } else {
-      // Sin seguimiento, Despacho enlaza directamente con Recepción. Conservamos la planeación
-      // como historial, pero ninguna ruta queda pendiente ni bloquea el cierre de la entrega.
+      // Sin seguimiento, Despacho completa la entrega normal. Las rutas quedan como referencia
+      // documental y Auditoría se abre únicamente si después se reporta una diferencia.
       await tx.rutas.updateMany({
         where: { negocio_id: negocioId, distribucion_id: id, estado: 'planificada' },
-        data: { estado: 'cancelada', notas: 'Reparto desactivado: pase directo a recepción' },
+        data: { estado: 'cancelada', notas: 'Reparto desactivado: entrega completada al despachar' },
       });
     }
   }, { isolationLevel: 'Serializable' });
   if (negocio?.reparto_habilitado) {
     void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
-  } else {
-    // Sin repartidor que marque las paradas, el despacho es el evento que solicita la recepción.
-    for (const ubicacionId of sucursalesConCarga) {
-      void avisarConfirmarRecepcion(BigInt(ubicacionId)).catch(() => {});
-    }
   }
   return { ok: true };
 }
@@ -1150,7 +1155,9 @@ export async function confirmarRecepcionesSinFaltantesEnRango(
   hasta: string,
 ) {
   const registros = await auditoriaRecepciones(negocioId, desde, hasta);
-  const pendientes = registros.filter((registro) => registro.estado === 'pendiente');
+  // Nunca completar automáticamente una recepción que ya contiene una diferencia conocida.
+  // Esos casos sí pertenecen a Auditoría y deben conservar sus faltantes capturados.
+  const pendientes = registros.filter((registro) => registro.estado === 'pendiente' && registro.total_faltante <= 0);
   let confirmadas = 0;
   for (const registro of pendientes) {
     await auditarFaltantesRecepcion(

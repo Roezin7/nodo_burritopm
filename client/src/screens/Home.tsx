@@ -44,7 +44,7 @@ function TareaHoy({ repartoHabilitado }: { repartoHabilitado: boolean }) {
           if (alerta) return { titulo: alerta.titulo, sub: alerta.detalle, ruta: alerta.ruta };
           if (d.operacion.distribuciones_abiertas > 0) return {
             titulo: 'Distribuciones en proceso',
-            sub: repartoHabilitado ? 'Revisa despacho y reparto' : 'Revisa despacho y recepción',
+            sub: repartoHabilitado ? 'Revisa despacho y reparto' : 'Revisa los despachos de la semana',
             ruta: '/semana/despacho',
           };
           return null;
@@ -89,7 +89,7 @@ const MODULOS: Modulo[] = [
   { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
   { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'], requiereReparto: true },
-  { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['encargado_sucursal'], requiereReparto: true },
   { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cobros, pagos y facturas pendientes', ruta: '/facturacion', soloAdmin: true },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },

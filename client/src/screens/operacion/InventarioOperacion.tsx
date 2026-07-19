@@ -27,6 +27,7 @@ interface Existencia {
   disponible: number;
   reservada: number;
   transito: number;
+  faltante?: number;
   costo_promedio: number | null;
   valor: number;
 }
@@ -34,6 +35,7 @@ interface Existencia {
 interface Stock {
   items: Existencia[];
   valor_total: number;
+  cajas_perdidas?: number;
   fuente?: 'actual' | 'cierre_semanal';
   semana_estado?: string | null;
 }
@@ -114,7 +116,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     return itemsPeriodo.filter((i) => {
       if (linea !== 'todas' && i.linea !== linea) return false;
       if (!editando && q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
-      return editando || i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0;
+      return editando || i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0 || (i.faltante ?? 0) > 0;
     });
   }, [itemsPeriodo, linea, buscar, editando]);
 
@@ -164,7 +166,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
       {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
-    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 7 : 6}</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso {repartoHabilitado ? 6 : 5}</span><h2>Inventario final</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar inventario</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">
@@ -176,6 +178,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     </div>
 
     {error && <p className="error-msg">{error}</p>}
+    {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} cajas perdidas:</strong> se muestran como existencia 0 y no impedirán cerrar la semana. Al cerrar se creará una incidencia para el administrador.</p>}
     {!semana.actual && <p className="notice">{stock?.fuente === 'cierre_semanal' ? <><strong>Cierre de semana {semana.numero}:</strong> cantidades y costos provienen de la fotografía contable.</> : capturaSemana ? <><strong>Inventario final de semana {semana.numero}:</strong> se muestra la captura física del {capturaSemana.fecha}; la valuación todavía corresponde al costo vigente.</> : <><strong>Sin fotografía histórica:</strong> la semana no tiene un cierre disponible y el saldo mostrado es el actual.</>}</p>}
     {!stock && !error ? <Spinner label="Calculando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
@@ -193,7 +196,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
         <div className="data-list data-list--inventory">
           <div className="data-row data-row--head"><span>Producto</span><span>Disponible</span><span>Reserva</span><span>Tránsito</span><span>Costo</span><span>Valor</span></div>
           {filas.map((i) => <div className="data-row" key={i.product_id}>
-            <span className="data-primary"><strong>{i.nombre}</strong><small>{i.sku} · {i.tipo?.replaceAll('_', ' ') ?? i.linea}</small></span>
+            <span className="data-primary"><strong>{i.nombre}</strong><small>{i.sku} · {i.tipo?.replaceAll('_', ' ') ?? i.linea}{(i.faltante ?? 0) > 0 && <span className="txt-danger"> · faltan {i.faltante?.toLocaleString('es-MX')}</span>}</small></span>
             <span data-label="Disponible">{editando ? <div className="input-suffix input-suffix--compact"><input type="number" min="0" step={i.unidad.toLowerCase().includes('pieza') ? '1' : '0.5'} value={cantidades[i.product_id] ?? ''} onChange={(e) => setCantidades({ ...cantidades, [i.product_id]: e.target.value })} /><span>{i.unidad}</span></div> : <><strong>{i.disponible.toLocaleString('es-MX')}</strong> <small>{i.unidad}</small></>}</span>
             <span data-label="Reserva">{i.reservada.toLocaleString('es-MX')}</span>
             <span data-label="Tránsito">{i.transito.toLocaleString('es-MX')}</span>

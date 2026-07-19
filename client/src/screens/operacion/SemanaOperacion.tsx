@@ -20,9 +20,8 @@ const capturas = [
 const proceso = [
   { clave: 'despacho', label: 'Despacho', numero: 4 },
   { clave: 'reparto', label: 'Reparto', numero: 5 },
-  { clave: 'recepcion', label: 'Recepción', numero: 6 },
-  { clave: 'inventario', label: 'Inventario', numero: 7 },
-  { clave: 'cierre', label: 'Cierre', numero: 8 },
+  { clave: 'inventario', label: 'Inventario', numero: 6 },
+  { clave: 'cierre', label: 'Cierre', numero: 7 },
 ] as const;
 
 const tareasPorRol = [
@@ -45,18 +44,23 @@ export default function SemanaOperacion() {
   if (!usuario) return null;
   if (cargandoConfig) return <Spinner />;
   if (paso === 'reparto' && !repartoHabilitado) {
-    const destino = usuario.rol === 'encargado_bodega' ? '/semana/despacho' : '/semana/recepcion';
+    const destino = usuario.rol === 'encargado_sucursal' ? '/semana/recepcion' : '/semana/despacho';
     return <Navigate to={rutaSemana(destino)} replace />;
   }
 
   const procesoVisible = proceso
     .filter((p) => p.clave !== 'reparto' || repartoHabilitado)
-    .map((p, i) => ({ ...p, label: usuario.rol === 'admin' && p.clave === 'recepcion' ? 'Auditoría' : p.label, numero: i + capturas.length + 1 }));
+    .map((p, i) => ({ ...p, numero: i + capturas.length + 1 }));
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
     if (paso === 'preparacion') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
     if (paso === 'seguimiento') return <Navigate to={rutaSemana('/semana/despacho')} replace />;
+    if (paso === 'recepcion') return <div className="page weekly-operation weekly-operation--simple">
+      <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Control excepcional</span><h1>Auditoría de faltantes</h1></div></header>
+      <SelectorSemana semana={semana} opciones={opcionesSemana} onChange={cambiarSemana} />
+      <div className="weekly-operation__content"><Recepcion integrado semana={semana} /></div>
+    </div>;
     const actual = (paso ?? 'compras') as PasoAdmin;
     const todos = [...capturas, ...procesoVisible];
     if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/compras')} replace />;
@@ -84,7 +88,6 @@ export default function SemanaOperacion() {
         {actual === 'ventas' && <Pedidos integrado semana={semana} />}
         {actual === 'despacho' && <Bodega integrado semana={semana} />}
         {actual === 'reparto' && <Ruta integrado semana={semana} />}
-        {actual === 'recepcion' && <Recepcion integrado semana={semana} />}
         {actual === 'inventario' && <InventarioOperacion integrado semana={semana} />}
         {actual === 'cierre' && <OperacionAdmin seccion="cierre" integrado semana={semana} />}
       </div>
@@ -92,7 +95,9 @@ export default function SemanaOperacion() {
   }
 
   const permitidos = tareasPorRol.filter((p) =>
-    (p.roles as readonly Rol[]).includes(usuario.rol) && (p.clave !== 'reparto' || repartoHabilitado));
+    (p.roles as readonly Rol[]).includes(usuario.rol)
+    && (p.clave !== 'reparto' || repartoHabilitado)
+    && (p.clave !== 'recepcion' || repartoHabilitado));
   const alias = paso === 'pedidos' ? 'ventas' : paso;
   const inicio = permitidos[0]?.clave ?? 'ventas';
   if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={rutaSemana(`/semana/${inicio}`)} replace />;

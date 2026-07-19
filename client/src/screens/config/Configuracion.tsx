@@ -108,7 +108,7 @@ function Operacion() {
         <div className="cfg-switch">
           <div>
             <strong>Seguimiento de reparto</strong>
-            <p>{repartoHabilitado ? 'Despacho → Reparto → Recepción' : 'Despacho → Recepción'}</p>
+            <p>{repartoHabilitado ? 'Despacho → Reparto' : 'Despacho completa la entrega'}</p>
           </div>
           <button
             type="button"
@@ -160,7 +160,7 @@ function Operacion() {
         </div>
       </div>
 
-      <div className="settings-card">
+      {repartoHabilitado && <div className="settings-card">
         <strong>Auto-cierre de recepción</strong>
         <div className="dias-selector">
           {AUTO_CIERRE_OPCIONES.map((o) => (
@@ -177,7 +177,7 @@ function Operacion() {
           ))}
         </div>
         {autoCierre === 0 && <small>Las recepciones quedan pendientes hasta confirmarlas</small>}
-      </div>
+      </div>}
       {error && <p className="error-msg">{error}</p>}
     </>
   );

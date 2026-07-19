@@ -199,9 +199,9 @@ function valoresInventario(d: Datos) {
   };
   if (d.semana.estado === 'cerrada' || guardado.carne + guardado.congelado + guardado.desechables > 0) return guardado;
   const terminado = d.existencias.filter((e) => e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima')
-    .reduce((a, e) => a + (num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * num0(e.costo_promedio), 0);
+    .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
   const desechables = d.existencias.filter((e) => e.products.linea_operacion === 'desechables')
-    .reduce((a, e) => a + (num0(e.cantidad_disponible) + num0(e.cantidad_transito)) * num0(e.costo_promedio), 0);
+    .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
   const fresca = d.lotesVivos.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   const congelado = d.lotesVivos.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   return { carne: r2(terminado + fresca), congelado: r2(congelado), desechables: r2(desechables) };
@@ -324,7 +324,7 @@ function llenarDesechables(wb: ExcelJS.Workbook, d: Datos) {
       }
     }
     const compras = d.compras.flatMap((c) => c.lineas).filter((l) => l.product_id === p.id).reduce((a, l) => a + num0(l.cajas), 0);
-    const final = num0(ex?.cantidad_disponible);
+    const final = Math.max(0, num0(ex?.cantidad_disponible));
     const hold = num0(ex?.cantidad_transito);
     const inicial = Math.max(0, final + vendido - compras);
     // DC (107) pertenece todavía al importe de LBT-8. El generador anterior lo
@@ -409,7 +409,7 @@ function llenarProduccion(wb: ExcelJS.Workbook, d: Datos) {
     ws.getCell(totalRow, 11).value = cajas > 0 ? costo / cajas : Number(producto.ultimo_costo ?? 0);
     const ex = d.existencias.find((e) => e.ubicacion_id === carniceria?.id && e.product_id === producto.id);
     const lotes = d.usaSnapshot ? [] : d.lotesVivos.filter((l) => l.ubicacion_id === carniceria?.id && l.product_id === producto.id);
-    const cajasFinales = num0(ex?.cantidad_disponible);
+    const cajasFinales = Math.max(0, num0(ex?.cantidad_disponible));
     const pesoFinal = ex?.peso_total_lb != null ? num0(ex.peso_total_lb)
       : lotes.length ? lotes.reduce((a, l) => a + num0(l.peso_disponible_lb), 0) : cajasFinales * Number(producto.peso_caja_lb ?? 0);
     const costoFinal = ex?.costo_total != null ? num0(ex.costo_total)
@@ -433,8 +433,8 @@ function llenarProduccion(wb: ExcelJS.Workbook, d: Datos) {
     const vendido = valorProducto(d, productos.map((p) => p.id));
     ws.getCell(row, 37).value = vendido;
     const existencias = d.existencias.filter((e) => e.ubicacion_id === carniceria?.id && ids.has(e.product_id.toString()));
-    const final = existencias.reduce((a, e) => a + num0(e.cantidad_disponible), 0);
-    const valorFinal = existencias.reduce((a, e) => a + num0(e.cantidad_disponible) * num0(e.costo_promedio), 0);
+    const final = existencias.reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)), 0);
+    const valorFinal = existencias.reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio), 0);
     const inicial = final + vendido - producido;
     const pesoCaja = Number(productos[0]?.peso_caja_lb ?? 0);
     const costoInicial = final > 0 ? valorFinal / final : Math.max(0, precioVentaGrupo(d, productos) - (productos.some((p) => p.tipo_operativo === 'proteina') ? MARKUP_PROTEINA : 0));

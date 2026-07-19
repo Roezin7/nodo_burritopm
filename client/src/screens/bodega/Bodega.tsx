@@ -5,7 +5,6 @@ import BodegaRutaTabs from '../../components/BodegaRutaTabs';
 import { filasOrden, type FilaOrden, type LineaOperacion, type ProductoOrdenable } from '../../operationOrder';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
-import CollapsibleSection from '../../components/CollapsibleSection';
 import { useAuth } from '../../auth';
 
 interface DistResumen {
@@ -70,7 +69,10 @@ interface RutaDetalle {
   paradas: RutaParada[];
 }
 
-interface Catalogo { productos: ProductoOrdenable[] }
+interface Catalogo {
+  productos: ProductoOrdenable[];
+  plantillas: { linea: LineaOperacion; dia_semana: number; activo?: boolean }[];
+}
 
 interface DestinoDocumento {
   clave: string;
@@ -82,14 +84,26 @@ interface DestinoDocumento {
 
 type AlcanceImpresion = { tipo: 'completo' | 'carga' } | { tipo: 'ruta'; rutaId: number };
 
-const ESTADOS_BODEGA = ['aprobada', 'verificada', 'en_transito', 'parcialmente_entregada'];
-const ESTADOS_HIST = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'];
-
 function fechaLegible(valor: string | null) {
   if (!valor) return 'Fecha pendiente';
   return new Date(`${valor}T12:00:00`).toLocaleDateString('es-MX', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
+}
+
+function diasDeSemana(semana: SemanaSeleccionada) {
+  const dias: { fecha: string; dia: string; numero: string; diaSemana: number }[] = [];
+  const cursor = new Date(`${semana.inicio}T12:00:00`);
+  while (cursor.toLocaleDateString('en-CA') <= semana.fin) {
+    dias.push({
+      fecha: cursor.toLocaleDateString('en-CA'),
+      dia: cursor.toLocaleDateString('es-MX', { weekday: 'long' }),
+      numero: cursor.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }),
+      diaSemana: cursor.getDay(),
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dias;
 }
 
 function numero(valor: number) {
@@ -140,8 +154,8 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   const [op, setOp] = useState<Operacion | null>(null);
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [productos, setProductos] = useState<ProductoOrdenable[]>([]);
+  const [programacion, setProgramacion] = useState<Catalogo['plantillas']>([]);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
-  const [tab, setTab] = useState<'activos' | 'historial'>('activos');
   const [error, setError] = useState('');
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const solicitud = useRef(0);
@@ -166,7 +180,11 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
 
   useEffect(() => {
     Promise.all([api<{ verificacion_carga: boolean }>('/negocio'), api<Catalogo>('/operacion/catalogo')])
-      .then(([negocio, catalogo]) => { setVerificacionCarga(negocio.verificacion_carga); setProductos(catalogo.productos); })
+      .then(([negocio, catalogo]) => {
+        setVerificacionCarga(negocio.verificacion_carga);
+        setProductos(catalogo.productos);
+        setProgramacion(catalogo.plantillas.filter((plantilla) => plantilla.activo !== false));
+      })
       .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar la configuración de despacho.'));
   }, []);
 
@@ -197,9 +215,13 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
     onRecargar={() => void abrir(op.id)}
   />;
 
-  const activos = lista.filter((d) => ESTADOS_BODEGA.includes(d.estado));
-  const historial = lista.filter((d) => ESTADOS_HIST.includes(d.estado));
-  const mostradas = tab === 'activos' ? activos : historial;
+  const dias = diasDeSemana(semana);
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+  const salidasPor = (fecha: string, linea: LineaOperacion) => lista
+    .filter((distribucion) => distribucion.fecha_entrega === fecha && distribucion.linea === linea)
+    .sort((a, b) => a.id - b.id);
+  const estaProgramado = (diaSemana: number, linea: LineaOperacion) =>
+    programacion.some((plantilla) => plantilla.dia_semana === diaSemana && plantilla.linea === linea);
 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>
@@ -209,22 +231,23 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
       {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 4</span><h2>Despacho</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
-      <div className="tabs">
-        <button className={tab === 'activos' ? 'tab tab--on' : 'tab'} onClick={() => setTab('activos')}>Pendientes ({activos.length})</button>
-        <button className={tab === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setTab('historial')}>Historial ({historial.length})</button>
-      </div>
-
-      {cargandoDetalle ? <p className="muted">Preparando documentos…</p> : mostradas.length === 0 ? (
-        <div className="empty-state"><strong>{tab === 'activos' ? 'No hay despachos pendientes' : 'Aún no hay despachos anteriores'}</strong><span>Los documentos aparecen automáticamente cuando los pedidos confirmados de la fecha están completos.</span></div>
-      ) : (
-        <CollapsibleSection title={tab === 'activos' ? 'Salidas de la semana' : 'Despachos anteriores'} count={mostradas.length}>
-          <div className="lista-ubicaciones">
-            {mostradas.map((d) => <button key={d.id} className="card card-click" onClick={() => void abrir(d.id)}>
-              <div className="ubic-row"><div><strong>{d.linea === 'carne' ? 'Carne' : 'Desechables'} · {fechaLegible(d.fecha_entrega)}</strong> <FaseChip estado={d.estado} /><div className="muted">{d.total_lineas} partidas · hojas por ruta listas para imprimir</div></div><span className="muted">›</span></div>
-            </button>)}
-          </div>
-        </CollapsibleSection>
-      )}
+      {cargandoDetalle ? <p className="muted">Preparando documentos…</p> : <section className="dispatch-week-board">
+        <header className="dispatch-week-board__head"><div><span>Semana {semana.numero}</span><strong>Día</strong></div><div className="dispatch-line-title dispatch-line-title--carne"><span /><div><strong>Carne</strong><small>Carnicería</small></div></div><div className="dispatch-line-title dispatch-line-title--desechables"><span /><div><strong>Desechables</strong><small>Bodega Adison</small></div></div></header>
+        <div className="dispatch-week-board__body">
+          {dias.map((dia) => <div className={`dispatch-day-row ${dia.fecha === hoy ? 'is-today' : ''}`} key={dia.fecha}>
+            <div className="dispatch-day-label"><strong>{dia.dia}</strong><span>{dia.numero}</span>{dia.fecha === hoy && <small>Hoy</small>}</div>
+            {(['carne', 'desechables'] as const).map((linea) => {
+              const salidas = salidasPor(dia.fecha, linea);
+              const programada = estaProgramado(dia.diaSemana, linea);
+              return <div className={`dispatch-day-cell dispatch-day-cell--${linea}`} key={linea}>
+                {salidas.length ? salidas.map((salida) => <button className="dispatch-day-card" key={salida.id} onClick={() => void abrir(salida.id)}>
+                  <div><strong>{salida.total_lineas} partidas</strong><span>Documentos por ruta</span></div><div><FaseChip estado={salida.estado} /><b>›</b></div>
+                </button>) : <div className={`dispatch-day-empty ${programada ? 'is-scheduled' : ''}`}><strong>{programada ? 'Salida programada' : 'Sin salida'}</strong>{programada && <span>Se generará al completar los pedidos</span>}</div>}
+              </div>;
+            })}
+          </div>)}
+        </div>
+      </section>}
     </div>
   );
 }
@@ -245,6 +268,7 @@ function OperacionView({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const enRuta = op.estado === 'en_transito' || op.estado === 'parcialmente_entregada';
+  const completado = ['entregada', 'cerrada', 'cerrada_con_incidencias'].includes(op.estado);
   const totalFaltante = op.total_carga.filter((t) => t.faltante > 0).length;
 
   async function ejecutar(endpoint: string) {
@@ -285,8 +309,9 @@ function OperacionView({
 
     <div className="action-bar dispatch-final-actions">
       {op.estado === 'aprobada' && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
-      {(op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>{repartoHabilitado ? 'Confirmar salida a ruta →' : 'Confirmar salida y enviar a Recepción →'}</button>}
-      {enRuta && <span className="muted">{repartoHabilitado ? 'Salida confirmada · en ruta.' : 'Salida confirmada · pendiente de recepción.'}</span>}
+      {(op.estado === 'verificada' || (op.estado === 'aprobada' && !verificacionCarga)) && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>{repartoHabilitado ? 'Confirmar salida a ruta →' : 'Confirmar despacho →'}</button>}
+      {enRuta && <span className="muted">{repartoHabilitado ? 'Salida confirmada · en ruta.' : 'Despacho confirmado.'}</span>}
+      {completado && <span className="muted">Despacho completado. Usa Auditoría únicamente si se reporta un faltante.</span>}
     </div>
 
     {impresion && <PaqueteDespacho op={op} rutas={rutas} productos={productos} alcance={impresion} onClose={() => setImpresion(null)} />}

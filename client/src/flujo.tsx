@@ -24,8 +24,12 @@ const DIST: Record<string, { label: string; cls: string }> = {
 
 export function EstadoDistChip({ estado }: { estado: string }) {
   const { repartoHabilitado } = useOperacionConfig();
-  const e = !repartoHabilitado && estado === 'en_transito'
-    ? { label: 'Pendiente de recepción', cls: 'chip--accent' }
+  const e = !repartoHabilitado && ['cerrada', 'entregada'].includes(estado)
+    ? { label: 'Despachada', cls: 'chip--ok' }
+    : !repartoHabilitado && estado === 'cerrada_con_incidencias'
+      ? { label: 'Despachada c/ faltantes', cls: 'chip--warn' }
+    : !repartoHabilitado && estado === 'en_transito'
+    ? { label: 'Despachada', cls: 'chip--accent' }
     : !repartoHabilitado && estado === 'parcialmente_entregada'
       ? { label: 'Recepción parcial', cls: 'chip--warn' }
       : DIST[estado];
@@ -57,8 +61,14 @@ export function faseDistribucion(estado: string): { clave: FaseDist; label: stri
 /** Chip de FASE (4 fases) — vista simple del admin. El detalle granular usa EstadoDistChip. */
 export function FaseChip({ estado }: { estado: string }) {
   const { repartoHabilitado } = useOperacionConfig();
+  if (!repartoHabilitado && ['cerrada', 'entregada'].includes(estado)) {
+    return <span className="chip chip-estado chip--ok">Despachada</span>;
+  }
+  if (!repartoHabilitado && estado === 'cerrada_con_incidencias') {
+    return <span className="chip chip-estado chip--warn">Con faltantes</span>;
+  }
   if (!repartoHabilitado && ['en_transito', 'parcialmente_entregada'].includes(estado)) {
-    return <span className="chip chip-estado chip--warn">Pendiente de recepción</span>;
+    return <span className="chip chip-estado chip--accent">Despachada</span>;
   }
   const f = faseDistribucion(estado);
   return <span className={`chip chip-estado ${f.cls}`}>{f.label}</span>;
@@ -97,7 +107,7 @@ const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] =
 export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
   const { usuario } = useAuth();
   const { repartoHabilitado } = useOperacionConfig();
-  const pasos = PASOS.filter((p) => p.clave !== 'ruta' || repartoHabilitado);
+  const pasos = PASOS.filter((p) => (p.clave !== 'ruta' || repartoHabilitado) && !(p.clave === 'recepcion' && usuario?.rol === 'admin'));
   const idxActivo = pasos.findIndex((p) => p.clave === activo);
   return (
     <nav className="flujo-stepper" aria-label="Etapas del abastecimiento">

@@ -29,11 +29,12 @@ const ITEMS: Item[] = [
   { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'captura', roles: ['admin', 'encargado_sucursal'] },
   { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'proceso', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
-  { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'proceso', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'proceso', roles: ['encargado_sucursal'], requiereReparto: true },
   { ruta: '/semana/inventario', label: 'Inventario', icono: 'boxes', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/semana/cierre', label: 'Cierre', icono: 'checks', grupo: 'proceso', soloAdmin: true },
   { ruta: '/facturacion', label: 'Facturación', icono: 'wallet', grupo: 'sistema', soloAdmin: true },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
+  { ruta: '/semana/recepcion', label: 'Auditoría', icono: 'checks', grupo: 'sistema', soloAdmin: true },
 ];
 
 const GRUPOS = [
@@ -101,7 +102,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     ? pathname === '/'
     : i.ruta === '/semana' ? pathname === '/semana' : pathname.startsWith(i.ruta);
   const destino = (i: Item) => i.ruta.startsWith('/semana') ? rutaSemana(i.ruta) : i.ruta;
-  const etiquetaItem = (i: Item) => usuario?.rol === 'admin' && i.ruta === '/semana/recepcion' ? 'Auditoría' : i.label;
+  const etiquetaItem = (i: Item) => i.label;
   const enMas = extras.some(itemActivo);
 
   const syncChip = !online ? (

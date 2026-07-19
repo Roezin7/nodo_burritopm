@@ -40,7 +40,7 @@ interface Conciliacion {
   ubicacion: { id: number; nombre: string };
   periodo: { desde: string; hasta: string; corte_miercoles: string };
   inicial_fijado: boolean; final_capturado: boolean; origen_inicial: 'fijado' | 'cierre_anterior' | 'reconstruido'; filas: ConciliacionFila[];
-  resumen: { saldos_provisionales: number; diferencias_fisicas: number; producciones: number; pedidos: number };
+  resumen: { saldos_provisionales: number; cajas_perdidas: number; diferencias_fisicas: number; producciones: number; pedidos: number };
 }
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -52,7 +52,7 @@ const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripc
   compras: { eyebrow: 'Paso 1', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
   produccion: { eyebrow: 'Paso 2', titulo: 'Producción', descripcion: 'Captura la materia prima usada y las cajas producidas.' },
   rutas: { eyebrow: 'Entregas', titulo: 'Rutas', descripcion: 'Orden de entrega por día.' },
-  cierre: { eyebrow: 'Paso 8', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
+  cierre: { eyebrow: 'Paso 7', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
 };
 
 export default function OperacionAdmin({ seccion, integrado = false, semana = crearSemana() }: { seccion: OperacionSeccion; integrado?: boolean; semana?: SemanaSeleccionada }) {
@@ -77,7 +77,7 @@ export default function OperacionAdmin({ seccion, integrado = false, semana = cr
   useEffect(() => { setResumen(null); void cargar(); }, [semana.inicio, semana.fin]);
   if (!catalogo || !resumen) return <div className={integrado ? '' : 'page'}><Spinner /><p className="error-msg">{error}</p></div>;
   const semanaCerrada = cierres.some((s) => s.anio === semana.anio && s.semana === semana.numero && s.estado === 'cerrada');
-  const vista = seccion === 'cierre' && !repartoHabilitado ? { ...meta.cierre, eyebrow: 'Paso 7' } : meta[seccion];
+  const vista = seccion === 'cierre' ? { ...meta.cierre, eyebrow: `Paso ${repartoHabilitado ? 7 : 6}` } : meta[seccion];
 
   return (
     <div className={integrado ? 'operation-embedded' : 'page operation-page'}>
@@ -452,7 +452,7 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
     <div className="reconciliation-status">
       <span className={`chip ${reporte.inicial_fijado ? 'chip--ok' : 'chip--warn'}`}>{reporte.inicial_fijado ? 'Inicio fijado' : reporte.origen_inicial === 'cierre_anterior' ? 'Inicio tomado del sábado anterior' : 'Inicio reconstruido, falta fijar'}</span>
       <span className={`chip ${reporte.final_capturado ? 'chip--ok' : 'chip--warn'}`}>{reporte.final_capturado ? 'Físico final capturado' : 'Falta inventario final'}</span>
-      {reporte.resumen.saldos_provisionales > 0 && <span className="chip chip--danger">{reporte.resumen.saldos_provisionales} saldos pendientes</span>}
+      {reporte.resumen.saldos_provisionales > 0 && <span className="chip chip--warn">{reporte.resumen.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas · no bloquean cierre</span>}
       {reporte.resumen.diferencias_fisicas > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fisicas} diferencias documentadas</span>}
     </div>
     <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Capturar físico final</Link></div>
@@ -467,9 +467,10 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
 }
 
 function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres: Cierre[]; semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
+  const toast = useToast();
   const [factura, setFactura] = useState<Factura | null>(null);
   useEffect(() => setFactura(null), [semana.inicio, semana.fin]);
-  async function cerrar() { setBusy(true); setError(''); try { await api('/cierre/cerrar', { method: 'POST', body: { fecha_cierre: semana.fin } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo cerrar la semana.'); } finally { setBusy(false); } }
+  async function cerrar() { setBusy(true); setError(''); try { const r = await api<{ cajas_perdidas: number; productos_con_faltante: number }>('/cierre/cerrar', { method: 'POST', body: { fecha_cierre: semana.fin } }); await onDone(); toast.ok(r.cajas_perdidas > 0 ? `Semana cerrada · ${r.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas registradas en Incidencias.` : 'Semana cerrada correctamente.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo cerrar la semana.'); } finally { setBusy(false); } }
   const nombresExcel: Record<string, string> = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' };
   async function descargar(id: number, tipo: string) { const res = await fetch(`/api/cierre/${id}/excel/${tipo}`, { headers: { Authorization: `Bearer ${getToken()}` } }); if (!res.ok) { setError('No se pudo generar el Excel.'); return; } const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nombresExcel[tipo] ?? `${tipo}.xlsx`; a.click(); URL.revokeObjectURL(url); }
   async function pagar(f: Factura) { setBusy(true); setError(''); try { await api(`/cierre/facturas/${f.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy() } }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); } finally { setBusy(false); } }
