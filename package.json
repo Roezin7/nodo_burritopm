@@ -23,9 +23,13 @@
     "prisma:studio": "npm run prisma:studio -w server",
     "seed": "npm run seed -w server",
     "test": "npm run test -w server",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
     "render-build": "npm install && npm run build && npm run prisma:generate -w server && npx --workspace server prisma migrate deploy"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "concurrently": "^9.1.0"
   }
 }

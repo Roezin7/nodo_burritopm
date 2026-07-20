@@ -3,11 +3,12 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth, rolLabel } from './auth';
 import { useTema } from './theme';
 import { Icono } from './icons';
-import { useOffline } from './offline';
 import BurritoLockup from './brand/BurritoLockup';
 import { useOperacionConfig } from './operacion-config';
 import { api, ApiError } from './api';
 import { useSemanaGlobal } from './semana-context';
+import Modal from './components/Modal';
+import SyncCenter from './components/SyncCenter';
 
 import type { Rol } from './auth';
 
@@ -80,7 +81,6 @@ function AvisoPinTemporal() {
 export default function Shell({ children }: { children: ReactNode }) {
   const { usuario, logout } = useAuth();
   const { tema, alternar } = useTema();
-  const { online, pendientes, sincronizar } = useOffline();
   const { repartoHabilitado } = useOperacionConfig();
   const { pathname } = useLocation();
   const { rutaSemana } = useSemanaGlobal();
@@ -113,26 +113,20 @@ export default function Shell({ children }: { children: ReactNode }) {
     if (i.ruta === '/semana/ventas' && usuario?.rol === 'encargado_sucursal') return 'Pedido';
     return i.label;
   };
-  const enMas = extras.some(itemActivo);
-
-  const syncChip = !online ? (
-    <span className="ctx-chip ctx-chip--off">
-      <span className="dot-status" /> Sin conexión
-      {pendientes > 0 && <span>· {pendientes}</span>}
-    </span>
-  ) : pendientes > 0 ? (
-    <span className="ctx-chip ctx-chip--sync" onClick={() => void sincronizar()}>
-      <span className="dot-status" /> Sincronizando {pendientes}
-    </span>
-  ) : null;
+  // Una sección agrupadora ("Operación") debe ser la única activa mientras se navega
+  // cualquiera de sus pasos. Sin esta prioridad, también se iluminaba "Más" porque ahí
+  // viven los accesos directos a esos mismos pasos administrativos.
+  const enPrimario = primarios.some(itemActivo);
+  const enMas = !enPrimario && extras.some(itemActivo);
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">Saltar al contenido</a>
       <aside className="nav-rail">
         <div className="nav-brand">
           <BurritoLockup size={30} variante="rail" />
         </div>
-        <nav className="nav-links">
+        <nav className="nav-links" aria-label="Navegación principal">
           {GRUPOS.map((grupo) => {
             const delGrupo = items.filter((i) => i.grupo === grupo.clave);
             if (!delGrupo.length) return null;
@@ -175,16 +169,16 @@ export default function Shell({ children }: { children: ReactNode }) {
             )}
           </div>
           <div className="ctx-right">
-            {syncChip}
+            <SyncCenter />
             {usuario?.rol === 'admin' && <NavLink className="icon-btn" to="/configuracion" aria-label="Configuración" title="Configuración"><Icono name="settings" size={18} /></NavLink>}
           </div>
         </header>
 
-        <main className="content"><AvisoPinTemporal />{children}</main>
+        <main className="content" id="main-content" tabIndex={-1}><AvisoPinTemporal />{children}</main>
       </div>
 
       {/* Nav inferior — móvil/tablet: pocas pestañas + "Más" para el resto */}
-      <nav className="bottom-nav">
+      <nav className="bottom-nav" aria-label="Navegación móvil">
         {primarios.map((i) => (
           <NavLink
             key={i.ruta}
@@ -210,8 +204,7 @@ export default function Shell({ children }: { children: ReactNode }) {
 
       {/* Hoja "Más": resto de secciones + tema/salir, en tiles grandes y fáciles de tocar */}
       {masAbierto && (
-        <div className="mas-sheet-backdrop" onClick={() => setMasAbierto(false)} role="presentation">
-          <div className="mas-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Más opciones">
+        <Modal backdropClassName="mas-sheet-backdrop" className="mas-sheet" ariaLabel="Más opciones" onClose={() => setMasAbierto(false)}>
             <div className="mas-sheet-handle" />
             {extras.length > 0 && (
               <div className="mas-grid">
@@ -240,8 +233,7 @@ export default function Shell({ children }: { children: ReactNode }) {
               </button>
             </div>
             <button className="btn btn-secondary btn-block mas-cerrar" onClick={() => setMasAbierto(false)}>Cerrar</button>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

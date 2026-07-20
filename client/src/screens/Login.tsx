@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import { useAuth, rolLabel, getUltimoUsuario, type Usuario } from '../auth';
 import BurritoLockup from '../brand/BurritoLockup';
+import { Icono } from '../icons';
 
 export default function Login() {
   const { login } = useAuth();
@@ -61,7 +62,7 @@ export default function Login() {
               <small className="muted">Continuar como</small>
               <strong>{ultimo.nombre}</strong>
             </span>
-            <span className="muted">›</span>
+            <span className="muted"><Icono name="chevron" /></span>
           </button>
         )}
         {ultimo && <p className="muted login-otro">o elige otro</p>}
@@ -95,7 +96,7 @@ export default function Login() {
   return (
     <div className="login">
       <button className="link-btn" onClick={() => { setSel(null); setPin(''); setError(''); }}>
-        ← cambiar usuario
+        <Icono name="back" size={17} /> cambiar usuario
       </button>
       <h1>Hola, {sel.nombre}</h1>
       <p className="subtitle">Ingresa tu PIN</p>
@@ -113,7 +114,7 @@ export default function Login() {
         ))}
         <button className="pinpad__ghost" onClick={() => setPin('')}>C</button>
         <button onClick={() => teclear('0')} disabled={enviando}>0</button>
-        <button className="pinpad__ghost" onClick={() => setPin(pin.slice(0, -1))}>⌫</button>
+        <button className="pinpad__ghost" aria-label="Borrar último dígito" onClick={() => setPin(pin.slice(0, -1))}><Icono name="backspace" /></button>
       </div>
       <button className="btn btn-primary" disabled={enviando || pin.length < 4} onClick={() => void intentar(pin)}>
         {enviando ? 'Entrando…' : 'Entrar'}

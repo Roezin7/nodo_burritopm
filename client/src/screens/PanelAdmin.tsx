@@ -4,6 +4,7 @@ import { api } from '../api';
 import Spinner from '../components/Spinner';
 import WeekPicker from '../components/WeekPicker';
 import { useSemanaGlobal } from '../semana-context';
+import { Icono } from '../icons';
 
 interface Panorama {
   periodo: { anio: number; semana: number; inicia_at: string; termina_at: string; estado: string };
@@ -46,7 +47,7 @@ export default function PanelAdmin() {
     {(() => {
       const alertasVisibles = semana.actual ? p.alertas.slice(1) : p.alertas;
       if (!alertasVisibles.length) return null;
-      const enlace = (a: Panorama['alertas'][number]) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b>→</b></Link>;
+      const enlace = (a: Panorama['alertas'][number]) => <Link className={`overview-alert overview-alert--${a.tipo}`} to={a.ruta.startsWith('/semana') ? rutaSemana(a.ruta) : a.ruta} key={`${a.tipo}-${a.titulo}`}><span><strong>{a.titulo}</strong><small>{a.detalle}</small></span><b><Icono name="chevron" /></b></Link>;
       return <><div className="overview-alerts">{alertasVisibles.slice(0, 2).map(enlace)}</div>{alertasVisibles.length > 2 && <details className="overview-more-alerts"><summary>Ver {alertasVisibles.length - 2} alerta{alertasVisibles.length - 2 === 1 ? '' : 's'} adicional{alertasVisibles.length - 2 === 1 ? '' : 'es'}</summary><div className="overview-alerts">{alertasVisibles.slice(2).map(enlace)}</div></details>}</>;
     })()}
 

@@ -4,6 +4,7 @@ import Spinner from '../../components/Spinner';
 import { useAuth, type Rol } from '../../auth';
 import type { Ubicacion } from './Ubicaciones';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { useDialog } from '../../dialog';
 
 interface UsuarioAdmin {
   id: number;
@@ -32,6 +33,7 @@ const VACIO: FormState = { id: null, nombre: '', rol: 'encargado_sucursal', pin:
 
 export default function Usuarios() {
   const { usuario } = useAuth();
+  const dialog = useDialog();
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [form, setForm] = useState<FormState>(VACIO);
@@ -116,9 +118,8 @@ export default function Usuarios() {
   }
 
   async function resetPin(u: UsuarioAdmin) {
-    const pin = window.prompt(`Nuevo PIN para ${u.nombre} (4 a 6 dígitos):`);
+    const pin = await dialog.prompt({ title: `Cambiar PIN de ${u.nombre}`, description: 'El usuario tendrá que usar este PIN la próxima vez que inicie sesión.', label: 'Nuevo PIN', inputMode: 'numeric', maxLength: 6, placeholder: '4 a 6 dígitos', confirmLabel: 'Cambiar PIN', validate: (valor) => /^\d{4,6}$/.test(valor) ? null : 'El PIN debe tener de 4 a 6 dígitos.' });
     if (!pin) return;
-    if (!/^\d{4,6}$/.test(pin)) { setError('El PIN debe tener de 4 a 6 dígitos.'); return; }
     try {
       await api(`/auth/admin/usuarios/${u.id}/reset-pin`, { method: 'POST', body: { pin_nuevo: pin } });
       setError('');
@@ -128,7 +129,7 @@ export default function Usuarios() {
   }
 
   async function eliminar(u: UsuarioAdmin) {
-    if (!window.confirm(`Eliminar a ${u.nombre}? Esta acción no se puede deshacer.`)) return;
+    if (!await dialog.confirm({ title: `Eliminar a ${u.nombre}`, description: 'Se eliminará su acceso a NODO. Esta acción no se puede deshacer.', confirmLabel: 'Eliminar usuario', tone: 'danger' })) return;
     try {
       await api(`/auth/admin/usuarios/${u.id}`, { method: 'DELETE' });
       setError('');

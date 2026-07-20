@@ -4,6 +4,9 @@ import Spinner from '../components/Spinner';
 import CollapsibleSection from '../components/CollapsibleSection';
 import { crearSemana, etiquetaRango, semanasAlrededor } from '../semana';
 import { useToast } from '../toast';
+import { useDialog } from '../dialog';
+import Modal from '../components/Modal';
+import { Icono } from '../icons';
 
 /** Cuántas filas se muestran siempre; el resto queda colapsado para no saturar la pantalla. */
 const LIMITE_VISIBLE = 6;
@@ -81,6 +84,7 @@ const texto = (valor: string | null | undefined) => (valor ?? '').normalize('NFD
 
 export default function Facturacion() {
   const toast = useToast();
+  const dialog = useDialog();
   const [datos, setDatos] = useState<Cartera | null>(null);
   const [vista, setVista] = useState<'pendientes' | 'historial'>('pendientes');
   const [tipo, setTipo] = useState<'todas' | 'cobrar' | 'pagar'>('todas');
@@ -147,7 +151,7 @@ export default function Facturacion() {
   }
 
   async function revertirMovimiento(id: number) {
-    if (!window.confirm('¿Revertir este pago y devolver el documento a pendientes?')) return;
+    if (!await dialog.confirm({ title: 'Revertir pago', description: 'El documento volverá a pendientes y su saldo se restaurará.', confirmLabel: 'Revertir pago', tone: 'danger' })) return;
     setBusy(true); setError('');
     try {
       await api(`/cierre/compras/${id}/pago`, { method: 'DELETE' });
@@ -185,7 +189,7 @@ export default function Facturacion() {
   }
 
   async function eliminarCredito(id: number) {
-    if (!window.confirm('¿Eliminar este crédito abierto de Lisle?')) return;
+    if (!await dialog.confirm({ title: 'Eliminar crédito de Lisle', description: 'El crédito abierto dejará de aplicarse al cierre semanal.', confirmLabel: 'Eliminar crédito', tone: 'danger' })) return;
     setBusy(true); setError('');
     try {
       await api(`/cierre/creditos-lisle/${id}`, { method: 'DELETE' });
@@ -272,8 +276,8 @@ export default function Facturacion() {
       </section>}
     </div>
 
-    {detalle && <div className="modal-backdrop" onClick={() => setDetalle(null)}><div className={`modal-card billing-detail ${detalle.tipo === 'cobrar' ? 'invoice-print' : ''}`} onClick={(e) => e.stopPropagation()}>
-      <div className="card-head"><div><span className="eyebrow">{detalle.tipo === 'cobrar' ? 'Factura emitida' : 'Factura recibida'}</span><strong>{detalle.tipo === 'cobrar' ? detalle.factura.numero : detalle.factura.referencia || `Compra #${detalle.factura.id}`}</strong></div><button className="icon-btn" aria-label="Cerrar" onClick={() => setDetalle(null)}>×</button></div>
+    {detalle && <Modal className={`billing-detail ${detalle.tipo === 'cobrar' ? 'invoice-print' : ''}`} ariaLabelledBy="billing-detail-title" onClose={() => setDetalle(null)}>
+      <div className="card-head"><div><span className="eyebrow">{detalle.tipo === 'cobrar' ? 'Factura emitida' : 'Factura recibida'}</span><strong id="billing-detail-title">{detalle.tipo === 'cobrar' ? detalle.factura.numero : detalle.factura.referencia || `Compra #${detalle.factura.id}`}</strong></div><button className="icon-btn" aria-label="Cerrar" onClick={() => setDetalle(null)}><Icono name="x" /></button></div>
       {detalle.tipo === 'cobrar' ? <>
         <div className="billing-detail-context"><div><small>Cliente</small><strong>{detalle.factura.ubicacion}</strong><span>{detalle.factura.empresa}</span></div><div><small>Periodo</small><strong>Semana {detalle.factura.semana} · {detalle.factura.anio}</strong><span>Vence {fechaCorta(detalle.factura.vence_at)}</span></div></div>
         <div className="invoice-detail">{detalle.factura.lineas.map((linea, indice) => <div key={indice}><span><strong>{linea.descripcion}</strong><small>{linea.cantidad} × {usd(linea.precio)}</small></span><strong>{usd(linea.importe)}</strong></div>)}</div>
@@ -284,22 +288,22 @@ export default function Facturacion() {
       <div className="invoice-grand-total"><span>{detalle.tipo === 'cobrar' ? detalle.factura.en_ciclo ? 'Saldo del ciclo' : 'Total histórico' : detalle.factura.estado === 'pagada' ? 'Total pagado' : 'Saldo pendiente'}</span><strong>{usd(detalle.tipo === 'cobrar' ? detalle.factura.en_ciclo ? detalle.factura.saldo : detalle.factura.total : detalle.factura.estado === 'pagada' ? detalle.factura.total : detalle.factura.saldo)}</strong></div>
       {detalle.tipo === 'cobrar' && detalle.factura.credito_aplicado > 0 && <p className="billing-credit-note">Este saldo ya descuenta {usd(detalle.factura.credito_aplicado)} del crédito de producción de Lisle.</p>}
       <div className="form-actions">{detalle.tipo === 'cobrar' && <button className="btn btn-secondary" onClick={() => window.print()}>Imprimir / PDF</button>}{detalle.tipo === 'pagar' && detalle.factura.estado === 'pendiente' && <button className="btn btn-primary" onClick={() => prepararMovimiento(detalle.factura.id, detalle.factura.referencia || `Compra #${detalle.factura.id}`, detalle.factura.saldo)}>Registrar pago</button>}</div>
-    </div></div>}
+    </Modal>}
 
-    {movimiento && <div className="modal-backdrop" onClick={() => !busy && setMovimiento(null)}><div className="modal-card payment-dialog" onClick={(e) => e.stopPropagation()}>
-      <div className="card-head"><div><span className="eyebrow">Pago a proveedor</span><strong>{movimiento.titulo}</strong></div><button className="icon-btn" aria-label="Cerrar" disabled={busy} onClick={() => setMovimiento(null)}>×</button></div>
+    {movimiento && <Modal className="payment-dialog" ariaLabelledBy="payment-dialog-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => setMovimiento(null)}>
+      <div className="card-head"><div><span className="eyebrow">Pago a proveedor</span><strong id="payment-dialog-title">{movimiento.titulo}</strong></div><button className="icon-btn" aria-label="Cerrar" disabled={busy} onClick={() => setMovimiento(null)}><Icono name="x" /></button></div>
       <div className="payment-dialog-amount"><span>Monto total</span><strong>{usd(movimiento.monto)}</strong></div>
       <label className="field"><span>Fecha del pago</span><input type="date" max={hoy()} value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} /></label>
       <div className="form-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setMovimiento(null)}>Cancelar</button><button className="btn btn-primary" disabled={busy || !fechaPago} onClick={() => void registrarMovimiento()}>{busy ? 'Guardando…' : 'Confirmar pago'}</button></div>
-    </div></div>}
+    </Modal>}
 
-    {mostrarCredito && <div className="modal-backdrop" onClick={() => !busy && setMostrarCredito(false)}><div className="modal-card payment-dialog" onClick={(e) => e.stopPropagation()}>
-      <div className="card-head"><div><span className="eyebrow">Ajuste de facturación</span><strong>Nuevo crédito de Lisle</strong></div><button className="icon-btn" aria-label="Cerrar" disabled={busy} onClick={() => setMostrarCredito(false)}>×</button></div>
+    {mostrarCredito && <Modal className="payment-dialog" ariaLabelledBy="credit-dialog-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => setMostrarCredito(false)}>
+      <div className="card-head"><div><span className="eyebrow">Ajuste de facturación</span><strong id="credit-dialog-title">Nuevo crédito de Lisle</strong></div><button className="icon-btn" aria-label="Cerrar" disabled={busy} onClick={() => setMostrarCredito(false)}><Icono name="x" /></button></div>
       <p className="muted">La ubicación está fija en Lisle. El crédito no modifica ventas ni inventario; reduce su cuenta al cerrar la semana seleccionada.</p>
       <label className="field"><span>Semana del crédito</span><select value={fechaCredito} onChange={(e) => setFechaCredito(e.target.value)}>{semanasCredito.map((semana) => <option key={semana.inicio} value={semana.inicio}>Semana {semana.numero} · {semana.anio} · {etiquetaRango(semana)}</option>)}</select><small>El crédito se aplicará cuando cierres esta semana.</small></label>
       <label className="field"><span>Monto del crédito</span><input type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="0.00" value={montoCredito} onChange={(e) => setMontoCredito(e.target.value)} /></label>
       <label className="field"><span>Concepto</span><input value={descripcionCredito} maxLength={180} onChange={(e) => setDescripcionCredito(e.target.value)} /></label>
       <div className="form-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setMostrarCredito(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy || !fechaCredito || Number(montoCredito) <= 0 || descripcionCredito.trim().length < 3} onClick={() => void registrarCredito()}>{busy ? 'Guardando…' : 'Guardar crédito'}</button></div>
-    </div></div>}
+    </Modal>}
   </div>;
 }

@@ -8,6 +8,7 @@ import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 import CollapsibleSection from '../../components/CollapsibleSection';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
+import { useDialog } from '../../dialog';
 
 interface LineaRec {
   linea_id: number;
@@ -30,6 +31,7 @@ interface AuditoriaRec {
 export default function Recepcion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
   const { repartoHabilitado } = useOperacionConfig();
+  const dialog = useDialog();
   const esAdmin = usuario?.rol === 'admin';
   const [ubicaciones, setUbicaciones] = useState<UbicacionAsignada[]>([]);
   const [ubicId, setUbicId] = useState('');
@@ -125,6 +127,10 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
     }
   }
   const toggleProblema = (id: number) => setProblema((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  async function cambiarUbicacion(siguiente: string) {
+    if (problema.size > 0 && !await dialog.confirm({ title: 'Cambiar de sucursal', description: 'Hay una recepción con ajustes sin confirmar. El borrador se conservará en este dispositivo.', confirmLabel: 'Cambiar sucursal' })) return;
+    setUbicId(siguiente);
+  }
 
   if (esAdmin) return <AuditoriaRecepcion integrado={integrado} semana={semana} />;
 
@@ -140,10 +146,7 @@ export default function Recepcion({ integrado = false, semana = crearSemana() }:
         <p className="muted">No tienes una sucursal asignada.</p>
       ) : (
         <>
-          <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={(siguiente) => {
-            if (problema.size > 0 && !window.confirm('Hay una recepción con ajustes sin confirmar. ¿Cambiar de sucursal y conservarla como borrador?')) return;
-            setUbicId(siguiente);
-          }} />
+          <UbicacionPicker label="Sucursal" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={(siguiente) => void cambiarUbicacion(siguiente)} />
 
           <div className="tabs">
             <button className={tab === 'pendientes' ? 'tab tab--on' : 'tab'} onClick={() => setTab('pendientes')}>Por recibir ({dists.length})</button>

@@ -6,7 +6,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="mask-icon" href="/mask-icon.svg" color="#5ea531" />
+    <link rel="mask-icon" href="/mask-icon.svg" color="#3f761f" />
     <!-- Ícono de inicio en iOS (la PWA usa este, no el manifest) -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!-- interactive-widget=resizes-content: en iOS 17.4+/Android, el teclado y la barra de
@@ -14,8 +14,8 @@
          la barra inferior y los paneles con posición fija queden mal ubicados o salten al abrir
          un campo de texto. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#15120e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#151411" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -23,7 +23,7 @@
     <meta name="apple-mobile-web-app-title" content="NODO" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <!-- Mosaicos de Windows -->
-    <meta name="msapplication-TileColor" content="#15120e" />
+    <meta name="msapplication-TileColor" content="#151411" />
     <meta name="msapplication-TileImage" content="/pwa-192.png" />
 
     <title>NODO · Burrito Parrilla</title>
@@ -57,14 +57,6 @@
       content="Abastecimiento centralizado: bodega, sucursales, inventarios y distribución en un solo flujo."
     />
     <meta name="twitter:image" content="https://burritopm.app/og-image.png" />
-
-    <!-- Tipografía de producto y datos; el logo utiliza su activo gráfico oficial. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
 
     <!-- Resuelve el tema antes de pintar para evitar parpadeo claro/oscuro -->
     <script>
@@ -100,7 +92,7 @@
         function mostrarRecuperacionManual() {
           var root = document.getElementById('root');
           if (!root || root.childElementCount) return;
-          root.innerHTML = '<main style="min-height:100dvh;display:grid;place-items:center;padding:24px;background:#19191c;color:#f2efe9;font:16px system-ui;text-align:center"><div><h1 style="font-size:22px">No se pudo abrir la aplicación</h1><p style="opacity:.75">Recarga para obtener la versión más reciente.</p><button onclick="location.reload()" style="border:0;border-radius:10px;padding:12px 18px;background:#5ea531;color:white;font:700 16px system-ui">Recargar</button></div></main>';
+          root.innerHTML = '<main style="min-height:100dvh;display:grid;place-items:center;padding:24px;background:#151411;color:#f2efe9;font:16px system-ui;text-align:center"><div><h1 style="font-size:22px">No se pudo abrir la aplicación</h1><p style="opacity:.75">Recarga para obtener la versión más reciente.</p><button onclick="location.reload()" style="border:0;border-radius:10px;padding:12px 18px;background:#3f761f;color:white;font:700 16px system-ui">Recargar</button></div></main>';
         }
 
         function recuperar() {

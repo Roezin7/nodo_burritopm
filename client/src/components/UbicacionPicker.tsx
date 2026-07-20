@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Icono } from '../icons';
 
 export interface OpcionUbic {
   id: number;
@@ -101,7 +102,7 @@ export default function UbicacionPicker({ label, opciones, value, onChange, umbr
                   >
                     {o.tipo === 'bodega' && <span className="ubic-pill-tag">Bodega</span>}
                     <span className="ubic-dropdown-opt-name">{o.nombre}</span>
-                    {String(o.id) === value && <span className="ubic-dropdown-check">✓</span>}
+                    {String(o.id) === value && <span className="ubic-dropdown-check"><Icono name="checks" size={16} /></span>}
                   </button>
                 ))
               )}

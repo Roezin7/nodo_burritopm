@@ -5,12 +5,28 @@ import { useToast } from '../../../toast';
 import { filasOrden, productosParaPedido } from '../../../operationOrder';
 import { etiquetaRango, type SemanaSeleccionada } from '../../../semana';
 import CollapsibleSection from '../../../components/CollapsibleSection';
+import { Icono } from '../../../icons';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../../use-unsaved';
 import {
   abreviaturaUbicacion, claveCantidadSemanal, clavePedidoSemanal, entregasDeSemana, esPieza,
   fechaEntregaCorta, fechaLarga, lineasDeVenta, pedidoEditable, usd,
   type Catalogo, type Linea, type Pedido, type ResultadoConfirmacion,
 } from './types';
+
+interface SeleccionMatriz {
+  fecha: string;
+  filaInicio: number;
+  columnaInicio: number;
+  filaFin: number;
+  columnaFin: number;
+}
+
+const limitesSeleccion = (seleccion: SeleccionMatriz) => ({
+  filaMin: Math.min(seleccion.filaInicio, seleccion.filaFin),
+  filaMax: Math.max(seleccion.filaInicio, seleccion.filaFin),
+  columnaMin: Math.min(seleccion.columnaInicio, seleccion.columnaFin),
+  columnaMax: Math.max(seleccion.columnaInicio, seleccion.columnaFin),
+});
 
 export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaciones, semanaCerrada, onActualizado }: {
   catalogo: Catalogo;
@@ -36,6 +52,8 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   const [fechaHerramienta, setFechaHerramienta] = useState('todas');
   const [ubicacionHerramienta, setUbicacionHerramienta] = useState('todas');
   const [productoHerramienta, setProductoHerramienta] = useState('todos');
+  const [seleccion, setSeleccion] = useState<SeleccionMatriz | null>(null);
+  const arrastrandoSeleccion = useRef(false);
   const restauradoRef = useRef<string | null>(null);
 
   const programadas = useMemo(() => ubicaciones.map((ubicacion) => ({
@@ -45,6 +63,29 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   })).filter((fila) => fila.entregas.length > 0), [ubicaciones, catalogo, linea, semana.inicio, semana.fin]);
   const claveBorrador = `bpm-borrador-ventas:${semana.inicio}:${linea}`;
   useUnsavedChanges(cambios.length > 0);
+
+  useEffect(() => {
+    const terminarArrastre = () => { arrastrandoSeleccion.current = false; };
+    window.addEventListener('mouseup', terminarArrastre);
+    return () => window.removeEventListener('mouseup', terminarArrastre);
+  }, []);
+
+  useEffect(() => { setSeleccion(null); }, [linea, semana.inicio, semana.fin, buscar]);
+
+  useEffect(() => {
+    const actualizarSiSeguro = () => {
+      if (document.visibilityState === 'visible' && cambios.length === 0) setRefresco((actual) => actual + 1);
+    };
+    const alCambiarVisibilidad = () => { if (document.visibilityState === 'visible') actualizarSiSeguro(); };
+    window.addEventListener('focus', actualizarSiSeguro);
+    document.addEventListener('visibilitychange', alCambiarVisibilidad);
+    const intervalo = window.setInterval(actualizarSiSeguro, 45_000);
+    return () => {
+      window.removeEventListener('focus', actualizarSiSeguro);
+      document.removeEventListener('visibilitychange', alCambiarVisibilidad);
+      window.clearInterval(intervalo);
+    };
+  }, [cambios.length]);
 
   useEffect(() => {
     let vigente = true;
@@ -112,6 +153,10 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   const ventasCapturadas = pedidosSemana.filter((pedido) => pedido.estado !== 'cancelado' && lineasDeVenta(pedido, linea).some((detalle) => detalle.cantidad > 0)).length;
   const fechasVisibles = [...new Set(visibles.flatMap((fila) => fila.entregas.map((entrega) => entrega.fecha)))].sort();
   const filasFormato = filasOrden(linea, catalogo.productos);
+  const celdasEnSeleccion = seleccion ? (() => {
+    const limites = limitesSeleccion(seleccion);
+    return (limites.filaMax - limites.filaMin + 1) * (limites.columnaMax - limites.columnaMin + 1);
+  })() : 0;
 
   function pedidosModificados(valores: Record<string, string>) {
     const modificados: string[] = [];
@@ -138,6 +183,60 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     setCantidades(siguientes);
     setHistorialCambios((historial) => [...historial.slice(-49), reversa]);
     setCambios(pedidosModificados(siguientes));
+  }
+
+  function seleccionarCelda(fecha: string, fila: number, columna: number, extender = false) {
+    setSeleccion((actual) => extender && actual?.fecha === fecha
+      ? { ...actual, filaFin: fila, columnaFin: columna }
+      : { fecha, filaInicio: fila, columnaInicio: columna, filaFin: fila, columnaFin: columna });
+  }
+
+  function seleccionarRango(nuevaSeleccion: SeleccionMatriz) {
+    setSeleccion(nuevaSeleccion);
+    requestAnimationFrame(() => {
+      const primera = inputsDeSeleccion(nuevaSeleccion).find((input) => !input.disabled);
+      primera?.focus();
+      primera?.select();
+    });
+  }
+
+  function estaSeleccionada(fecha: string, fila: number, columna: number) {
+    if (!seleccion || seleccion.fecha !== fecha) return false;
+    const limites = limitesSeleccion(seleccion);
+    return fila >= limites.filaMin && fila <= limites.filaMax
+      && columna >= limites.columnaMin && columna <= limites.columnaMax;
+  }
+
+  function inputsDeSeleccion(seleccionObjetivo = seleccion) {
+    if (!seleccionObjetivo) return [];
+    const limites = limitesSeleccion(seleccionObjetivo);
+    return [...document.querySelectorAll<HTMLInputElement>('input[data-grid-mode="desktop"][data-weekly-matrix-input]')]
+      .filter((input) => input.dataset.gridDate === seleccionObjetivo.fecha
+        && Number(input.dataset.gridRow) >= limites.filaMin
+        && Number(input.dataset.gridRow) <= limites.filaMax
+        && Number(input.dataset.gridColumn) >= limites.columnaMin
+        && Number(input.dataset.gridColumn) <= limites.columnaMax);
+  }
+
+  function borrarSeleccion() {
+    aplicarValores(inputsDeSeleccion().filter((input) => !input.disabled && input.dataset.gridKey)
+      .map((input) => ({ clave: input.dataset.gridKey!, valor: '' })));
+  }
+
+  function copiarSeleccion(evento: ReactClipboardEvent<HTMLInputElement>, fecha: string, fila: number, columna: number) {
+    const objetivo = seleccion?.fecha === fecha ? seleccion : { fecha, filaInicio: fila, filaFin: fila, columnaInicio: columna, columnaFin: columna };
+    const limites = limitesSeleccion(objetivo);
+    const valores = new Map(inputsDeSeleccion(objetivo).map((input) => [`${input.dataset.gridRow}|${input.dataset.gridColumn}`, input.value]));
+    const filasCopiadas: string[] = [];
+    for (let filaActual = limites.filaMin; filaActual <= limites.filaMax; filaActual += 1) {
+      const columnas: string[] = [];
+      for (let columnaActual = limites.columnaMin; columnaActual <= limites.columnaMax; columnaActual += 1) {
+        columnas.push(valores.get(`${filaActual}|${columnaActual}`) ?? '');
+      }
+      filasCopiadas.push(columnas.join('\t'));
+    }
+    evento.preventDefault();
+    evento.clipboardData.setData('text/plain', filasCopiadas.join('\n'));
   }
 
   function cambiarCantidad(ubicacionId: number, fechaEntrega: string, productId: number, valor: string) {
@@ -192,10 +291,23 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     restaurantes: typeof programadas,
   ) {
     const textoPegado = evento.clipboardData.getData('text/plain');
-    if (!textoPegado.includes('\t') && !textoPegado.includes('\n')) return;
     evento.preventDefault();
-    const matriz = textoPegado.trim().split(/\r?\n/).map((renglon) => renglon.split('\t'));
+    const matriz = textoPegado.replace(/\r?\n$/, '').split(/\r?\n/).map((renglon) => renglon.split('\t'));
     const entradas: { clave: string; valor: string }[] = [];
+    const limpiar = (crudo: string) => {
+      const limpio = crudo.trim().replace(/[$,]/g, '');
+      return limpio === '' || (Number.isFinite(Number(limpio)) && Number(limpio) >= 0) ? limpio : null;
+    };
+
+    const valorUnico = matriz.length === 1 && matriz[0].length === 1 ? limpiar(matriz[0][0]) : null;
+    const seleccionMultiple = seleccion?.fecha === fechaEntrega
+      && (seleccion.filaInicio !== seleccion.filaFin || seleccion.columnaInicio !== seleccion.columnaFin);
+    if (valorUnico !== null && seleccionMultiple) {
+      aplicarValores(inputsDeSeleccion().filter((input) => !input.disabled && input.dataset.gridKey)
+        .map((input) => ({ clave: input.dataset.gridKey!, valor: valorUnico })));
+      return;
+    }
+
     for (const [desplazamientoFila, renglon] of matriz.entries()) {
       const fila = filas[filaInicio + desplazamientoFila];
       if (!fila) break;
@@ -205,22 +317,81 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
         const producto = fila.productos[columna];
         const pedido = restaurante ? porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega)) : undefined;
         if (!restaurante || !producto || !pedidoEditable(pedido)) continue;
-        const limpio = crudo.trim().replace(/[$,]/g, '');
-        if (limpio !== '' && (!Number.isFinite(Number(limpio)) || Number(limpio) < 0)) continue;
+        const limpio = limpiar(crudo);
+        if (limpio === null) continue;
         entradas.push({ clave: claveCantidadSemanal(restaurante.ubicacion.id, fechaEntrega, producto.id), valor: limpio });
       }
     }
     aplicarValores(entradas);
+    setSeleccion({
+      fecha: fechaEntrega,
+      filaInicio,
+      columnaInicio,
+      filaFin: Math.min(filas.length - 1, filaInicio + matriz.length - 1),
+      columnaFin: Math.min(restaurantes.length - 1, columnaInicio + Math.max(...matriz.map((fila) => fila.length)) - 1),
+    });
   }
 
-  function navegarConEnter(evento: ReactKeyboardEvent<HTMLInputElement>) {
-    if (evento.key !== 'Enter') return;
+  function navegarMatriz(evento: ReactKeyboardEvent<HTMLInputElement>, modo: 'desktop' | 'mobile') {
+    const modificador = evento.metaKey || evento.ctrlKey;
+    if (modo === 'desktop' && modificador && evento.key.toLowerCase() === 'z') {
+      evento.preventDefault();
+      deshacer();
+      return;
+    }
+    if (modo === 'desktop' && modificador && evento.key.toLowerCase() === 'a') {
+      evento.preventDefault();
+      const fecha = evento.currentTarget.dataset.gridDate!;
+      const celdasFecha = [...document.querySelectorAll<HTMLInputElement>(`input[data-grid-mode="desktop"][data-grid-date="${fecha}"]`)]
+        .filter((input) => !input.disabled);
+      if (!celdasFecha.length) return;
+      const filas = celdasFecha.map((input) => Number(input.dataset.gridRow));
+      const columnas = celdasFecha.map((input) => Number(input.dataset.gridColumn));
+      seleccionarRango({ fecha, filaInicio: Math.min(...filas), filaFin: Math.max(...filas), columnaInicio: Math.min(...columnas), columnaFin: Math.max(...columnas) });
+      return;
+    }
+    if (modo === 'desktop' && (evento.key === 'Delete' || evento.key === 'Backspace')) {
+      evento.preventDefault();
+      borrarSeleccion();
+      return;
+    }
+    if (modo === 'desktop' && evento.key === 'Escape') {
+      seleccionarCelda(evento.currentTarget.dataset.gridDate!, Number(evento.currentTarget.dataset.gridRow), Number(evento.currentTarget.dataset.gridColumn));
+      return;
+    }
+
+    const esAvance = evento.key === 'Enter' || evento.key === 'Tab';
+    const esFlecha = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(evento.key);
+    if (!esAvance && !esFlecha) return;
     evento.preventDefault();
-    const celdas = [...document.querySelectorAll<HTMLInputElement>('input[data-weekly-matrix-input]:not(:disabled)')]
+    const fecha = evento.currentTarget.dataset.gridDate;
+    const celdas = [...document.querySelectorAll<HTMLInputElement>(`input[data-grid-mode="${modo}"][data-weekly-matrix-input]:not(:disabled)`)]
+      .filter((input) => modo === 'mobile' || input.dataset.gridDate === fecha)
       .sort((a, b) => Number(a.dataset.navOrder) - Number(b.dataset.navOrder));
     const actual = celdas.indexOf(evento.currentTarget);
-    const siguiente = celdas[actual + (evento.shiftKey ? -1 : 1)];
-    if (siguiente) { siguiente.focus(); siguiente.select(); }
+    if (actual < 0) return;
+    let siguiente: HTMLInputElement | undefined;
+    if (modo === 'mobile' || esAvance) {
+      siguiente = celdas[actual + (evento.shiftKey ? -1 : 1)];
+    } else {
+      const fila = Number(evento.currentTarget.dataset.gridRow);
+      const columna = Number(evento.currentTarget.dataset.gridColumn);
+      const candidatas = celdas.filter((input) => {
+        const otraFila = Number(input.dataset.gridRow);
+        const otraColumna = Number(input.dataset.gridColumn);
+        if (evento.key === 'ArrowLeft') return otraFila === fila && otraColumna < columna;
+        if (evento.key === 'ArrowRight') return otraFila === fila && otraColumna > columna;
+        if (evento.key === 'ArrowUp') return otraColumna === columna && otraFila < fila;
+        if (evento.key === 'ArrowDown') return otraColumna === columna && otraFila > fila;
+        return otraFila === fila;
+      });
+      if (evento.key === 'ArrowLeft' || evento.key === 'ArrowUp' || evento.key === 'End') siguiente = candidatas.at(-1);
+      else siguiente = candidatas[0];
+    }
+    if (!siguiente) return;
+    if (modo === 'desktop') seleccionarCelda(siguiente.dataset.gridDate!, Number(siguiente.dataset.gridRow), Number(siguiente.dataset.gridColumn), evento.shiftKey);
+    siguiente.focus();
+    siguiente.select();
   }
 
   async function guardarSemana(confirmar: boolean) {
@@ -309,7 +480,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     <section className="workspace-card weekly-sales-toolbar">
       <div><span className="eyebrow">Semana {semana.numero}</span><h2>Pedidos por restaurante</h2><p>{etiquetaRango(semana)}</p></div>
       <label className="field"><span>Buscar restaurante</span><input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre o empresa" /></label>
-      <div className="weekly-sales-toolbar-actions">{historialCambios.length > 0 && <button className="btn btn-ghost" disabled={busy} onClick={deshacer}>Deshacer</button>}<button className="btn btn-secondary" disabled={cargando || busy || semanaCerrada} onClick={() => setHerramientas((actual) => !actual)}>{herramientas ? 'Cerrar herramientas' : 'Herramientas'}</button>{cambios.length === 0 && <button className="btn btn-primary" disabled={cargando || busy || semanaCerrada} onClick={() => void guardarSemana(true)}>{busy ? 'Confirmando…' : 'Confirmar semana'}</button>}</div>
+      <div className="weekly-sales-toolbar-actions"><button className="btn btn-ghost" disabled={cargando || busy || cambios.length > 0} title={cambios.length > 0 ? 'Guarda o descarta tus cambios antes de actualizar' : 'Traer los pedidos más recientes'} onClick={() => setRefresco((actual) => actual + 1)}><Icono name="refresh" size={16} /> Actualizar</button>{historialCambios.length > 0 && <button className="btn btn-ghost" disabled={busy} onClick={deshacer}>Deshacer</button>}<button className="btn btn-secondary" disabled={cargando || busy || semanaCerrada} onClick={() => setHerramientas((actual) => !actual)}>{herramientas ? 'Cerrar herramientas' : 'Herramientas'}</button>{cambios.length === 0 && <button className="btn btn-primary" disabled={cargando || busy || semanaCerrada} onClick={() => void guardarSemana(true)}>{busy ? 'Confirmando…' : 'Confirmar semana'}</button>}</div>
     </section>
     {herramientas && <section className="workspace-card weekly-sales-tools">
       <div><span className="eyebrow">Acciones masivas</span><strong>Elige qué parte de la cuadrícula quieres modificar</strong></div>
@@ -322,6 +493,10 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     {error && <p className="error-msg">{error}</p>}
     {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
     <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de {linea}</span><strong>{usd(importe)}</strong></div></div>
+    <div className="matrix-edit-guide" role="note">
+      <span><strong>Captura rápida:</strong> Enter avanza por columnas · flechas para navegar · Shift extiende · Delete borra · ⌘/Ctrl+C, V y Z funcionan como en Excel.</span>
+      {seleccion && <div><b>{celdasEnSeleccion} {celdasEnSeleccion === 1 ? 'celda seleccionada' : 'celdas seleccionadas'}</b><button type="button" className="link-btn txt-danger" disabled={semanaCerrada} onClick={borrarSeleccion}>Borrar selección</button><button type="button" className="link-btn" onClick={() => setSeleccion(null)}>Cancelar</button></div>}
+    </div>
     {cargando ? <Spinner label="Cargando semana…" /> : <div className="weekly-sales-sheets">{fechasVisibles.map((fechaEntrega, fechaIndice) => {
       const restaurantes = visibles.filter((fila) => fila.entregas.some((entrega) => entrega.fecha === fechaEntrega));
       const filas = filasFormato.map((formato) => ({
@@ -338,20 +513,23 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
         return estadoPedido && !['borrador', 'cancelado'].includes(estadoPedido);
       }).length;
       return <CollapsibleSection title={fechaLarga(fechaEntrega)} count={`${capturadas}/${restaurantes.length}`} summary={`${totalDia.toLocaleString('es-MX')} unidades`} className="weekly-sales-sheet" key={fechaEntrega}>
-        <div className="weekly-sales-matrix-wrap"><table className="weekly-sales-matrix">
-          <thead><tr><th>Total</th><th>Item</th>{restaurantes.map((restaurante) => {
+        <div className="weekly-sales-matrix-wrap"><table className="weekly-sales-matrix" onDragStart={(evento) => evento.preventDefault()}>
+          <thead><tr><th><button type="button" className="matrix-header-button" aria-label={`Seleccionar toda la tabla del ${fechaLarga(fechaEntrega)}`} onClick={() => seleccionarRango({ fecha: fechaEntrega, filaInicio: 0, filaFin: filas.length - 1, columnaInicio: 0, columnaFin: restaurantes.length - 1 })}>Todo</button></th><th>Item</th>{restaurantes.map((restaurante, columnaIndice) => {
             const pedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega));
-            return <th key={restaurante.ubicacion.id} title={`${restaurante.ubicacion.nombre} · ${pedido?.estado.replaceAll('_', ' ') ?? 'sin capturar'}`}><strong>{abreviaturaUbicacion(restaurante.ubicacion)}</strong><small>{restaurante.ubicacion.nombre}</small><i className={`matrix-status matrix-status--${pedido?.estado ?? 'pendiente'}`} /></th>;
+            const columnaSeleccionada = seleccion?.fecha === fechaEntrega && columnaIndice >= limitesSeleccion(seleccion).columnaMin && columnaIndice <= limitesSeleccion(seleccion).columnaMax;
+            return <th className={columnaSeleccionada ? 'matrix-header-selected' : ''} key={restaurante.ubicacion.id} title={`${restaurante.ubicacion.nombre} · ${pedido?.estado.replaceAll('_', ' ') ?? 'sin capturar'}`}><button type="button" className="matrix-header-button" onClick={() => seleccionarRango({ fecha: fechaEntrega, filaInicio: 0, filaFin: filas.length - 1, columnaInicio: columnaIndice, columnaFin: columnaIndice })}><strong>{abreviaturaUbicacion(restaurante.ubicacion)}</strong><small>{restaurante.ubicacion.nombre}</small></button><i className={`matrix-status matrix-status--${pedido?.estado ?? 'pendiente'}`} /></th>;
           })}</tr></thead>
           <tbody>{filas.map((fila, filaIndice) => {
             const totalProducto = fila.productos.reduce((total, producto, indice) => total + (producto ? Number(cantidades[claveCantidadSemanal(restaurantes[indice].ubicacion.id, fechaEntrega, producto.id)] || 0) : 0), 0);
-            return <tr key={fila.formato.nombre}><th>{totalProducto.toLocaleString('es-MX')}</th><th>{fila.formato.nombre}</th>{fila.productos.map((producto, indice) => {
+            return <tr key={fila.formato.nombre}><th>{totalProducto.toLocaleString('es-MX')}</th><th className={seleccion?.fecha === fechaEntrega && filaIndice >= limitesSeleccion(seleccion).filaMin && filaIndice <= limitesSeleccion(seleccion).filaMax ? 'matrix-header-selected' : ''}><button type="button" className="matrix-row-button" onClick={() => seleccionarRango({ fecha: fechaEntrega, filaInicio: filaIndice, filaFin: filaIndice, columnaInicio: 0, columnaFin: restaurantes.length - 1 })}>{fila.formato.nombre}</button></th>{fila.productos.map((producto, indice) => {
               const restaurante = restaurantes[indice];
               const pedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega));
               if (!producto) return <td key={restaurante.ubicacion.id} className="matrix-cell-empty">—</td>;
               const clave = claveCantidadSemanal(restaurante.ubicacion.id, fechaEntrega, producto.id);
               const modificada = Number(cantidades[clave] || 0) !== Number(cantidadesGuardadas[clave] || 0);
-              return <td key={restaurante.ubicacion.id} className={`${!pedidoEditable(pedido) ? 'matrix-cell-locked' : ''} ${modificada ? 'matrix-cell-dirty' : ''}`}><input data-weekly-matrix-input data-nav-order={fechaIndice * 10000 + indice * 100 + filaIndice} aria-label={`${fila.formato.nombre} · ${restaurante.ubicacion.nombre} · ${fechaEntregaCorta(fechaEntrega)}`} title={`${restaurante.ubicacion.nombre} · ${fila.formato.nombre}`} disabled={semanaCerrada || !pedidoEditable(pedido)} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onPaste={(e) => pegarMatriz(e, fechaEntrega, filaIndice, indice, filas, restaurantes)} onKeyDown={navegarConEnter} onChange={(e) => cambiarCantidad(restaurante.ubicacion.id, fechaEntrega, producto.id, e.target.value)} /></td>;
+              const seleccionada = estaSeleccionada(fechaEntrega, filaIndice, indice);
+              const activa = seleccionada && seleccion?.filaFin === filaIndice && seleccion.columnaFin === indice;
+              return <td key={restaurante.ubicacion.id} className={`${!pedidoEditable(pedido) ? 'matrix-cell-locked' : ''} ${modificada ? 'matrix-cell-dirty' : ''} ${seleccionada ? 'matrix-cell-selected' : ''} ${activa ? 'matrix-cell-active' : ''}`}><input data-weekly-matrix-input data-grid-mode="desktop" data-grid-date={fechaEntrega} data-grid-row={filaIndice} data-grid-column={indice} data-grid-key={clave} data-nav-order={fechaIndice * 10000 + filaIndice * 100 + indice} aria-label={`${fila.formato.nombre} · ${restaurante.ubicacion.nombre} · ${fechaEntregaCorta(fechaEntrega)}`} title={`${restaurante.ubicacion.nombre} · ${fila.formato.nombre}`} disabled={semanaCerrada || !pedidoEditable(pedido)} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onFocus={(e) => e.currentTarget.select()} onMouseDown={(e) => { if (e.button !== 0) return; seleccionarCelda(fechaEntrega, filaIndice, indice, e.shiftKey); arrastrandoSeleccion.current = true; }} onMouseEnter={(e) => { if (arrastrandoSeleccion.current && e.buttons === 1) seleccionarCelda(fechaEntrega, filaIndice, indice, true); }} onCopy={(e) => copiarSeleccion(e, fechaEntrega, filaIndice, indice)} onPaste={(e) => pegarMatriz(e, fechaEntrega, filaIndice, indice, filas, restaurantes)} onKeyDown={(e) => navegarMatriz(e, 'desktop')} onChange={(e) => cambiarCantidad(restaurante.ubicacion.id, fechaEntrega, producto.id, e.target.value)} /></td>;
             })}</tr>;
           })}</tbody>
           <tfoot><tr><th>{totalDia.toLocaleString('es-MX')}</th><th>Total</th>{restaurantes.map((restaurante, indice) => <th key={restaurante.ubicacion.id}>{totalRestaurante(indice).toLocaleString('es-MX')}</th>)}</tr></tfoot>
@@ -373,7 +551,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
                   const modificada = Number(cantidades[clave] || 0) !== Number(cantidadesGuardadas[clave] || 0);
                   return <label className={modificada ? 'is-dirty' : ''} key={fila.formato.nombre}>
                     <span><strong>{fila.formato.nombre}</strong><small>{producto.unidad}</small></span>
-                    <input data-weekly-matrix-input data-nav-order={fechaIndice * 10000 + restauranteIndice * 100 + filaIndice} aria-label={`${fila.formato.nombre} · ${restaurante.ubicacion.nombre} · ${fechaEntregaCorta(fechaEntrega)}`} disabled={!editable} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onKeyDown={navegarConEnter} onChange={(e) => cambiarCantidad(restaurante.ubicacion.id, fechaEntrega, producto.id, e.target.value)} />
+                    <input data-weekly-matrix-input data-grid-mode="mobile" data-nav-order={fechaIndice * 10000 + restauranteIndice * 100 + filaIndice} aria-label={`${fila.formato.nombre} · ${restaurante.ubicacion.nombre} · ${fechaEntregaCorta(fechaEntrega)}`} disabled={!editable} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onFocus={(e) => e.currentTarget.select()} onKeyDown={(e) => navegarMatriz(e, 'mobile')} onChange={(e) => cambiarCantidad(restaurante.ubicacion.id, fechaEntrega, producto.id, e.target.value)} />
                   </label>;
                 })}
               </div>

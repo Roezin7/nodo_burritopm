@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../db.js';
-import { guardarPedido } from './service.js';
+import { guardarPedido, listarPedidos } from './service.js';
 
 describe('corrección de una venta procesada', () => {
   let negocioId: bigint;
@@ -14,6 +14,7 @@ describe('corrección de una venta procesada', () => {
   let pedidoId: bigint;
   let lineaPedidoId: bigint;
   let distribucionId: bigint;
+  let plantillaId: bigint;
   let actualizadoAt: string;
 
   beforeAll(async () => {
@@ -33,6 +34,11 @@ describe('corrección de una venta procesada', () => {
       data: { negocio_id: negocioId, nombre: 'Sucursal vitest', codigo: 'SUC-VT', tipo: 'sucursal', empresa_cliente_id: empresaId },
     });
     sucursalId = sucursal.id;
+    const plantilla = await prisma.plantillas_ruta.create({
+      data: { negocio_id: negocioId, nombre: 'Ruta restaurante vitest', codigo: 'RUTA-VT', linea_operacion: 'carne', dia_semana: 4, conductor: 'Vitest' },
+    });
+    plantillaId = plantilla.id;
+    await prisma.plantilla_ruta_paradas.create({ data: { plantilla_id: plantillaId, ubicacion_id: sucursalId, orden: 1 } });
     const producto = await prisma.products.create({
       data: {
         negocio_id: negocioId,
@@ -115,10 +121,28 @@ describe('corrección de una venta procesada', () => {
     await prisma.semanas_operativas.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.products.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.usuarios.deleteMany({ where: { negocio_id: negocioId } });
+    await prisma.plantillas_ruta.delete({ where: { id: plantillaId } });
     await prisma.ubicaciones.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.empresas_clientes.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.unidades.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.negocios.delete({ where: { id: negocioId } });
+  });
+
+  it('muestra en la consulta global del admin el mismo pedido capturado por un restaurante', async () => {
+    const capturado = await guardarPedido(negocioId, usuarioId, {
+      ubicacion_id: Number(sucursalId),
+      linea: 'carne',
+      fecha_entrega: '2037-07-16',
+      confirmar: false,
+      lineas: [{ product_id: Number(productoId), cantidad: 5 }],
+    }, false);
+
+    const [vistaRestaurante, vistaAdmin] = await Promise.all([
+      listarPedidos(negocioId, { desde: '2037-07-16', hasta: '2037-07-16', ubicacionId: sucursalId }),
+      listarPedidos(negocioId, { desde: '2037-07-13', hasta: '2037-07-18' }),
+    ]);
+    expect(vistaRestaurante.find((pedido) => pedido.id === capturado.id)?.lineas[0]?.cantidad).toBe(5);
+    expect(vistaAdmin.find((pedido) => pedido.id === capturado.id)?.lineas[0]?.cantidad).toBe(5);
   });
 
   it('disminuye y aumenta solo la diferencia sin cambiar el estado ni recrear el despacho', async () => {

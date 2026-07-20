@@ -1,5 +1,7 @@
 import { filasOrden } from '../../../operationOrder';
 import type { Catalogo, Linea, Pedido } from './types';
+import Modal from '../../../components/Modal';
+import { Icono } from '../../../icons';
 
 interface HojaRuta {
   clave: string;
@@ -82,8 +84,8 @@ function TablaRuta({ titulo, subtitulo, filas }: { titulo: string; subtitulo?: s
 
 export default function OrdenImprimible({ datos, catalogo, onClose }: { datos: { linea: Linea; inicio: string; fin: string; pedidos: Pedido[] }; catalogo: Catalogo; onClose: () => void }) {
   const hojas = construirHojasRuta(datos, catalogo);
-  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card invoice-print operation-order-print route-order-print" onClick={(e) => e.stopPropagation()}>
-    <header className="print-order-head no-print"><div><span className="eyebrow">M&amp;G Management and Logistics Inc.</span><h1>Orden de {datos.linea} por ruta</h1><p>{datos.inicio} al {datos.fin} · {hojas.length} hojas</p></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
+  return <Modal className="invoice-print operation-order-print route-order-print" ariaLabelledBy="print-order-title" onClose={onClose}>
+    <header className="print-order-head no-print"><div><span className="eyebrow">M&amp;G Management and Logistics Inc.</span><h1 id="print-order-title">Orden de {datos.linea} por ruta</h1><p>{datos.inicio} al {datos.fin} · {hojas.length} hojas</p></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}><Icono name="x" /></button></header>
     {hojas.map((hoja) => <section className={`route-order-page route-order-page--${datos.linea}`} key={hoja.clave}>
       <header className="route-order-heading"><div><span>M&amp;G Management and Logistics Inc.</span><strong>{hoja.conductor}</strong></div><div><span>{datos.linea}</span><strong>{hoja.nombre}</strong></div></header>
       <div className="route-order-grid" style={{ gridTemplateColumns: `repeat(${hoja.fechas.length + 1}, minmax(190px, 1fr))` }}>
@@ -94,5 +96,5 @@ export default function OrdenImprimible({ datos, catalogo, onClose }: { datos: {
     </section>)}
     {!hojas.length && <div className="empty-state"><strong>No hay pedidos confirmados en esta semana</strong><span>Los borradores no se incluyen en la impresión ni en los consolidados.</span></div>}
     <button className="btn btn-primary btn-block no-print" disabled={!hojas.length} onClick={() => window.print()}>Imprimir / guardar PDF</button>
-  </div></div>;
+  </Modal>;
 }

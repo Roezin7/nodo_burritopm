@@ -3,10 +3,19 @@
    Estructura: tokens · base · app shell · componentes · pantallas · momentos firma
    ========================================================================== */
 
+/* Fuentes empaquetadas con la PWA; sólo el subconjunto latino WOFF2 que usa el producto. */
+@font-face { font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 400; src: url('@fontsource/hanken-grotesk/files/hanken-grotesk-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 500; src: url('@fontsource/hanken-grotesk/files/hanken-grotesk-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 600; src: url('@fontsource/hanken-grotesk/files/hanken-grotesk-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 700; src: url('@fontsource/hanken-grotesk/files/hanken-grotesk-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-display: swap; font-weight: 400; src: url('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-display: swap; font-weight: 500; src: url('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-display: swap; font-weight: 600; src: url('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2') format('woff2'); }
+
 /* ---------- 1. TOKENS ---------- */
 :root {
   /* Neutros cálidos — el lienzo */
-  --bg: #faf8f4;
+  --bg: #f7f6f2;
   --surface: #ffffff;
   --surface-2: #f3f0ea;
   --ink: #1b1815;
@@ -16,18 +25,18 @@
   --border-strong: #d5ccbf;
 
   /* Marca Burrito Parrilla — verde del logo real (idéntico en claro y oscuro) */
-  --logo-verde: #5ea531;
-  --brand: #5ea531;
-  --brand-strong: #4c8a26;
-  --brand-tint: #e9f4dc;
+  --logo-verde: #3f761f;
+  --brand: #3f761f;
+  --brand-strong: #315e17;
+  --brand-tint: #e8f2df;
 
   /* Acento rojo Burrito — energía/llamadas de atención (no es peligro) */
   --accent: #e5392b;
   --accent-tint: #fde6e3;
 
   /* Acción primaria = verde un punto más oscuro (legible con texto blanco) */
-  --primary: #4c8a26;
-  --primary-hover: #3f761f;
+  --primary: #3f761f;
+  --primary-hover: #315e17;
   --on-primary: #ffffff;
 
   /* Semánticos */
@@ -73,7 +82,7 @@
 }
 
 :root[data-tema='dark'] {
-  --bg: #15120e;
+  --bg: #151411;
   --surface: #1f1b16;
   --surface-2: #2a251e;
   --ink: #f3eee6;

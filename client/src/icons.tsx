@@ -146,6 +146,11 @@ const PATHS: Record<string, JSX.Element> = {
   ),
   chevron: <path d="M9 6l6 6-6 6" />,
   back: <path d="M15 6l-6 6 6 6" />,
+  up: <path d="M6 15l6-6 6 6" />,
+  down: <path d="M6 9l6 6 6-6" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
+  backspace: <><path d="m9 6-6 6 6 6h11a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H9Z" /><path d="m13 10 4 4m0-4-4 4" /></>,
   menu: (
     <>
       <circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" />

@@ -1,0 +1,54 @@
+name: Calidad de producto
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-test-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nodo
+          POSTGRES_PASSWORD: nodo
+          POSTGRES_DB: nodo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nodo -d nodo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://nodo:nodo@127.0.0.1:5432/nodo_test
+      JWT_SECRET: ci-secret-only
+      NODE_ENV: test
+      SEED_DEMO: '1'
+      SEED_ADMIN_PIN: '1234'
+      PORT: '3100'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npx --workspace server prisma migrate deploy
+      - run: npm run seed
+      - run: npm run seed:operacion -w server
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

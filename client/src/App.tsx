@@ -9,6 +9,8 @@ import Spinner from './components/Spinner';
 import { Component, Suspense, lazy, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
 import { OperacionConfigProvider } from './operacion-config';
 import { SemanaProvider } from './semana-context';
+import { DialogProvider } from './dialog';
+import { usePageTitle } from './page-title';
 
 // Cada área grande se descarga solo cuando el rol la necesita. Además de acelerar el arranque,
 // esto evita que el teléfono evalúe la consola administrativa para capturar un pedido sencillo.
@@ -45,6 +47,7 @@ function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
 function AppBody() {
   const { usuario, cargando, recienEntro, consumirRecienEntro } = useAuth();
   const navigate = useNavigate();
+  usePageTitle(usuario);
 
   // Tras un login explícito, siempre al Inicio.
   useEffect(() => {
@@ -109,17 +112,19 @@ export default function App() {
           }}
         />
       )}
-      <ToastProvider>
-        <AuthProvider>
-          <BrowserRouter>
-            <SemanaProvider>
-              <OperacionConfigProvider>
-                <AppBody />
-              </OperacionConfigProvider>
-            </SemanaProvider>
-          </BrowserRouter>
-        </AuthProvider>
-      </ToastProvider>
+      <DialogProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <BrowserRouter>
+              <SemanaProvider>
+                <OperacionConfigProvider>
+                  <AppBody />
+                </OperacionConfigProvider>
+              </SemanaProvider>
+            </BrowserRouter>
+          </AuthProvider>
+        </ToastProvider>
+      </DialogProvider>
     </AppErrorBoundary>
   );
 }

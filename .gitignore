@@ -18,6 +18,8 @@ server/prisma/*.db
 
 # logs / os
 *.log
+playwright-report/
+test-results/
 .DS_Store
 
 # claude code (config local con permisos/atajos de esta máquina)

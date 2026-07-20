@@ -197,7 +197,7 @@ function RutaCard({ ruta, onAbrir }: { ruta: RutaDetalle; onAbrir: (p: Parada) =
             disabled={bloqueada}
             style={bloqueada ? { opacity: 0.55, cursor: 'default' } : undefined}
           >
-            <span className="parada-orden">{cerrada(p.estado) ? '✓' : p.orden}</span>
+            <span className="parada-orden">{cerrada(p.estado) ? <Icono name="checks" size={16} /> : p.orden}</span>
             <span className="parada-info">
               <strong>{p.ubicacion.nombre}</strong>
               <small>{p.ubicacion.direccion || `${p.items.length} productos`}</small>

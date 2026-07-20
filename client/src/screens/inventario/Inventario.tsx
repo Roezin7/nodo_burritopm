@@ -7,6 +7,7 @@ import { FlujoStepper } from '../../flujo';
 import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPicker';
 import Spinner from '../../components/Spinner';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { Icono } from '../../icons';
 import EstadoChip from './EstadoChip';
 import HoyCard from './HoyCard';
 import StockActual from './StockActual';
@@ -156,7 +157,7 @@ export default function Inventario() {
                   <EstadoChip estado={c.estado} />
                   <div className="muted">{c.contadas}/{c.total_lineas} contados</div>
                 </div>
-                <span className="muted">›</span>
+                <span className="muted"><Icono name="chevron" /></span>
               </div>
             </button>
           ))}

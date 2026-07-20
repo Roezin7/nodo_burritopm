@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useSearchParams } from 'react-router-dom';
 import { crearSemana, type SemanaSeleccionada } from './semana';
 import { hayCambiosSinGuardar } from './use-unsaved';
+import { useDialog } from './dialog';
 
 const CLAVE_SEMANA = 'bpm-semana-seleccionada';
 
@@ -18,6 +19,7 @@ function inicioGuardado() {
 }
 
 export function SemanaProvider({ children }: { children: ReactNode }) {
+  const dialog = useDialog();
   const [params, setParams] = useSearchParams();
   const inicioUrl = params.get('semana') ?? undefined;
   const [semana, setSemana] = useState(() => crearSemana(inicioUrl ?? inicioGuardado()));
@@ -29,10 +31,10 @@ export function SemanaProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(CLAVE_SEMANA, siguiente.inicio); } catch { /* almacenamiento no disponible */ }
   }, [inicioUrl]);
 
-  const seleccionarSemana = (inicio: string) => {
+  const seleccionarSemana = async (inicio: string) => {
     const siguiente = crearSemana(inicio);
     if (siguiente.inicio !== semana.inicio && hayCambiosSinGuardar()
-      && !window.confirm('Hay información sin guardar. ¿Descartarla y cambiar de semana?')) return;
+      && !await dialog.confirm({ title: 'Cambiar de semana', description: 'Hay información sin guardar. Si continúas, se descartarán esos cambios.', confirmLabel: 'Descartar y cambiar', tone: 'danger' })) return;
     setSemana(siguiente);
     try { localStorage.setItem(CLAVE_SEMANA, siguiente.inicio); } catch { /* almacenamiento no disponible */ }
     const nuevos = new URLSearchParams(params);

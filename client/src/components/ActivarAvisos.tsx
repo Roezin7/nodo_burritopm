@@ -47,7 +47,7 @@ export default function ActivarAvisos() {
           {busy ? '…' : 'Activar'}
         </button>
       )}
-      <button className="toast-x" onClick={cerrar} aria-label="cerrar">×</button>
+      <button className="toast-x" onClick={cerrar} aria-label="Cerrar"><Icono name="x" size={17} /></button>
     </div>
   );
 }

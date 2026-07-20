@@ -28,7 +28,6 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [notas, setNotas] = useState('');
   const [buscar, setBuscar] = useState('');
   const [vista, setVista] = useState<'captura' | 'historial' | 'consolidados'>('captura');
-  const [modoCaptura, setModoCaptura] = useState<'semana' | 'individual'>('semana');
   const [pasoIndividual, setPasoIndividual] = useState<'captura' | 'revision'>('captura');
   const [filtroProductos, setFiltroProductos] = useState<'todos' | 'principales' | 'complementos' | 'seleccionados'>('principales');
   const [historial, setHistorial] = useState<Pedido[]>([]);
@@ -52,12 +51,12 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   // si el usuario navegaba por accidente antes de guardar.
   const claveBorradorIndividual = ubicacionId && fecha ? `bpm-borrador-pedido:${ubicacionId}:${linea}:${fecha}` : null;
   const hayCambiosIndividual = useMemo(() => {
-    if (vista !== 'captura' || (admin && modoCaptura === 'semana')) return false;
+    if (vista !== 'captura' || admin) return false;
     if (notas !== notasGuardadas) return true;
     const claves = new Set([...Object.keys(cantidades), ...Object.keys(cantidadesGuardadas)].map(Number));
     for (const k of claves) if ((cantidades[k] || '0') !== (cantidadesGuardadas[k] || '0')) return true;
     return false;
-  }, [cantidades, cantidadesGuardadas, notas, notasGuardadas, vista, admin, modoCaptura]);
+  }, [cantidades, cantidadesGuardadas, notas, notasGuardadas, vista, admin]);
   useUnsavedChanges(hayCambiosIndividual);
 
   useEffect(() => {
@@ -116,7 +115,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   }, [admin, semana.inicio]);
 
   useEffect(() => {
-    if (vista !== 'captura' || (admin && modoCaptura === 'semana') || !ubicacionId || !fecha) {
+    if (vista !== 'captura' || admin || !ubicacionId || !fecha) {
       setEstado(null); setVersion(null); setNotas(''); setCantidades({});
       setCantidadesGuardadas({}); setNotasGuardadas(''); setPreciosPedido({}); setCargandoPedido(false);
       setClavePedidoHidratado(null);
@@ -161,7 +160,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       .catch((e) => { if (vigente) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el pedido.'); })
       .finally(() => { if (vigente) setCargandoPedido(false); });
     return () => { vigente = false; };
-  }, [ubicacionId, linea, fecha, vista, modoCaptura, admin, catalogo, ubicacionSeleccionada?.empresa?.codigo]);
+  }, [ubicacionId, linea, fecha, vista, admin, catalogo, ubicacionSeleccionada?.empresa?.codigo]);
 
   useEffect(() => { setImpresion(null); }, [semana.inicio, semana.fin]);
 
@@ -262,7 +261,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
     return true;
   });
   const nombreProducto = (p: Catalogo['productos'][number]) => p.sku === 'MEAT-PASTOR-TAP' ? 'Pastor Tapatíos' : p.nombre;
-  const capturaSemanal = admin && modoCaptura === 'semana';
+  const capturaSemanal = admin;
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
       {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Ventas' : 'Pedido del restaurante'}</span><h1>{admin ? 'Venta semanal' : 'Hacer pedido'}</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
@@ -274,10 +273,6 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>
         </div>}
       </div>
-      {admin && vista === 'captura' && <div className="weekly-capture-mode">
-        <strong>Capturar:</strong>
-        <div className="segmented segmented--small"><button className={capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('semana')}>Semana completa</button><button className={!capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('individual')}>Orden individual</button></div>
-      </div>}
       {error && <p className="error-msg">{error}</p>}
       {vista === 'consolidados' ? <Distribucion integrado semana={semana} soloRevision /> : vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>
         <section className="order-capture order-capture--guided">

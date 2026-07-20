@@ -7,6 +7,9 @@ import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../..
 import { useOperacionConfig } from '../../operacion-config';
 import CollapsibleSection from '../../components/CollapsibleSection';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
+import { useDialog } from '../../dialog';
+import Modal from '../../components/Modal';
+import { Icono } from '../../icons';
 
 export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
@@ -107,6 +110,7 @@ export default function OperacionAdmin({ seccion, integrado = false, semana = cr
 }
 
 function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; bloqueada: boolean; busy: boolean; setBusy: (v: boolean) => void; onDone: (mensaje?: string) => Promise<void>; setError: (v: string) => void }) {
+  const dialog = useDialog();
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const bodega = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && !u.nombre.toLowerCase().includes('carnicer'));
   const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
@@ -196,8 +200,8 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     setEditandoId(null); setReferencia(''); setTotalFactura(''); setFecha(fechaDentroDeSemana(semana));
     setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setIdempotencyKey(nuevaClaveIdempotencia('compra')); setError('');
   }
-  function limpiarCompra() {
-    if (capturaPendiente && !window.confirm('¿Limpiar toda la compra que estás capturando?')) return;
+  async function limpiarCompra() {
+    if (capturaPendiente && !await dialog.confirm({ title: 'Limpiar compra', description: 'Se descartarán todos los renglones y datos que estás capturando.', confirmLabel: 'Limpiar captura', tone: 'danger' })) return;
     setReferencia(''); setTotalFactura(''); setFecha(fechaDentroDeSemana(semana)); setEditandoId(null);
     setLineas([nuevaLinea(String(productosCompra[0]?.id ?? ''))]); setIdempotencyKey(nuevaClaveIdempotencia('compra')); setError('');
     guardarBorradorLocal(claveBorradorCompra, null);
@@ -212,9 +216,9 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     setLineas(compra.lineas.map((l) => ({ clave: Date.now() + Math.random(), producto: String(l.product_id), cajas: l.es_cargo_compra ? '1' : String(l.cajas), peso: l.peso_lb > 0 ? String(l.peso_lb) : '', costo: String(l.costo), congelado: l.congelado })));
     setError('');
   }
-  function cambiarLineaCompra(siguiente: 'carne' | 'desechables') {
+  async function cambiarLineaCompra(siguiente: 'carne' | 'desechables') {
     if (siguiente === linea) return;
-    if (capturaPendiente && !window.confirm('Hay una compra sin guardar. ¿Descartarla y cambiar de línea?')) return;
+    if (capturaPendiente && !await dialog.confirm({ title: 'Cambiar línea de compra', description: 'Hay una compra sin guardar. La captura actual se descartará.', confirmLabel: 'Descartar y cambiar', tone: 'danger' })) return;
     setLinea(siguiente); setReferencia(''); setTotalFactura(''); setEditandoId(null);
     setIdempotencyKey(nuevaClaveIdempotencia('compra'));
     guardarBorradorLocal(claveBorradorCompra, null);
@@ -232,7 +236,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
   }
   async function cambiarLote(id: number, valor: boolean) { setBusy(true); setError(''); try { await api(`/operacion/lotes/${id}`, { method: 'PATCH', body: { congelado: valor } }); await onDone('Lote actualizado.'); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo actualizar el lote.'); } finally { setBusy(false); } }
   async function eliminarCompra(id: number) {
-    if (!window.confirm('Se eliminará la compra y se restarán sus cajas, peso y costo del inventario. Solo puede hacerse si todavía no fue utilizada. ¿Continuar?')) return;
+    if (!await dialog.confirm({ title: 'Eliminar compra', description: 'Se restarán sus cajas, peso y costo del inventario. Sólo puede eliminarse si todavía no fue utilizada.', confirmLabel: 'Eliminar compra', tone: 'danger' })) return;
     setBusy(true); setError('');
     try {
       await api(`/operacion/compras/${id}`, { method: 'DELETE' });
@@ -255,7 +259,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
 
   return <div className="operation-stack">
     <section className="workspace-card form-workspace purchase-workspace" ref={editorRef}>
-        <div className="workspace-card-head purchase-capture-head"><div><span className="eyebrow">{editandoId == null ? 'Entrada' : 'Corrección'}</span><h2>{editandoId == null ? 'Registrar compra' : `Editar compra #${editandoId}`}</h2><p>{almacen?.nombre ?? 'Almacén pendiente'}</p></div><div className="purchase-head-actions"><div className="segmented segmented--small"><button disabled={editandoId != null} className={linea === 'carne' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => cambiarLineaCompra('carne')}>Carne</button><button disabled={editandoId != null} className={linea === 'desechables' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => cambiarLineaCompra('desechables')}>Desechables</button></div><button type="button" className="btn btn-secondary btn-sm" disabled={editandoId != null || busy} onClick={repetirUltima}>Repetir última</button></div></div>
+        <div className="workspace-card-head purchase-capture-head"><div><span className="eyebrow">{editandoId == null ? 'Entrada' : 'Corrección'}</span><h2>{editandoId == null ? 'Registrar compra' : `Editar compra #${editandoId}`}</h2><p>{almacen?.nombre ?? 'Almacén pendiente'}</p></div><div className="purchase-head-actions"><div className="segmented segmented--small"><button disabled={editandoId != null} className={linea === 'carne' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => void cambiarLineaCompra('carne')}>Carne</button><button disabled={editandoId != null} className={linea === 'desechables' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => void cambiarLineaCompra('desechables')}>Desechables</button></div><button type="button" className="btn btn-secondary btn-sm" disabled={editandoId != null || busy} onClick={repetirUltima}>Repetir última</button></div></div>
         <div className="form-grid form-grid--purchase purchase-entry-meta">
           <label className="field"><span>Proveedor</span><select data-purchase-entry value={proveedor} onKeyDown={avanzarConEnter} onChange={(e) => setProveedor(e.target.value)}>{catalogo.proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></label>
           <label className="field"><span>Fecha</span><input data-purchase-entry type="date" min={semana.inicio} max={semana.fin} value={fecha} onKeyDown={avanzarConEnter} onChange={(e) => setFecha(e.target.value)} /></label>
@@ -271,11 +275,11 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
             {requierePeso ? <label className="field field--number purchase-line__weight"><span className="purchase-line__field-label">Peso total</span><div className="input-suffix"><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.peso} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { peso: e.target.value })} /><span>lb</span></div><small>{pesoCaja.toFixed(2)} lb/caja</small></label> : <span className="purchase-line__empty">—</span>}
             <label className="field field--number purchase-line__cost"><span className="purchase-line__field-label">Importe</span><div className="input-prefix"><span>$</span><input data-purchase-entry type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" value={l.costo} onKeyDown={avanzarConEnter} onChange={(e) => editarLinea(l.clave, { costo: e.target.value })} /></div></label>
             {requierePeso ? <label className="purchase-line__freeze"><input type="checkbox" checked={l.congelado} onChange={(e) => editarLinea(l.clave, { congelado: e.target.checked })} /><span>Congelado</span></label> : <span className="purchase-line__empty">—</span>}
-            {lineas.length > 1 ? <button type="button" className="icon-btn" aria-label="Quitar renglón" onClick={() => setLineas((actuales) => actuales.filter((fila) => fila.clave !== l.clave))}>×</button> : <span />}
+            {lineas.length > 1 ? <button type="button" className="icon-btn" aria-label="Quitar renglón" onClick={() => setLineas((actuales) => actuales.filter((fila) => fila.clave !== l.clave))}><Icono name="x" /></button> : <span />}
           </div>; })}
           <button type="button" className="btn btn-secondary btn-sm purchase-add" onClick={() => setLineas((actuales) => [...actuales, nuevaLinea(String(productosCompra[0]?.id ?? ''))])}>+ Agregar producto</button>
         </div>
-        <div className="form-submit form-submit--summary purchase-submit"><div className="purchase-form-totals"><span><small>Inventario</small><strong>{usd(costoInventario)}</strong></span>{cargosContables > 0 && <span><small>Cargos contables</small><strong>{usd(cargosContables)}</strong></span>}<span className="purchase-form-grand-total"><small>{totalFactura === '' ? 'Total' : 'Total factura'}</small><strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={limpiarCompra}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
+        <div className="form-submit form-submit--summary purchase-submit"><div className="purchase-form-totals"><span><small>Inventario</small><strong>{usd(costoInventario)}</strong></span>{cargosContables > 0 && <span><small>Cargos contables</small><strong>{usd(cargosContables)}</strong></span>}<span className="purchase-form-grand-total"><small>{totalFactura === '' ? 'Total' : 'Total factura'}</small><strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void limpiarCompra()}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
     </section>
 
     {semana.actual && resumen.lotes.length > 0 && <CollapsibleSection title="Materia prima disponible" count={`${resumen.lotes.length} lotes`} defaultOpen={false}>
@@ -328,6 +332,7 @@ function estimarConsumoDesde(
 
 function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, setError }: { catalogo: Catalogo; resumen: Resumen; semana: SemanaSeleccionada; bloqueada: boolean; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
   const toast = useToast();
+  const dialog = useDialog();
   const carniceria = catalogo.ubicaciones.find((u) => u.tipo === 'bodega' && u.nombre.toLowerCase().includes('carnicer'));
   const materias = catalogo.productos.filter((p) => p.tipo === 'materia_prima');
   const siguienteId = useRef(2);
@@ -375,8 +380,12 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     setBorradores((actuales) => [...actuales, crearBorrador(String(siguiente?.id ?? ''))]);
   }
 
-  function cargarPlanDelDia() {
-    if (capturaProduccionPendiente && !window.confirm('Se reemplazará la captura actual por el plan habitual del día. ¿Continuar?')) return;
+  async function cargarPlanDelDia() {
+    if (capturaProduccionPendiente && !await dialog.confirm({
+      title: 'Cargar el plan habitual',
+      description: 'La captura actual se reemplazará por el plan habitual de este día.',
+      confirmLabel: 'Reemplazar captura',
+    })) return;
     const dia = new Date(`${fecha}T12:00:00`).getDay();
     const idsMaterias = [...new Set(catalogo.recetas_produccion.filter((receta) => {
       const salida = catalogo.productos.find((producto) => producto.id === receta.producto_salida_id);
@@ -452,7 +461,12 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la producción.'); } finally { setBusy(false); }
   }
   async function eliminar(id: number) {
-    if (!window.confirm('¿Eliminar este batch? Se revertirán la materia prima, las cajas producidas y sus costos.')) return;
+    if (!await dialog.confirm({
+      title: 'Eliminar batch de producción',
+      description: 'Se revertirán la materia prima, las cajas producidas y sus costos. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar batch',
+      tone: 'danger',
+    })) return;
     setBusy(true); setError('');
     try {
       await api(`/operacion/produccion/${id}`, { method: 'DELETE' });
@@ -462,7 +476,12 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     finally { setBusy(false); }
   }
   async function eliminarDia(fechaGrupo: string, ids: number[]) {
-    if (!window.confirm(`¿Eliminar los ${ids.length} batches del ${fechaGrupo}? Se revertirán juntos de la captura semanal.`)) return;
+    if (!await dialog.confirm({
+      title: `Eliminar ${ids.length} batches`,
+      description: `Se revertirán juntos de la captura semanal del ${fechaGrupo}. Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar día',
+      tone: 'danger',
+    })) return;
     setBusy(true); setError('');
     try {
       for (const id of ids) await api(`/operacion/produccion/${id}`, { method: 'DELETE' });
@@ -566,7 +585,7 @@ function Rutas({ catalogo, busy, setBusy, onDone, setError }: { catalogo: Catalo
   return <div className="route-template-grid">{catalogo.plantillas.map((p) => { const a = edits[p.id] ?? p.paradas; const cambiado = Boolean(edits[p.id]) || conductores[p.id] != null; return <CollapsibleSection title={p.nombre} count={`${a.length} paradas`} summary={`${p.linea} · ${dias[p.dia_semana]}`} className={`route-template route-template--${p.linea}`} key={p.id}>
     <div className="route-template-actions"><button className="btn btn-primary btn-sm" disabled={busy || !cambiado} onClick={() => void guardar(p)}>Guardar cambios</button></div>
     <label className="field route-driver"><span>Responsable de ruta</span><input value={conductores[p.id] ?? p.conductor} onChange={(e) => setConductores({ ...conductores, [p.id]: e.target.value })} /></label>
-    <div className="route-stop-list">{a.map((x, i) => <div className="route-stop" key={x.ubicacion_id}><span className="route-stop-number">{i + 1}</span><span className="route-stop-name"><strong>{x.nombre}</strong><button className={x.opcional ? 'optional-toggle is-on' : 'optional-toggle'} onClick={() => alternarOpcional(p.id, x.ubicacion_id)}>{x.opcional ? 'Parada opcional' : 'Parada fija'}</button></span><span className="route-stop-actions"><button className="icon-btn" aria-label="Subir parada" disabled={i === 0} onClick={() => mover(p.id, i, -1)}>↑</button><button className="icon-btn" aria-label="Bajar parada" disabled={i === a.length - 1} onClick={() => mover(p.id, i, 1)}>↓</button><button className="icon-btn btn-peligro" aria-label="Quitar parada" onClick={() => quitar(p.id, x.ubicacion_id)}>×</button></span></div>)}</div>
+    <div className="route-stop-list">{a.map((x, i) => <div className="route-stop" key={x.ubicacion_id}><span className="route-stop-number">{i + 1}</span><span className="route-stop-name"><strong>{x.nombre}</strong><button className={x.opcional ? 'optional-toggle is-on' : 'optional-toggle'} onClick={() => alternarOpcional(p.id, x.ubicacion_id)}>{x.opcional ? 'Parada opcional' : 'Parada fija'}</button></span><span className="route-stop-actions"><button className="icon-btn" aria-label="Subir parada" disabled={i === 0} onClick={() => mover(p.id, i, -1)}><Icono name="up" /></button><button className="icon-btn" aria-label="Bajar parada" disabled={i === a.length - 1} onClick={() => mover(p.id, i, 1)}><Icono name="down" /></button><button className="icon-btn btn-peligro" aria-label="Quitar parada" onClick={() => quitar(p.id, x.ubicacion_id)}><Icono name="x" /></button></span></div>)}</div>
     <label className="route-add"><span>Agregar restaurante</span><select value="" onChange={(e) => agregar(p.id, Number(e.target.value))}><option value="">Seleccionar…</option>{catalogo.ubicaciones.filter((u) => u.tipo === 'sucursal' && !a.some((x) => x.ubicacion_id === u.id)).map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}</select></label>
   </CollapsibleSection>; })}</div>;
 }
@@ -613,6 +632,7 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
 
 function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres: Cierre[]; semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; onDone: () => Promise<void>; setError: (v: string) => void }) {
   const toast = useToast();
+  const dialog = useDialog();
   const [factura, setFactura] = useState<Factura | null>(null);
   const [vistaPrevia, setVistaPrevia] = useState<VistaPreviaCierre | null>(null);
   useEffect(() => { setFactura(null); setVistaPrevia(null); }, [semana.inicio, semana.fin]);
@@ -620,7 +640,18 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   async function cerrar() { setBusy(true); setError(''); try { const r = await api<{ cajas_perdidas: number; productos_con_faltante: number }>('/cierre/cerrar', { method: 'POST', body: { fecha_cierre: semana.fin } }); setVistaPrevia(null); await onDone(); toast.ok(r.cajas_perdidas > 0 ? `Semana cerrada · ${r.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas registradas en Incidencias.` : 'Semana cerrada correctamente.'); } catch (e) { setVistaPrevia(null); setError(e instanceof ApiError ? e.message : 'No se pudo cerrar la semana.'); } finally { setBusy(false); } }
   const nombresExcel: Record<string, string> = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' };
   async function descargar(id: number, tipo: string) { const res = await fetch(`/api/cierre/${id}/excel/${tipo}`, { headers: { Authorization: `Bearer ${getToken()}` } }); if (!res.ok) { setError('No se pudo generar el Excel.'); return; } const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nombresExcel[tipo] ?? `${tipo}.xlsx`; a.click(); URL.revokeObjectURL(url); }
-  async function reabrir(id: number) { if (!window.confirm('Se anularán las facturas y, si existió un conteo físico, se revertirán sus ajustes. Después podrás corregir compras o producción y cerrar nuevamente. ¿Continuar?')) return; setBusy(true); setError(''); try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); } finally { setBusy(false); } }
+  async function reabrir(id: number) {
+    if (!await dialog.confirm({
+      title: 'Reabrir esta semana',
+      description: 'Se anularán las facturas y, si existió un conteo físico, se revertirán sus ajustes. Después podrás corregir compras o producción y cerrar nuevamente.',
+      confirmLabel: 'Reabrir semana',
+      tone: 'danger',
+    })) return;
+    setBusy(true); setError('');
+    try { await api(`/cierre/${id}/reabrir`, { method: 'POST' }); await onDone(); }
+    catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo reabrir la semana.'); }
+    finally { setBusy(false); }
+  }
   const libros = [['weekly-order', 'Weekly Order'], ['disposables', 'Disposables'], ['production', 'Production'], ['billing', 'Billing'], ['lbt', 'LBT'], ['aurora', 'Aurora']] as const;
   const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   return <div className="operation-stack">
@@ -632,8 +663,8 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
       <div className="week-toolbar"><div className="export-menu">{libros.map(([tipo, label]) => <button className="export-chip" key={tipo} onClick={() => void descargar(s.id, tipo)}>{label}<small>.xlsx</small></button>)}</div>{s.estado === 'cerrada' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void reabrir(s.id)}>Reabrir semana</button>}</div>
       <CollapsibleSection title="Facturas" count={s.facturas.length}><div className="invoice-list"><div className="invoice-row invoice-row--head"><span>Factura</span><span>Empresa / ubicación</span><span>Vencimiento</span><span>Estado</span><span>Total</span><span /></div>{s.facturas.map((f) => <div className="invoice-row" key={f.id}><button className="invoice-number" onClick={() => setFactura(f)}>{f.numero}<small>v{f.version} · {f.linea}</small></button><span data-label="Ubicación"><strong>{f.ubicacion}</strong><small>{f.empresa}</small></span><span data-label="Vence">{f.vence_at}</span><span data-label="Estado"><span className="chip chip--info">Ciclo automático</span></span><span data-label="Total"><strong>{usd(f.total)}</strong></span><span /></div>)}</div></CollapsibleSection>
     </section>) : <div className="empty-state workspace-card"><strong>Semana {semana.numero} todavía abierta</strong><span>Al cerrarla se generarán facturas, balances y libros Excel de este periodo.</span></div>}</div>
-    {vistaPrevia && <div className="modal-backdrop" onClick={() => { if (!busy) setVistaPrevia(null); }}><div className="modal-card close-preview-modal" onClick={(e) => e.stopPropagation()}>
-      <div className="card-head"><div><span className="eyebrow">Vista previa · Semana {vistaPrevia.semana.numero}</span><h2>Resultado estimado del cierre</h2><p>{vistaPrevia.semana.inicia_at} al {vistaPrevia.semana.termina_at}</p></div><button className="icon-btn" disabled={busy} aria-label="Cerrar" onClick={() => setVistaPrevia(null)}>×</button></div>
+    {vistaPrevia && <Modal className="close-preview-modal" ariaLabelledBy="close-preview-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => setVistaPrevia(null)}>
+      <div className="card-head"><div><span className="eyebrow">Vista previa · Semana {vistaPrevia.semana.numero}</span><h2 id="close-preview-title">Resultado estimado del cierre</h2><p>{vistaPrevia.semana.inicia_at} al {vistaPrevia.semana.termina_at}</p></div><button className="icon-btn" disabled={busy} aria-label="Cerrar" onClick={() => setVistaPrevia(null)}><Icono name="x" /></button></div>
       <div className="close-preview-total"><span>Venta que se facturará</span><strong>{usd(vistaPrevia.ventas.total)}</strong><small>Carne {usd(vistaPrevia.ventas.carne)} · Desechables {usd(vistaPrevia.ventas.desechables)}</small></div>
       {vistaPrevia.ajustes.length > 0 && <div className="notice"><strong>Ajustes incluidos:</strong> {vistaPrevia.ajustes.map((ajuste) => `${ajuste.ubicacion}: ${ajuste.descripcion} (${usd(ajuste.monto)})`).join(' · ')}</div>}
       <details className="operation-help"><summary>Cómo se calcula el inventario</summary><p>Saldo inicial + compras + producción − ventas. El conteo físico es opcional; los saldos negativos se reportan como cajas perdidas y se valúan en cero.</p></details>
@@ -642,7 +673,7 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
       {vistaPrevia.cajas_perdidas > 0 && <p className="notice notice--warning"><strong>{vistaPrevia.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas</strong> en {vistaPrevia.productos_con_faltante} {vistaPrevia.productos_con_faltante === 1 ? 'producto' : 'productos'}. Se valuarán como cero y se crearán incidencias; no bloquean el cierre.</p>}
       <CollapsibleSection title="Facturas por generar" count={vistaPrevia.facturas.length}><div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Factura</span><span>Empresa / ubicación</span><span>Vencimiento</span><span>Línea</span><span>Total</span></div>{vistaPrevia.facturas.map((f) => <div className="invoice-row" key={f.numero}><span className="invoice-number">{f.numero}<small>{f.productos} productos · {f.unidades.toLocaleString('es-MX')} unidades</small></span><span data-label="Ubicación"><strong>{f.ubicacion}</strong><small>{f.empresa}</small></span><span data-label="Vence">{f.vence_at}</span><span data-label="Línea"><span className="chip">{f.linea}</span></span><span data-label="Total"><strong>{usd(f.total)}</strong></span></div>)}</div></CollapsibleSection>
       <div className="close-preview-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setVistaPrevia(null)}>Seguir revisando</button><button className="btn btn-primary" disabled={busy} onClick={() => void cerrar()}>{busy ? 'Cerrando…' : `Confirmar cierre · ${usd(vistaPrevia.ventas.total)}`}</button></div>
-    </div></div>}
-    {factura && <div className="modal-backdrop" onClick={() => setFactura(null)}><div className="modal-card invoice-print" onClick={(e) => e.stopPropagation()}><div className="card-head"><div><span className="eyebrow">Factura</span><strong>M&amp;G Management and Logistics Inc.</strong></div><button className="icon-btn" aria-label="Cerrar" onClick={() => setFactura(null)}>×</button></div><h2>{factura.ubicacion}</h2><p>{factura.empresa} · {factura.numero} · vence {factura.vence_at}</p><div className="invoice-detail">{factura.lineas.map((l, i) => <div key={i}><span><strong>{l.descripcion}</strong><small>{l.cantidad} × {usd(l.precio)}</small></span><strong>{usd(l.importe)}</strong></div>)}</div><div className="invoice-grand-total"><span>Total</span><strong>{usd(factura.total)}</strong></div><button className="btn btn-primary btn-block" onClick={() => window.print()}>Imprimir / guardar PDF</button></div></div>}
+    </Modal>}
+    {factura && <Modal className="invoice-print" ariaLabelledBy="invoice-preview-title" onClose={() => setFactura(null)}><div className="card-head"><div><span className="eyebrow">Factura</span><strong id="invoice-preview-title">M&amp;G Management and Logistics Inc.</strong></div><button className="icon-btn" aria-label="Cerrar" onClick={() => setFactura(null)}><Icono name="x" /></button></div><h2>{factura.ubicacion}</h2><p>{factura.empresa} · {factura.numero} · vence {factura.vence_at}</p><div className="invoice-detail">{factura.lineas.map((l, i) => <div key={i}><span><strong>{l.descripcion}</strong><small>{l.cantidad} × {usd(l.precio)}</small></span><strong>{usd(l.importe)}</strong></div>)}</div><div className="invoice-grand-total"><span>Total</span><strong>{usd(factura.total)}</strong></div><button className="btn btn-primary btn-block" onClick={() => window.print()}>Imprimir / guardar PDF</button></Modal>}
   </div>;
 }

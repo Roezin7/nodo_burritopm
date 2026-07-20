@@ -4,10 +4,13 @@ import { useAuth } from '../../auth';
 import { useToast, mensajeError } from '../../toast';
 import EstadoChip from './EstadoChip';
 import { fechaLarga, type InventarioDetalle, type LineaInventario } from './types';
+import { useDialog } from '../../dialog';
+import { Icono } from '../../icons';
 
 export default function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; onSalir: () => void; onRecargar: () => void }) {
   const { usuario } = useAuth();
   const toast = useToast();
+  const dialog = useDialog();
   const [lineas, setLineas] = useState<LineaInventario[]>(detalle.lineas);
   const [guardando, setGuardando] = useState(false);
   const [armado, setArmado] = useState(false); // confirmar cierre en 2 toques (sin diálogo)
@@ -108,10 +111,10 @@ export default function Editor({ detalle, onSalir, onRecargar }: { detalle: Inve
 
   async function eliminar() {
     const cerrado = detalle.estado === 'cerrado' || detalle.estado === 'reabierto';
-    const msg = cerrado
-      ? (esPedido ? '¿Eliminar este pedido cerrado? No se podrá recuperar.' : 'Eliminar este inventario revertirá el stock a como estaba antes de cerrarlo y borrará la sesión. ¿Continuar?')
-      : `¿Eliminar este ${esPedido ? 'pedido' : 'inventario'}? No se podrá recuperar.`;
-    if (!window.confirm(msg)) return;
+    const descripcion = cerrado && !esPedido
+      ? 'Se revertirá el stock a como estaba antes del cierre y se borrará la sesión. Esta acción no se puede deshacer.'
+      : `Este ${esPedido ? 'pedido' : 'inventario'} no se podrá recuperar.`;
+    if (!await dialog.confirm({ title: `Eliminar ${esPedido ? 'pedido' : 'inventario'}`, description: descripcion, confirmLabel: 'Eliminar', tone: 'danger' })) return;
     setGuardando(true);
     try {
       await api(`/conteos/${detalle.id}`, { method: 'DELETE' });
@@ -187,7 +190,7 @@ export default function Editor({ detalle, onSalir, onRecargar }: { detalle: Inve
                   disabled={!editable}
                   onClick={() => set(l.product_id, 'contado', !l.contado)}
                 >
-                  {l.contado ? '✓' : '○'}
+                  {l.contado ? <Icono name="checks" size={16} /> : <span aria-hidden="true">○</span>}
                 </button>
               </div>
             ))}

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
 import { ApiError } from './api';
+import { Icono } from './icons';
 
 interface Accion { label: string; onClick: () => void }
 interface Toast {
@@ -49,7 +50,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 {t.accion.label}
               </button>
             )}
-            <button className="toast-x" aria-label="cerrar" onClick={() => quitar(t.id)}>×</button>
+            <button className="toast-x" aria-label="Cerrar" onClick={() => quitar(t.id)}><Icono name="x" size={17} /></button>
           </div>
         ))}
       </div>

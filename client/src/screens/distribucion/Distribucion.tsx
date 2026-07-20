@@ -8,6 +8,8 @@ import { indiceEnOrden, nombreEnOrden, type LineaOperacion } from '../../operati
 import { crearSemana, hoyChicago, type SemanaSeleccionada } from '../../semana';
 import CollapsibleSection from '../../components/CollapsibleSection';
 import { useUnsavedChanges } from '../../use-unsaved';
+import { useDialog } from '../../dialog';
+import { Icono } from '../../icons';
 
 interface DistResumen {
   id: number;
@@ -180,7 +182,7 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
                     {d.fecha_entrega ?? new Date(d.creado_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })} · {d.linea ?? 'operación'} · {d.total_lineas} líneas
                   </div>
                 </div>
-                <span className="muted">›</span>
+                <span className="muted"><Icono name="chevron" /></span>
               </div>
             </button>
           ))}
@@ -237,6 +239,7 @@ interface VistaProducto {
 }
 
 function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado?: boolean; onSalir: () => void }) {
+  const dialog = useDialog();
   const toast = useToast();
   const [vista, setVista] = useState<'producto' | 'sucursal' | 'ruta'>('producto');
   const [prod, setProd] = useState<VistaProducto | null>(null);
@@ -341,7 +344,7 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
 
   async function renombrar() {
     const actual = nombre ?? '';
-    const nuevo = window.prompt('Nombre del pedido (vacío para quitar):', actual);
+    const nuevo = await dialog.prompt({ title: 'Renombrar consolidado', description: 'Este nombre identifica el documento para bodega y administración.', label: 'Nombre del pedido', initialValue: actual, placeholder: 'Vacío para usar el folio', confirmLabel: 'Guardar nombre' });
     if (nuevo == null || nuevo.trim() === actual) return;
     setBusy(true); setError('');
     try {
@@ -356,7 +359,7 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
   }
 
   async function eliminar() {
-    if (!window.confirm('¿Eliminar este consolidado? Se devolverá a la bodega central el inventario que las sucursales aún tengan, se borrarán sus rutas e incidencias y las ventas volverán a estado confirmado para poder corregirlas. No se puede deshacer.')) return;
+    if (!await dialog.confirm({ title: 'Eliminar consolidado', description: 'Se devolverá a bodega el inventario que conserven las sucursales, se eliminarán rutas e incidencias y las ventas volverán a confirmado. Esta acción no se puede deshacer.', confirmLabel: 'Eliminar consolidado', tone: 'danger' })) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'DELETE' });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import { useDialog } from '../../dialog';
 
 interface Incidencia {
   id: number;
@@ -16,6 +17,7 @@ interface Incidencia {
 }
 
 export default function Incidencias() {
+  const dialog = useDialog();
   const [lista, setLista] = useState<Incidencia[]>([]);
   const [estado, setEstado] = useState<'abierta' | 'todas'>('abierta');
   const [error, setError] = useState('');
@@ -28,8 +30,8 @@ export default function Incidencias() {
   useEffect(() => { void cargar(); }, [estado]);
 
   async function resolver(i: Incidencia) {
-    const comentario = window.prompt('Resolución (opcional):') ?? undefined;
-    try { await api(`/incidencias/${i.id}/resolver`, { method: 'POST', body: { comentario } }); await cargar(); }
+    const comentario = await dialog.prompt({ title: 'Resolver incidencia', description: 'Registra cómo se atendió esta diferencia para conservar el contexto en el historial.', label: 'Resolución (opcional)', confirmLabel: 'Marcar resuelta', cancelLabel: 'Resolver sin comentario', placeholder: 'Ej. inventario conciliado con bodega' });
+    try { await api(`/incidencias/${i.id}/resolver`, { method: 'POST', body: { comentario: comentario || undefined } }); await cargar(); }
     catch (e) { setError(e instanceof ApiError ? e.message : 'Error'); }
   }
 

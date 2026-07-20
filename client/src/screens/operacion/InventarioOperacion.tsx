@@ -7,6 +7,7 @@ import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
 import CollapsibleSection from '../../components/CollapsibleSection';
 import { useUnsavedChanges } from '../../use-unsaved';
+import { useDialog } from '../../dialog';
 
 type Linea = 'todas' | 'carne' | 'desechables';
 
@@ -54,6 +55,7 @@ const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 export default function InventarioOperacion({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
   const toast = useToast();
+  const dialog = useDialog();
   const admin = usuario?.rol === 'admin';
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [almacenId, setAlmacenId] = useState('');
@@ -140,9 +142,9 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     setEditando(true);
   }
 
-  function cambiarAlmacen(siguiente: string) {
+  async function cambiarAlmacen(siguiente: string) {
     if (siguiente === almacenId) return;
-    if (editando && !window.confirm('Hay un inventario en captura. ¿Descartarlo y cambiar de almacén?')) return;
+    if (editando && !await dialog.confirm({ title: 'Cambiar de almacén', description: 'Hay un inventario en captura. Los cambios sin guardar se descartarán.', confirmLabel: 'Descartar y cambiar', tone: 'danger' })) return;
     setEditando(false); setCantidades({}); setTocados(new Set()); setObservacion('');
     setAlmacenId(siguiente);
   }
@@ -201,7 +203,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   }
 
   async function eliminarInventario(inventario: InventarioGuardado) {
-    if (!window.confirm(`¿Eliminar el inventario del ${inventario.fecha}? Se revertirán todos sus ajustes.`)) return;
+    if (!await dialog.confirm({ title: `Eliminar inventario del ${inventario.fecha}`, description: 'Se revertirán todos los ajustes generados por este conteo.', confirmLabel: 'Eliminar inventario', tone: 'danger' })) return;
     setBusy(true); setError('');
     try {
       await api(`/operacion/inventarios-finales/${inventario.id}`, { method: 'DELETE' });
@@ -220,7 +222,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">
-        {almacenes.map((a) => <button key={a.id} className={String(a.id) === almacenId ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => cambiarAlmacen(String(a.id))}>{a.nombre}</button>)}
+        {almacenes.map((a) => <button key={a.id} className={String(a.id) === almacenId ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => void cambiarAlmacen(String(a.id))}>{a.nombre}</button>)}
       </div>
       <div className="segmented segmented--small" aria-label="Línea de inventario">
         {([['todas', 'Todo'], ['carne', 'Carne'], ['desechables', 'Desechables']] as [Linea, string][]).map(([k, label]) => <button key={k} className={linea === k ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea(k)}>{label}</button>)}

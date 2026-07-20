@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Icono } from '../icons';
 
 export default function CollapsibleSection({
   title,
@@ -19,7 +20,7 @@ export default function CollapsibleSection({
   return <details className={`collapsible-section ${className}`.trim()} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary>
       <span className="collapsible-section__title"><strong>{title}</strong>{summary && <small>{summary}</small>}</span>
-      <span className="collapsible-section__meta">{count != null && <b>{count}</b>}<i aria-hidden="true">⌄</i></span>
+      <span className="collapsible-section__meta">{count != null && <b>{count}</b>}<i aria-hidden="true"><Icono name="down" size={17} /></i></span>
     </summary>
     <div className="collapsible-section__body">{children}</div>
   </details>;

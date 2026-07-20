@@ -3,6 +3,7 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth, type Rol } from './auth';
 import { useOperacionConfig } from './operacion-config';
+import { Icono } from './icons';
 
 // ── Estado de la distribución ──────────────────────────────────────────────
 const DIST: Record<string, { label: string; cls: string }> = {
@@ -117,7 +118,7 @@ export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
         const cls = `flujo-paso ${estado === 'on' ? 'flujo-paso--on' : ''} ${estado === 'done' ? 'flujo-paso--done' : ''} ${accesible ? 'flujo-paso--link' : 'flujo-paso--off'}`;
         const contenido = (
           <>
-            <span className="flujo-num">{estado === 'done' ? '✓' : i + 1}</span>
+            <span className="flujo-num">{estado === 'done' ? <Icono name="checks" size={14} /> : i + 1}</span>
             {p.label}
           </>
         );
@@ -130,7 +131,7 @@ export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
             ) : (
               <span className={cls} aria-disabled="true" title="No disponible para tu rol">{contenido}</span>
             )}
-            {i < pasos.length - 1 && <span className="flujo-sep">›</span>}
+            {i < pasos.length - 1 && <span className="flujo-sep"><Icono name="chevron" size={16} /></span>}
           </div>
         );
       })}

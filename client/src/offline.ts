@@ -39,10 +39,23 @@ function db() {
 
 export interface FalloSync { id: number; method: string; path: string; error: string; ts: number; reintentable: boolean }
 interface FalloPersistido extends FalloSync { request_id?: number }
-export interface EstadoOffline { online: boolean; pendientes: number; fallidos: FalloSync[] }
+export interface EstadoOffline {
+  online: boolean;
+  pendientes: number;
+  fallidos: FalloSync[];
+  sincronizando: boolean;
+  ultimaSincronizacion: number | null;
+}
 type Listener = (estado: EstadoOffline) => void;
 const listeners = new Set<Listener>();
 let online = navigator.onLine;
+let sincronizando = false;
+const ULTIMA_SYNC = 'bpm-ultima-sincronizacion';
+function leerUltimaSincronizacion() {
+  try { return Number(localStorage.getItem(ULTIMA_SYNC)) || null; }
+  catch { return null; }
+}
+let ultimaSincronizacion = leerUltimaSincronizacion();
 
 function esPeticionOfflineSegura(method: string, path: string) {
   return (method === 'PUT' && path === '/operacion/pedidos')
@@ -56,7 +69,7 @@ async function contarPendientes(): Promise<number> {
 async function notificar() {
   const pendientes = await contarPendientes();
   const fallidos = await (await db()).getAll(STORE_FALLOS) as FalloPersistido[];
-  for (const l of listeners) l({ online, pendientes, fallidos });
+  for (const l of listeners) l({ online, pendientes, fallidos, sincronizando, ultimaSincronizacion });
 }
 
 async function registrarFallo(fallo: Omit<FalloPersistido, 'id'>) {
@@ -138,15 +151,16 @@ export async function encolar(req: Omit<PendingReq, 'id' | 'ts'>) {
   await notificar();
 }
 
-let sincronizando = false;
-
 /** Reenvía la cola en orden. Se detiene al primer fallo de red (sigue offline). */
 export async function sincronizar(): Promise<void> {
   if (sincronizando) return;
   sincronizando = true;
+  let falloDeRed = false;
+  let huboEnvio = false;
   try {
+    await notificar();
     const d = await db();
-    let keys = await d.getAllKeys(STORE);
+    const keys = await d.getAllKeys(STORE);
     for (const key of keys) {
       const req = (await d.get(STORE, key)) as PendingReq | undefined;
       if (!req) continue;
@@ -167,6 +181,7 @@ export async function sincronizar(): Promise<void> {
           },
           body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
         });
+        if (res.ok) huboEnvio = true;
         if (!res.ok && res.status >= 500) {
           // Error de servidor: puede ser transitorio o un dato que el servidor nunca va a
           // aceptar. Reintentamos con tope; pasado el tope se descarta (con aviso) para no
@@ -189,13 +204,18 @@ export async function sincronizar(): Promise<void> {
         await d.delete(STORE, key);
       } catch {
         // Sin red: cortamos y reintentaremos luego (esto sí afecta a toda la cola por igual).
+        falloDeRed = true;
         break;
       }
     }
-    keys = await d.getAllKeys(STORE);
-    void notificar();
+    const restantes = await d.count(STORE);
+    if (!falloDeRed && huboEnvio && restantes === 0 && navigator.onLine) {
+      ultimaSincronizacion = Date.now();
+      try { localStorage.setItem(ULTIMA_SYNC, String(ultimaSincronizacion)); } catch { /* almacenamiento bloqueado */ }
+    }
   } finally {
     sincronizando = false;
+    await notificar();
   }
 }
 
@@ -211,7 +231,7 @@ export const estaOnline = () => online;
 
 /** Hook de estado de conexión + cola pendiente, para la barra de contexto y el banner. */
 export function useOffline() {
-  const [estado, setEstado] = useState<EstadoOffline>({ online, pendientes: 0, fallidos: [] });
+  const [estado, setEstado] = useState<EstadoOffline>({ online, pendientes: 0, fallidos: [], sincronizando, ultimaSincronizacion });
   useEffect(() => suscribir(setEstado), []);
   return { ...estado, sincronizar, descartarFallos, reintentarFallo, descartarOperacionFallida };
 }

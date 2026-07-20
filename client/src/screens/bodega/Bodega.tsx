@@ -6,6 +6,8 @@ import { filasOrden, type FilaOrden, type LineaOperacion, type ProductoOrdenable
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 import { useAuth } from '../../auth';
+import Modal from '../../components/Modal';
+import { Icono } from '../../icons';
 
 interface DistResumen {
   id: number;
@@ -358,7 +360,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
               const programada = estaProgramado(dia.diaSemana, linea);
               return <div className={`dispatch-day-cell dispatch-day-cell--${linea}`} key={linea}>
                 {salidas.length ? salidas.map((salida) => <button className="dispatch-day-card" key={salida.id} onClick={() => void abrir(salida.ids)}>
-                  <div><strong>{salida.total_lineas} partidas</strong><span>Documentos por ruta</span></div><div><FaseChip estado={salida.estado} /><b>›</b></div>
+                  <div><strong>{salida.total_lineas} partidas</strong><span>Documentos por ruta</span></div><div><FaseChip estado={salida.estado} /><b><Icono name="chevron" /></b></div>
                 </button>) : <div className={`dispatch-day-empty ${programada ? 'is-scheduled' : ''}`}><strong>{programada ? 'Salida programada' : 'Sin salida'}</strong>{programada && <span>Se generará al completar los pedidos</span>}</div>}
               </div>;
             })}
@@ -539,8 +541,8 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
   const mostrarCarga = alcance.tipo === 'carga' || (alcance.tipo === 'completo' && !unicaTapatios);
   const mostrarRutas = alcance.tipo !== 'carga';
 
-  return <div className="modal-backdrop" onClick={onClose}><div className="modal-card invoice-print dispatch-print" onClick={(e) => e.stopPropagation()}>
-    <header className="dispatch-preview-toolbar no-print"><div><span className="eyebrow">Vista previa</span><h2>{alcance.tipo === 'carga' ? 'Hoja general de carga' : alcance.tipo === 'ruta' ? 'Paquete del chofer' : 'Paquete completo'}</h2></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}>×</button></header>
+  return <Modal className="invoice-print dispatch-print" ariaLabelledBy="dispatch-preview-title" onClose={onClose}>
+    <header className="dispatch-preview-toolbar no-print"><div><span className="eyebrow">Vista previa</span><h2 id="dispatch-preview-title">{alcance.tipo === 'carga' ? 'Hoja general de carga' : alcance.tipo === 'ruta' ? 'Paquete del chofer' : 'Paquete completo'}</h2></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}><Icono name="x" /></button></header>
 
     {mostrarCarga && (unicaTapatios ? <section className="dispatch-print-page dispatch-print-page--tapatios">
       <HojaRutaTapatios ruta={rutas[0]} destinos={destinosDeRuta(rutas[0])} filas={filas} fecha={op.fecha_entrega} />
@@ -568,5 +570,5 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
     })}
 
     <button className="btn btn-primary btn-block no-print" onClick={() => window.print()}>Imprimir / guardar PDF</button>
-  </div></div>;
+  </Modal>;
 }
