@@ -56,7 +56,6 @@ export default function SemanaOperacion() {
     if (paso === 'preparacion') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
     if (paso === 'seguimiento') return <Navigate to={rutaSemana('/semana/despacho')} replace />;
     if (paso === 'recepcion') return <div className="page weekly-operation weekly-operation--simple">
-      <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Control excepcional</span><h1>Auditoría de faltantes</h1></div></header>
       <WeekPicker semana={semana} onChange={cambiarSemana} />
       <div className="weekly-operation__content"><Recepcion integrado semana={semana} /></div>
     </div>;
@@ -91,12 +90,13 @@ export default function SemanaOperacion() {
   if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={rutaSemana(`/semana/${inicio}`)} replace />;
   const actual = alias as Tarea;
 
-  return <div className="page weekly-operation weekly-operation--simple">
-    <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Operación semanal</span><h1>Trabajo del día</h1></div></header>
+  const tituloRol = usuario.rol === 'encargado_sucursal' ? 'Pedido y recepción' : 'Trabajo de bodega';
+  return <div className="page weekly-operation weekly-operation--simple weekly-operation--field">
+    {permitidos.length > 1 && <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Trabajo del día</span><h1>{tituloRol}</h1></div></header>}
     <WeekPicker semana={semana} onChange={cambiarSemana} />
-    <nav className="capture-tabs capture-tabs--role" aria-label="Trabajo disponible">
+    {permitidos.length > 1 && <nav className="capture-tabs capture-tabs--role" aria-label="Trabajo disponible">
       {permitidos.map((p, i) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{i + 1}</span><strong>{p.label}</strong></NavLink>)}
-    </nav>
+    </nav>}
     <div className="weekly-operation__content">
       {actual === 'ventas' && <Pedidos integrado semana={semana} />}
       {actual === 'despacho' && <Bodega integrado semana={semana} />}

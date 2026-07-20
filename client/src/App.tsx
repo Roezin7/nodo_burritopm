@@ -1,22 +1,25 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth, type Rol } from './auth';
 import { ToastProvider } from './toast';
-import Login from './screens/Login';
-import Home from './screens/Home';
-import ConteosInventario from './screens/inventario/Inventario';
-import Incidencias from './screens/incidencias/Incidencias';
-import Configuracion from './screens/config/Configuracion';
 import OfflineBanner from './OfflineBanner';
 import UpdateBanner from './UpdateBanner';
 import Shell from './Shell';
 import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
-import OperacionAdmin from './screens/operacion/OperacionAdmin';
-import SemanaOperacion from './screens/operacion/SemanaOperacion';
-import Facturacion from './screens/Facturacion';
-import { Component, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
 import { OperacionConfigProvider } from './operacion-config';
 import { SemanaProvider } from './semana-context';
+
+// Cada área grande se descarga solo cuando el rol la necesita. Además de acelerar el arranque,
+// esto evita que el teléfono evalúe la consola administrativa para capturar un pedido sencillo.
+const Login = lazy(() => import('./screens/Login'));
+const Home = lazy(() => import('./screens/Home'));
+const ConteosInventario = lazy(() => import('./screens/inventario/Inventario'));
+const Incidencias = lazy(() => import('./screens/incidencias/Incidencias'));
+const Configuracion = lazy(() => import('./screens/config/Configuracion'));
+const OperacionAdmin = lazy(() => import('./screens/operacion/OperacionAdmin'));
+const SemanaOperacion = lazy(() => import('./screens/operacion/SemanaOperacion'));
+const Facturacion = lazy(() => import('./screens/Facturacion'));
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean }> {
   state = { fallo: false };
@@ -58,11 +61,12 @@ function AppBody() {
       </div>
     );
   }
-  if (!usuario) return <Login />;
+  if (!usuario) return <Suspense fallback={<div className="app-shell"><Spinner label="Preparando acceso…" /></div>}><Login /></Suspense>;
 
   return (
     <Shell>
       <OfflineBanner />
+      <Suspense fallback={<div className="route-skeleton" aria-label="Cargando pantalla"><span /><span /><span /></div>}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/inventario" element={<Navigate to="/semana/inventario" replace />} />
@@ -83,6 +87,7 @@ function AppBody() {
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </Shell>
   );
 }

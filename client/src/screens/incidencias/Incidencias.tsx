@@ -44,7 +44,7 @@ export default function Incidencias() {
       </div>
       {error && <p className="error-msg">{error}</p>}
       {lista.length === 0 ? (
-        <p className="muted">Sin incidencias {estado === 'abierta' ? 'abiertas' : ''}. 🎉</p>
+        <div className="empty-state empty-state--card"><strong>{estado === 'abierta' ? 'Todo está en orden' : 'Sin incidencias registradas'}</strong><span>{estado === 'abierta' ? 'Las diferencias de entrega o inventario aparecerán aquí para darles seguimiento.' : 'No hay resultados en el historial.'}</span></div>
       ) : (
         <CollapsibleSection title={estado === 'abierta' ? 'Incidencias abiertas' : 'Historial de incidencias'} count={lista.length}><div className="lista-ubicaciones">
           {lista.map((i) => (

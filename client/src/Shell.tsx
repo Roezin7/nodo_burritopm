@@ -95,13 +95,24 @@ export default function Shell({ children }: { children: ReactNode }) {
 
   // "Más" siempre visible en móvil: además del overflow, ahí viven Tema y Cerrar sesión
   // (si no, roles con pocas secciones se quedaban sin forma de salir en el teléfono).
-  const primarios = items.length > MAX_PRIMARIOS ? items.slice(0, MAX_PRIMARIOS) : items;
-  const extras = items.length > MAX_PRIMARIOS ? items.slice(MAX_PRIMARIOS) : [];
+  const operacionAdmin: Item = { ruta: '/semana', label: 'Operación', icono: 'checks', grupo: 'general', soloAdmin: true };
+  const itemsMoviles = usuario?.rol === 'admin'
+    ? [items.find((i) => i.ruta === '/')!, operacionAdmin, items.find((i) => i.ruta === '/facturacion')!]
+    : items;
+  const primarios = itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(0, MAX_PRIMARIOS) : itemsMoviles;
+  const rutasPrimarias = new Set(primarios.map((i) => i.ruta));
+  const extras = usuario?.rol === 'admin'
+    ? items.filter((i) => !rutasPrimarias.has(i.ruta))
+    : itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(MAX_PRIMARIOS) : [];
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
-    : i.ruta === '/semana' ? pathname === '/semana' : pathname.startsWith(i.ruta);
+    : i.ruta === '/semana' ? pathname.startsWith('/semana') : pathname.startsWith(i.ruta);
   const destino = (i: Item) => i.ruta.startsWith('/semana') ? rutaSemana(i.ruta) : i.ruta;
-  const etiquetaItem = (i: Item) => i.label;
+  const etiquetaItem = (i: Item) => {
+    if (i.ruta === '/' && usuario?.rol !== 'admin') return 'Hoy';
+    if (i.ruta === '/semana/ventas' && usuario?.rol === 'encargado_sucursal') return 'Pedido';
+    return i.label;
+  };
   const enMas = extras.some(itemActivo);
 
   const syncChip = !online ? (

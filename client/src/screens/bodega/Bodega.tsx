@@ -256,6 +256,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   const [productos, setProductos] = useState<ProductoOrdenable[]>([]);
   const [programacion, setProgramacion] = useState<Catalogo['plantillas']>([]);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
+  const [lineaMovil, setLineaMovil] = useState<LineaOperacion>('carne');
   const [error, setError] = useState('');
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const solicitud = useRef(0);
@@ -339,7 +340,15 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
       {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 4</span><h2>Despacho</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
-      {cargandoDetalle ? <p className="muted">Preparando documentos…</p> : <section className="dispatch-week-board">
+      {!cargandoDetalle && <div className="dispatch-mobile-line" role="group" aria-label="Línea de despacho">
+        {(['carne', 'desechables'] as const).map((linea) => <button
+          key={linea}
+          className={lineaMovil === linea ? 'is-active' : ''}
+          aria-pressed={lineaMovil === linea}
+          onClick={() => setLineaMovil(linea)}
+        >{linea === 'carne' ? 'Carne' : 'Desechables'}</button>)}
+      </div>}
+      {cargandoDetalle ? <p className="muted">Preparando documentos…</p> : <section className={`dispatch-week-board dispatch-week-board--${lineaMovil}`}>
         <header className="dispatch-week-board__head"><div><span>Semana {semana.numero}</span><strong>Día</strong></div><div className="dispatch-line-title dispatch-line-title--carne"><span /><div><strong>Carne</strong><small>Carnicería</small></div></div><div className="dispatch-line-title dispatch-line-title--desechables"><span /><div><strong>Desechables</strong><small>Bodega Adison</small></div></div></header>
         <div className="dispatch-week-board__body">
           {dias.map((dia) => <div className={`dispatch-day-row ${dia.fecha === hoy ? 'is-today' : ''}`} key={dia.fecha}>

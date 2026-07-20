@@ -6,13 +6,12 @@ import { useToast } from '../../toast';
 import { nombreEnVenta, productosParaPedido } from '../../operationOrder';
 import { crearSemana, inicioDeSemana, type SemanaSeleccionada } from '../../semana';
 import Distribucion from '../distribucion/Distribucion';
-import CollapsibleSection from '../../components/CollapsibleSection';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 import CapturaSemanalPedidos from './pedidos/CapturaSemanalPedidos';
 import HistorialPedidos from './pedidos/HistorialPedidos';
 import OrdenImprimible from './pedidos/OrdenImprimible';
 import {
-  entregasDeSemana, esPieza, fechaEntregaCorta, fechaLarga, hoy, unidadCorta, usd,
+  entregasDeSemana, esPieza, fechaEntregaCorta, hoy, unidadCorta, usd,
   type Catalogo, type Linea, type Pedido, type ResultadoConfirmacion,
 } from './pedidos/types';
 
@@ -30,6 +29,8 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [buscar, setBuscar] = useState('');
   const [vista, setVista] = useState<'captura' | 'historial' | 'consolidados'>('captura');
   const [modoCaptura, setModoCaptura] = useState<'semana' | 'individual'>('semana');
+  const [pasoIndividual, setPasoIndividual] = useState<'captura' | 'revision'>('captura');
+  const [filtroProductos, setFiltroProductos] = useState<'todos' | 'principales' | 'complementos' | 'seleccionados'>('principales');
   const [historial, setHistorial] = useState<Pedido[]>([]);
   const [historialUbicacion, setHistorialUbicacion] = useState('todas');
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
@@ -104,6 +105,8 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
 
   useEffect(() => {
     setFechaManual(false);
+    setPasoIndividual('captura');
+    setFiltroProductos(linea === 'carne' ? 'principales' : 'todos');
     const proxima = entregas.find((e) => e.fecha >= hoy()) ?? entregas[0];
     setFecha(proxima?.fecha ?? '');
   }, [entregas, semana.inicio]);
@@ -195,6 +198,24 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
     finally { setBusy(false); }
   }
 
+  function cambiarLineaPedido(siguiente: Linea) {
+    if (siguiente === linea) return;
+    setLinea(siguiente);
+    setPasoIndividual('captura');
+    setFiltroProductos(siguiente === 'carne' ? 'principales' : 'todos');
+    setBuscar('');
+  }
+
+  function cambiarCantidadIndividual(productId: number, valor: string) {
+    setCantidades((actuales) => ({ ...actuales, [productId]: valor }));
+  }
+
+  function ajustarCantidad(productId: number, paso: number) {
+    const actual = Number(cantidades[productId] || 0);
+    const siguiente = Math.max(0, Math.round((actual + paso) * 100) / 100);
+    cambiarCantidadIndividual(productId, siguiente ? String(siguiente) : '');
+  }
+
   async function abrirImpresion(lineaObjetivo: Linea) {
     setError('');
     try {
@@ -226,25 +247,31 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const ubic = ubicacionSeleccionada;
   const productosDeVenta = productos.filter((p) => p.linea === linea);
   const total = productosDeVenta.reduce((a, p) => a + Number(cantidades[p.id] || 0) * (preciosPedido[p.id] ?? p.precio ?? 0), 0);
-  const unidades = productosDeVenta.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
   const unidadesOrden = productos.reduce((a, p) => a + Number(cantidades[p.id] || 0), 0);
-  const conCantidad = productosDeVenta.filter((p) => Number(cantidades[p.id] || 0) > 0).length;
   const semanaCerrada = catalogo.semanas.some((s) => s.anio === semana.anio && s.semana === semana.numero && s.estado === 'cerrada');
   const editable = !semanaCerrada && (!estado || (admin
     ? !['cerrado', 'cancelado'].includes(estado)
     : ['borrador', 'confirmado'].includes(estado)));
   const q = buscar.trim().toLowerCase();
-  const visibles = productos.filter((p) => !q || `${nombreEnVenta(p.sku, p.nombre, linea)} ${p.tipo}`.toLowerCase().includes(q));
+  const seleccionados = productos.filter((p) => Number(cantidades[p.id] || 0) > 0);
+  const visibles = productos.filter((p) => {
+    if (q && !`${nombreEnVenta(p.sku, p.nombre, linea)} ${p.nombre} ${p.tipo}`.toLowerCase().includes(q)) return false;
+    if (filtroProductos === 'seleccionados') return Number(cantidades[p.id] || 0) > 0;
+    if (filtroProductos === 'principales') return p.sku.startsWith('MEAT-');
+    if (filtroProductos === 'complementos') return !p.sku.startsWith('MEAT-');
+    return true;
+  });
+  const nombreProducto = (p: Catalogo['productos'][number]) => p.sku === 'MEAT-PASTOR-TAP' ? 'Pastor Tapatíos' : p.nombre;
   const capturaSemanal = admin && modoCaptura === 'semana';
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
-      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">Ventas</span><h1>Venta semanal</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
-      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Paso 3</span><h2>Ventas</h2></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Ventas' : 'Pedido del restaurante'}</span><h1>{admin ? 'Venta semanal' : 'Hacer pedido'}</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Paso 3' : 'Pedido del restaurante'}</span><h2>{admin ? 'Ventas' : 'Hacer pedido'}</h2></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
         {admin && <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setVista('historial')}>Historial</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Despachos</button></div>}
         {vista !== 'consolidados' && <div className="segmented order-line-switch">
-        <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('carne')}>Carne</button>
-        <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
+        <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('carne')}>Carne</button>
+        <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>
         </div>}
       </div>
       {admin && vista === 'captura' && <div className="weekly-capture-mode">
@@ -252,29 +279,48 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         <div className="segmented segmented--small"><button className={capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('semana')}>Semana completa</button><button className={!capturaSemanal ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setModoCaptura('individual')}>Orden individual</button></div>
       </div>}
       {error && <p className="error-msg">{error}</p>}
-      {vista === 'consolidados' ? <Distribucion integrado semana={semana} soloRevision /> : vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className="order-workspace">
-        <section className="order-capture">
-          <div className="workspace-card order-context">
-            <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label>
-            <label className="field order-delivery-field"><span className="order-delivery-label">Entrega de semana {semana.numero}{admin && <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setFechaManual((actual) => { if (actual && entregas[0]) setFecha(entregas[0].fecha); return !actual; }); }}>{fechaManual ? 'Usar ruta programada' : 'Fecha excepcional'}</button>}</span>{fechaManual ? <input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => setFecha(e.target.value)} /> : <select value={fecha} disabled={!entregas.length} onChange={(e) => setFecha(e.target.value)}>{!entregas.length && <option value="">Sin entrega configurada</option>}{entregas.map((e) => <option key={e.fecha} value={e.fecha}>{fechaEntregaCorta(e.fecha)}</option>)}</select>}<small className="order-delivery-hint">{fechaManual ? 'Fecha excepcional dentro de la semana seleccionada.' : entregaSeleccionada ? `${entregaSeleccionada.rutas.map((r) => r.nombre).join(' / ')} · ${[...new Set(entregaSeleccionada.rutas.map((r) => r.conductor))].join(', ')}` : 'Este restaurante no aparece en una ruta activa para esta línea.'}</small></label>
+      {vista === 'consolidados' ? <Distribucion integrado semana={semana} soloRevision /> : vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>
+        <section className="order-capture order-capture--guided">
+          <div className="workspace-card order-context order-context--guided">
+            {admin || ubicaciones.length > 1 ? <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => { setUbicacionId(e.target.value); setPasoIndividual('captura'); }}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label> : <div className="order-context-value"><span>Restaurante</span><strong>{ubic?.nombre ?? 'Sin restaurante asignado'}</strong><small>{ubic?.empresa?.nombre}</small></div>}
+            <label className="field order-delivery-field"><span className="order-delivery-label">Entrega · semana {semana.numero}{admin && <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setFechaManual((actual) => { if (actual && entregas[0]) setFecha(entregas[0].fecha); return !actual; }); }}>{fechaManual ? 'Usar ruta programada' : 'Fecha excepcional'}</button>}</span>{fechaManual ? <input type="date" min={semana.inicio} max={semana.fin} value={fecha} onChange={(e) => { setFecha(e.target.value); setPasoIndividual('captura'); }} /> : <select value={fecha} disabled={!entregas.length} onChange={(e) => { setFecha(e.target.value); setPasoIndividual('captura'); }}>{!entregas.length && <option value="">Sin entrega configurada</option>}{entregas.map((e) => <option key={e.fecha} value={e.fecha}>{fechaEntregaCorta(e.fecha)}</option>)}</select>}<small className="order-delivery-hint">{fechaManual ? 'Fecha excepcional dentro de la semana seleccionada.' : entregaSeleccionada ? `${entregaSeleccionada.rutas.map((r) => r.nombre).join(' / ')} · ${[...new Set(entregaSeleccionada.rutas.map((r) => r.conductor))].join(', ')}` : 'Este restaurante no aparece en una ruta activa para esta línea.'}</small></label>
+            <div className={`save-status ${cargandoPedido || busy ? 'save-status--syncing' : hayCambiosIndividual ? 'save-status--local' : 'save-status--saved'}`} role="status" aria-live="polite"><i />{cargandoPedido ? 'Cargando pedido…' : busy ? 'Guardando…' : hayCambiosIndividual ? 'Borrador protegido en este dispositivo' : estado === 'confirmado' ? 'Pedido confirmado' : 'Todo guardado'}</div>
           </div>
           {ubic?.entrega_en && <p className="context-note">Entrega física en <strong>{ubic.entrega_en.nombre}</strong>; la factura permanece en {ubic.nombre}.</p>}
-          {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada y esta venta se muestra en modo consulta.</p>}
-          {!semanaCerrada && !cargandoPedido && !editable && <p className="notice notice--warning">Esta venta ya fue procesada. El administrador puede corregirla.</p>}
+          {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada y este pedido se muestra en modo consulta.</p>}
+          {!semanaCerrada && !cargandoPedido && !editable && <p className="notice notice--warning">Este pedido ya fue procesado. El administrador puede corregirlo.</p>}
           {!semanaCerrada && editable && admin && estado && !['borrador', 'confirmado'].includes(estado) && <p className="context-note">Corrección vinculada: al guardar se actualizarán despacho, inventario y facturación.</p>}
-          <CollapsibleSection title="Productos" count={productos.length} className="product-picker">
-            <div className="workspace-card-head"><div /><input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" /></div>
-            <div className="order-product-list">{visibles.map((p) => <label key={p.id} className={`order-product ${Number(cantidades[p.id] || 0) > 0 ? 'has-quantity' : ''}`}>
-              <span><strong>{nombreEnVenta(p.sku, p.nombre, linea)}</strong><small>{p.peso_caja_lb ? `Caja terminada de ${p.peso_caja_lb} lb` : p.unidad} · {p.precio_pendiente && preciosPedido[p.id] == null ? 'Costo semanal + $15 al capturar producción' : usd(preciosPedido[p.id] ?? p.precio)}</small></span>
-              <div className="input-suffix input-suffix--compact"><input disabled={cargandoPedido || !editable} inputMode="decimal" type="number" min="0" step={esPieza(p) ? '1' : '0.5'} value={cantidades[p.id] ?? ''} placeholder="0" onChange={(e) => setCantidades({ ...cantidades, [p.id]: e.target.value })} /><span>{unidadCorta(p)}</span></div>
-            </label>)}</div>
-          </CollapsibleSection>
-          <label className="workspace-card field order-notes"><span>Notas de la venta <em>opcional</em></span><textarea disabled={cargandoPedido || !editable} rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
+
+          {pasoIndividual === 'captura' ? <section className="workspace-card guided-products" aria-labelledby="productos-title">
+            <header className="guided-products__head"><div><span className="eyebrow">Captura</span><h3 id="productos-title">¿Qué necesitas?</h3><p>Agrega cantidades; tu avance se conserva automáticamente.</p></div><span className="guided-products__count">{seleccionados.length} seleccionados</span></header>
+            <div className="guided-products__tools">
+              <input className="compact-search" aria-label="Buscar producto" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar producto" />
+              <div className="product-filters" aria-label="Filtrar productos">
+                <button type="button" className={filtroProductos === 'todos' ? 'is-active' : ''} onClick={() => setFiltroProductos('todos')}>Todos</button>
+                {linea === 'carne' && <button type="button" className={filtroProductos === 'principales' ? 'is-active' : ''} onClick={() => setFiltroProductos('principales')}>Proteínas</button>}
+                {linea === 'carne' && <button type="button" className={filtroProductos === 'complementos' ? 'is-active' : ''} onClick={() => setFiltroProductos('complementos')}>Complementos</button>}
+                <button type="button" className={filtroProductos === 'seleccionados' ? 'is-active' : ''} onClick={() => setFiltroProductos('seleccionados')}>Seleccionados {seleccionados.length || ''}</button>
+              </div>
+            </div>
+            {cargandoPedido ? <div className="guided-product-skeleton" aria-label="Cargando productos"><span /><span /><span /></div> : <div className="order-product-list order-product-list--guided">{visibles.map((p) => { const paso = esPieza(p) ? 1 : 0.5; const cantidad = Number(cantidades[p.id] || 0); return <article key={p.id} className={`order-product order-product--guided ${cantidad > 0 ? 'has-quantity' : ''}`}>
+              <div className="order-product__info"><strong>{nombreProducto(p)}</strong><small>{p.peso_caja_lb ? `Caja de ${p.peso_caja_lb} lb` : p.unidad} · {p.precio_pendiente && preciosPedido[p.id] == null ? 'Precio pendiente de producción' : usd(preciosPedido[p.id] ?? p.precio)}</small></div>
+              <div className="number-stepper" aria-label={`Cantidad de ${nombreProducto(p)}`}>
+                <button type="button" disabled={cargandoPedido || !editable || cantidad <= 0} aria-label={`Quitar ${paso} de ${nombreProducto(p)}`} onClick={() => ajustarCantidad(p.id, -paso)}>−</button>
+                <label><span className="sr-only">Cantidad de {nombreProducto(p)}</span><input disabled={cargandoPedido || !editable} inputMode="decimal" type="number" min="0" step={paso} value={cantidades[p.id] ?? ''} placeholder="0" onFocus={(e) => e.currentTarget.select()} onChange={(e) => cambiarCantidadIndividual(p.id, e.target.value)} /><small>{unidadCorta(p)}</small></label>
+                <button type="button" disabled={cargandoPedido || !editable} aria-label={`Agregar ${paso} de ${nombreProducto(p)}`} onClick={() => ajustarCantidad(p.id, paso)}>+</button>
+              </div>
+            </article>; })}{!visibles.length && <div className="empty-state"><strong>{filtroProductos === 'seleccionados' ? 'Todavía no agregas productos' : 'No encontramos productos'}</strong><span>{filtroProductos === 'seleccionados' ? 'Usa Todos para empezar tu pedido.' : 'Prueba otra búsqueda o categoría.'}</span></div>}</div>}
+          </section> : <section className="workspace-card order-review" aria-labelledby="revision-title">
+            <header><div><span className="eyebrow">Revisión</span><h3 id="revision-title">Confirma tu pedido</h3><p>Revisa cantidades antes de enviarlo a preparación.</p></div><button type="button" className="btn btn-secondary" onClick={() => setPasoIndividual('captura')}>Seguir editando</button></header>
+            <div className="order-review__context"><div><span>Restaurante</span><strong>{ubic?.nombre}</strong></div><div><span>Entrega</span><strong>{fecha ? fechaEntregaCorta(fecha) : 'Sin fecha'}</strong></div><div><span>Línea</span><strong>{linea === 'carne' ? 'Carne' : 'Desechables'}</strong></div></div>
+            <div className="order-review__list">{seleccionados.map((p) => <div key={p.id}><span><strong>{nombreProducto(p)}</strong><small>{unidadCorta(p)}</small></span><b>{Number(cantidades[p.id] || 0).toLocaleString('es-MX')}</b></div>)}</div>
+            <label className="field order-notes"><span>Notas del pedido <em>opcional</em></span><textarea disabled={cargandoPedido || !editable} rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
+            <p className="order-review__explanation">Al confirmar, administración podrá incluir este pedido en preparación y despacho.</p>
+          </section>}
         </section>
-        <aside className="order-summary">
-          <span className="eyebrow">Resumen de venta</span><h2>{ubic?.nombre ?? 'Selecciona restaurante'}</h2><p>{fecha ? `Semana ${semana.numero} · ${fechaLarga(fecha)}` : 'Sin entrega programada'} · {linea}</p>
-          <dl><div><dt>Productos</dt><dd>{conCantidad}</dd></div><div><dt>Unidades</dt><dd>{unidades.toLocaleString('es-MX')}</dd></div><div><dt>Total {linea}</dt><dd>{usd(total)}</dd></div></dl>
-          <div className="order-actions"><button className="btn btn-secondary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar</button><button className="btn btn-primary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha || unidadesOrden <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : cargandoPedido ? 'Cargando…' : admin && estado && !['borrador', 'confirmado'].includes(estado) ? 'Guardar corrección' : 'Confirmar'}</button></div>
+        <aside className="order-summary order-summary--guided">
+          <div className="order-summary__compact"><span><small>{pasoIndividual === 'captura' ? 'Pedido actual' : 'Listo para confirmar'}</small><strong>{seleccionados.length} productos · {unidadesOrden.toLocaleString('es-MX')} unidades</strong></span>{admin && <b>{usd(total)}</b>}</div>
+          {pasoIndividual === 'captura' ? <button className="btn btn-primary" disabled={cargandoPedido || !editable || !ubicacionId || !fecha || unidadesOrden <= 0} onClick={() => setPasoIndividual('revision')}>Revisar pedido</button> : <div className="order-actions"><button className="btn btn-secondary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha} onClick={() => void guardar(false)}>Guardar borrador</button><button className="btn btn-primary" disabled={busy || cargandoPedido || !editable || !ubicacionId || !fecha || unidadesOrden <= 0} onClick={() => void guardar(true)}>{busy ? 'Guardando…' : admin && estado && !['borrador', 'confirmado'].includes(estado) ? 'Guardar corrección' : 'Confirmar pedido'}</button></div>}
         </aside>
       </div> : <HistorialPedidos pedidos={historial} cargando={cargandoHistorial} linea={linea} semana={semana} ubicacion={historialUbicacion} setUbicacion={setHistorialUbicacion} ubicaciones={ubicaciones} onPrint={() => void abrirImpresion(linea)} onConfirmar={() => void confirmarTodos(semana.inicio, semana.fin)} confirmando={busy || semanaCerrada} />}
       {impresion && <OrdenImprimible datos={impresion} catalogo={catalogo} onClose={() => setImpresion(null)} />}

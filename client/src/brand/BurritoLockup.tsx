@@ -20,8 +20,7 @@ export default function BurritoLockup({ size = 32, variante = 'rail', animated =
         <NodoIsotipo size={size} animated={animated} glow={glow} />
         <span className="bpm-lockup-word">NODO</span>
       </div>
-      <img className={`bpm-logo bpm-logo--light bpm-logo--${variante}`} src="/burrito-logo.png" alt="Burrito Parrilla Mexicana" draggable={false} />
-      <img className={`bpm-logo bpm-logo--dark bpm-logo--${variante}`} src="/burrito-logo-dark.png" alt="Burrito Parrilla Mexicana" draggable={false} />
+      <img className={`bpm-logo bpm-logo--${variante}`} src="/burrito-logo.png" alt="Burrito Parrilla Mexicana" draggable={false} />
     </div>
   );
 }

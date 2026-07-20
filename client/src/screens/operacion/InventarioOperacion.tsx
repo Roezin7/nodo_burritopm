@@ -216,7 +216,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div><span className="eyebrow">Inventario</span><h1>Existencias</h1></div>
       {admin && <div className="page-actions"><Link className="btn btn-secondary" to={`/semana/compras?semana=${semana.inicio}`}>Compra</Link><Link className="btn btn-primary" to={`/semana/produccion?semana=${semana.inicio}`}>Producción</Link></div>}
     </header>}
-    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Auditoría opcional</span><h2>Doble check de inventario</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar conteo físico</button>}</header>}
+    {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">Inventario físico</span><h2>{editando ? 'Capturar existencias' : 'Existencias por almacén'}</h2></div>{admin && !editando && <button className="btn btn-primary" onClick={iniciarCierre}>Capturar conteo físico</button>}</header>}
 
     <div className="workspace-toolbar">
       <div className="segmented" aria-label="Almacén">

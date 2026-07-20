@@ -356,6 +356,30 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
           })}</tbody>
           <tfoot><tr><th>{totalDia.toLocaleString('es-MX')}</th><th>Total</th>{restaurantes.map((restaurante, indice) => <th key={restaurante.ubicacion.id}>{totalRestaurante(indice).toLocaleString('es-MX')}</th>)}</tr></tfoot>
         </table></div>
+        <div className="weekly-sales-mobile-list">
+          {restaurantes.map((restaurante, restauranteIndice) => {
+            const pedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega));
+            const editable = !semanaCerrada && pedidoEditable(pedido);
+            return <article className="weekly-sales-mobile-card" key={restaurante.ubicacion.id}>
+              <header>
+                <div><strong>{restaurante.ubicacion.nombre}</strong><small>{restaurante.ubicacion.empresa?.nombre ?? 'Restaurante'}</small></div>
+                <div><span className={`chip matrix-status-label matrix-status-label--${pedido?.estado ?? 'pendiente'}`}>{pedido?.estado.replaceAll('_', ' ') ?? 'Sin capturar'}</span><b>{totalRestaurante(restauranteIndice).toLocaleString('es-MX')}</b><small>unidades</small></div>
+              </header>
+              <div className="weekly-sales-mobile-products">
+                {filas.map((fila, filaIndice) => {
+                  const producto = fila.productos[restauranteIndice];
+                  if (!producto) return null;
+                  const clave = claveCantidadSemanal(restaurante.ubicacion.id, fechaEntrega, producto.id);
+                  const modificada = Number(cantidades[clave] || 0) !== Number(cantidadesGuardadas[clave] || 0);
+                  return <label className={modificada ? 'is-dirty' : ''} key={fila.formato.nombre}>
+                    <span><strong>{fila.formato.nombre}</strong><small>{producto.unidad}</small></span>
+                    <input data-weekly-matrix-input data-nav-order={fechaIndice * 10000 + restauranteIndice * 100 + filaIndice} aria-label={`${fila.formato.nombre} · ${restaurante.ubicacion.nombre} · ${fechaEntregaCorta(fechaEntrega)}`} disabled={!editable} inputMode="decimal" type="number" min="0" step={esPieza(producto) ? '1' : '0.5'} value={cantidades[clave] ?? ''} placeholder="0" onKeyDown={navegarConEnter} onChange={(e) => cambiarCantidad(restaurante.ubicacion.id, fechaEntrega, producto.id, e.target.value)} />
+                  </label>;
+                })}
+              </div>
+            </article>;
+          })}
+        </div>
       </CollapsibleSection>;
     })}</div>}
     {!cargando && !visibles.length && <div className="empty-state"><strong>No hay restaurantes programados</strong><span>Revisa la línea seleccionada, la búsqueda o la configuración de rutas.</span></div>}

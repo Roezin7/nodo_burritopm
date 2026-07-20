@@ -18,7 +18,7 @@ export default function WeekPicker({ semana, onChange, label = 'Semana de trabaj
     <label>
       <span>{label}</span>
       <select value={semana.inicio} onChange={(e) => onChange(e.target.value)}>
-        {opciones.map((opcion) => <option key={opcion.inicio} value={opcion.inicio}>Semana {opcion.numero} · {opcion.anio} · {etiquetaRango(opcion)}</option>)}
+        {opciones.map((opcion) => <option key={opcion.inicio} value={opcion.inicio}>Semana {opcion.numero} · {etiquetaRango(opcion)}</option>)}
       </select>
     </label>
     <button type="button" className="icon-btn" aria-label="Semana siguiente" onClick={() => onChange(siguiente.inicio)}>→</button>
