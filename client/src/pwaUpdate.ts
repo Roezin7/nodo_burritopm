@@ -1,4 +1,5 @@
 import { registerSW } from 'virtual:pwa-register';
+import { hayCambiosSinGuardar } from './use-unsaved';
 
 type Escuchador = (disponible: boolean) => void;
 
@@ -11,22 +12,34 @@ function publicar(valor: boolean) {
   escuchadores.forEach((f) => f(valor));
 }
 
-/** Registra el service worker y avisa (sin recargar solo) cuando hay una versión nueva. */
+function aplicarSiEsSeguro() {
+  if (hayCambiosSinGuardar()) {
+    publicar(true);
+    return;
+  }
+  publicar(false);
+  void aplicar?.(true);
+}
+
+/** Registra el service worker y activa de inmediato una versión nueva si no hay capturas abiertas. */
 export function iniciarActualizacionPWA() {
   aplicar = registerSW({
     immediate: true,
     onNeedRefresh() {
-      publicar(true);
+      aplicarSiEsSeguro();
     },
     onRegisteredSW(_url, registration) {
       if (!registration) return;
-      // Una tablet dedicada puede quedar con la pestaña abierta horas sin recargar; el
-      // navegador solo revisa el sw.js por su cuenta en la siguiente navegación, que puede
-      // no llegar nunca. Forzamos la revisión periódica y al volver a primer plano.
-      setInterval(() => { void registration.update(); }, 60 * 60_000);
+      const revisar = () => { void registration.update().catch(() => { /* sin conexión */ }); };
+      // Revisa al arrancar y periódicamente: una PC o tablet puede permanecer cerrada o con
+      // la pestaña suspendida durante semanas y conservar un app-shell anterior.
+      revisar();
+      setInterval(revisar, 15 * 60_000);
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') void registration.update();
+        if (document.visibilityState === 'visible') revisar();
       });
+      window.addEventListener('focus', revisar);
+      window.addEventListener('online', revisar);
     },
   });
 }

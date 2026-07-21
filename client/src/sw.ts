@@ -18,8 +18,16 @@ clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
-// App-shell: las navegaciones (no /api) responden con index.html (offline-first).
-registerRoute(new NavigationRoute(createHandlerBoundToURL('/index.html'), { denylist: [/^\/api/] }));
+// App-shell: en línea siempre pedimos el HTML actual al servidor. El precache se usa solo
+// como respaldo sin conexión; así un service worker activo no mantiene una versión anterior.
+const appShellOffline = createHandlerBoundToURL('/index.html');
+registerRoute(new NavigationRoute(async (options) => {
+  try {
+    const response = await fetch(options.request, { cache: 'no-store' });
+    if (response.ok) return response;
+  } catch { /* sin conexión: usar el app-shell precargado */ }
+  return appShellOffline(options);
+}, { denylist: [/^\/api/] }));
 
 // ───────────────────────── Web Push ─────────────────────────
 self.addEventListener('push', (event) => {

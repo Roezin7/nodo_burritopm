@@ -67,19 +67,38 @@
 /* Salto de teclado visible únicamente al recibir foco. */
 .skip-link {
   position: fixed;
+  z-index: 1000;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.skip-link:focus-visible {
   top: max(0.5rem, env(safe-area-inset-top));
   left: max(0.5rem, env(safe-area-inset-left));
-  z-index: 1000;
-  transform: translateY(-160%);
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
   border-radius: 10px;
   background: var(--ink);
   color: var(--surface);
-  padding: 0.65rem 0.9rem;
+  opacity: 1;
+  pointer-events: auto;
   font-weight: 700;
   text-decoration: none;
 }
-
-.skip-link:focus { transform: translateY(0); }
 
 /* Diálogos propios para confirmaciones y captura breve. */
 .app-dialog { width: min(460px, 100%); padding: 1.25rem; }

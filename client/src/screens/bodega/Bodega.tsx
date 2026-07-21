@@ -339,7 +339,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
       {!integrado && <header className="page-head"><div><span className="eyebrow">Documentos de salida</span><h1>Despacho</h1><p className="page-sub">Hojas de carga y paquetes para cada ruta.</p></div></header>}
       {!integrado && <FlujoStepper activo="bodega" />}
       {!integrado && <BodegaRutaTabs activo="bodega" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Paso 4</span><h2>Despacho</h2></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Operación diaria</span><h2>Despacho</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
       {!cargandoDetalle && <div className="dispatch-mobile-line" role="group" aria-label="Línea de despacho">

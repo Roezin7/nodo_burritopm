@@ -27,7 +27,7 @@ const GRUPOS: { titulo: string; items: { clave: Tab; label: string; descripcion:
   ] },
   { titulo: 'Reglas', items: [
     { clave: 'stock', label: 'Productos por ubicación', descripcion: 'Disponibilidad y mínimos' },
-    { clave: 'operacion', label: 'Flujo semanal', descripcion: 'Despacho, reparto y cierre' },
+    { clave: 'operacion', label: 'Operación semanal', descripcion: 'Despacho, reparto y cierre' },
   ] },
 ];
 const ITEMS = GRUPOS.flatMap((grupo) => grupo.items);

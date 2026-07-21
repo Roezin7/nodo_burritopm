@@ -8,9 +8,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // 'prompt' (en vez de 'autoUpdate'): una tablet de bodega suele quedar con la pestaña
-      // abierta todo el turno con capturas a medias; no queremos recargarla sola bajo el
-      // usuario. Se avisa con un banner y el usuario decide cuándo actualizar (pwaUpdate.ts).
+      // Conservamos el modo prompt para no recargar una captura activa. pwaUpdate.ts aplica
+      // automáticamente la versión al abrir/volver a la app cuando no hay cambios sin guardar.
       registerType: 'prompt',
       injectRegister: false,
       strategies: 'injectManifest',

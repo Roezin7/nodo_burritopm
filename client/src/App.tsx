@@ -69,7 +69,7 @@ function AppBody() {
   return (
     <Shell>
       <OfflineBanner />
-      <Suspense fallback={<div className="route-skeleton" aria-label="Cargando pantalla"><span /><span /><span /></div>}>
+      <Suspense fallback={<div className="route-skeleton" role="status" aria-label="Cargando pantalla"><span /><span /><span /></div>}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/inventario" element={<Navigate to="/semana/inventario" replace />} />

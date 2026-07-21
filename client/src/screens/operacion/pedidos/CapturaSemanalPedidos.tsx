@@ -512,7 +512,8 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
         const estadoPedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega))?.estado;
         return estadoPedido && !['borrador', 'cancelado'].includes(estadoPedido);
       }).length;
-      return <CollapsibleSection title={fechaLarga(fechaEntrega)} count={`${capturadas}/${restaurantes.length}`} summary={`${totalDia.toLocaleString('es-MX')} unidades`} className="weekly-sales-sheet" key={fechaEntrega}>
+      const diaCompleto = restaurantes.length > 0 && capturadas === restaurantes.length;
+      return <CollapsibleSection title={fechaLarga(fechaEntrega)} count={`${capturadas}/${restaurantes.length}`} summary={`${totalDia.toLocaleString('es-MX')} unidades`} className={`weekly-sales-sheet ${diaCompleto ? 'weekly-sales-sheet--complete' : ''}`} key={fechaEntrega}>
         <div className="weekly-sales-matrix-wrap"><table className="weekly-sales-matrix" onDragStart={(evento) => evento.preventDefault()}>
           <thead><tr><th><button type="button" className="matrix-header-button" aria-label={`Seleccionar toda la tabla del ${fechaLarga(fechaEntrega)}`} onClick={() => seleccionarRango({ fecha: fechaEntrega, filaInicio: 0, filaFin: filas.length - 1, columnaInicio: 0, columnaFin: restaurantes.length - 1 })}>Todo</button></th><th>Item</th>{restaurantes.map((restaurante, columnaIndice) => {
             const pedido = porClave.get(clavePedidoSemanal(restaurante.ubicacion.id, fechaEntrega));

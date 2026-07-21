@@ -91,6 +91,12 @@ app.use(
     setHeaders: (res, filePath) => {
       if (filePath.includes(`${path.sep}assets${path.sep}`)) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (['index.html', 'sw.js', 'manifest.webmanifest'].includes(path.basename(filePath))) {
+        // El app-shell y el service worker siempre se revalidan. Solo los assets con hash son
+        // inmutables; cachear estos archivos puede dejar una instalación en un deploy anterior.
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
       }
     },
   }),
@@ -98,7 +104,9 @@ app.use(
 // SPA fallback: cualquier ruta que no sea /api devuelve index.html (sin cache, para
 // que un deploy nuevo se vea de inmediato).
 app.get(/^(?!\/api).*/, (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 

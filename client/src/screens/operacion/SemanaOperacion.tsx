@@ -11,17 +11,17 @@ import Spinner from '../../components/Spinner';
 import WeekPicker from '../../components/WeekPicker';
 import { useSemanaGlobal } from '../../semana-context';
 
-const capturas = [
-  { clave: 'compras', label: 'Compras', numero: 1 },
-  { clave: 'produccion', label: 'Producción', numero: 2 },
-  { clave: 'ventas', label: 'Ventas', numero: 3 },
+const operacionDiaria = [
+  { clave: 'ventas', label: 'Ventas' },
+  { clave: 'despacho', label: 'Despacho' },
+  { clave: 'reparto', label: 'Reparto' },
 ] as const;
 
-const proceso = [
-  { clave: 'despacho', label: 'Despacho', numero: 4 },
-  { clave: 'reparto', label: 'Reparto', numero: 5 },
-  { clave: 'inventario', label: 'Inventario', numero: 6 },
-  { clave: 'cierre', label: 'Cierre', numero: 7 },
+const controlSemanal = [
+  { clave: 'compras', label: 'Compras' },
+  { clave: 'produccion', label: 'Producción' },
+  { clave: 'inventario', label: 'Inventario' },
+  { clave: 'cierre', label: 'Cierre' },
 ] as const;
 
 const tareasPorRol = [
@@ -32,7 +32,7 @@ const tareasPorRol = [
   { clave: 'inventario', label: 'Inventario', roles: ['encargado_bodega'] },
 ] as const;
 
-type PasoAdmin = (typeof capturas)[number]['clave'] | (typeof proceso)[number]['clave'];
+type AreaAdmin = (typeof operacionDiaria)[number]['clave'] | (typeof controlSemanal)[number]['clave'];
 type Tarea = (typeof tareasPorRol)[number]['clave'];
 
 export default function SemanaOperacion() {
@@ -47,9 +47,7 @@ export default function SemanaOperacion() {
     return <Navigate to={rutaSemana(destino)} replace />;
   }
 
-  const procesoVisible = proceso
-    .filter((p) => p.clave !== 'reparto' || repartoHabilitado)
-    .map((p, i) => ({ ...p, numero: i + capturas.length + 1 }));
+  const operacionDiariaVisible = operacionDiaria.filter((p) => p.clave !== 'reparto' || repartoHabilitado);
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
@@ -59,15 +57,26 @@ export default function SemanaOperacion() {
       <WeekPicker semana={semana} onChange={cambiarSemana} />
       <div className="weekly-operation__content"><Recepcion integrado semana={semana} /></div>
     </div>;
-    const actual = (paso ?? 'compras') as PasoAdmin;
-    const todos = [...capturas, ...procesoVisible];
+    const actual = (paso ?? 'compras') as AreaAdmin;
+    const todos = [...operacionDiariaVisible, ...controlSemanal];
     if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/compras')} replace />;
     return <div className="page weekly-operation weekly-operation--simple">
       <WeekPicker semana={semana} onChange={cambiarSemana} />
 
-      <nav className="capture-tabs weekly-flow-tabs" aria-label="Flujo semanal">
-        {todos.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{p.numero}</span><strong>{p.label}</strong></NavLink>)}
-      </nav>
+      <div className="weekly-work-areas">
+        <section className="weekly-work-area">
+          <h2 className="weekly-work-area__label">Operación diaria</h2>
+          <nav className="capture-tabs weekly-area-tabs" aria-label="Operación diaria">
+            {operacionDiariaVisible.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
+          </nav>
+        </section>
+        <section className="weekly-work-area">
+          <h2 className="weekly-work-area__label">Control semanal</h2>
+          <nav className="capture-tabs weekly-area-tabs" aria-label="Control semanal">
+            {controlSemanal.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
+          </nav>
+        </section>
+      </div>
 
       <div className="weekly-operation__content">
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}
@@ -94,8 +103,8 @@ export default function SemanaOperacion() {
   return <div className="page weekly-operation weekly-operation--simple weekly-operation--field">
     {permitidos.length > 1 && <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Trabajo del día</span><h1>{tituloRol}</h1></div></header>}
     <WeekPicker semana={semana} onChange={cambiarSemana} />
-    {permitidos.length > 1 && <nav className="capture-tabs capture-tabs--role" aria-label="Trabajo disponible">
-      {permitidos.map((p, i) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{i + 1}</span><strong>{p.label}</strong></NavLink>)}
+    {permitidos.length > 1 && <nav className="capture-tabs capture-tabs--role capture-tabs--plain" aria-label="Trabajo disponible">
+      {permitidos.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
     </nav>}
     <div className="weekly-operation__content">
       {actual === 'ventas' && <Pedidos integrado semana={semana} />}

@@ -4,7 +4,6 @@ import { api, ApiError, getToken, nuevaClaveIdempotencia } from '../../api';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
-import { useOperacionConfig } from '../../operacion-config';
 import CollapsibleSection from '../../components/CollapsibleSection';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 import { useDialog } from '../../dialog';
@@ -65,15 +64,14 @@ const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const diasLargos = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripcion: string }> = {
-  compras: { eyebrow: 'Paso 1', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
-  produccion: { eyebrow: 'Paso 2', titulo: 'Producción', descripcion: 'Captura la materia prima usada y las cajas producidas.' },
+  compras: { eyebrow: 'Control semanal', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
+  produccion: { eyebrow: 'Control semanal', titulo: 'Producción', descripcion: 'Captura la materia prima usada y las cajas producidas.' },
   rutas: { eyebrow: 'Entregas', titulo: 'Rutas', descripcion: 'Orden de entrega por día.' },
-  cierre: { eyebrow: 'Paso 7', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
+  cierre: { eyebrow: 'Control semanal', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
 };
 
 export default function OperacionAdmin({ seccion, integrado = false, semana = crearSemana() }: { seccion: OperacionSeccion; integrado?: boolean; semana?: SemanaSeleccionada }) {
   const toast = useToast();
-  const { repartoHabilitado } = useOperacionConfig();
   const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [cierres, setCierres] = useState<Cierre[]>([]);
@@ -93,7 +91,7 @@ export default function OperacionAdmin({ seccion, integrado = false, semana = cr
   useEffect(() => { setResumen(null); void cargar(); }, [semana.inicio, semana.fin]);
   if (!catalogo || !resumen) return <div className={integrado ? '' : 'page'}><Spinner /><p className="error-msg">{error}</p></div>;
   const semanaCerrada = cierres.some((s) => s.anio === semana.anio && s.semana === semana.numero && s.estado === 'cerrada');
-  const vista = seccion === 'cierre' ? { ...meta.cierre, eyebrow: `Paso ${repartoHabilitado ? 7 : 6}` } : meta[seccion];
+  const vista = meta[seccion];
 
   return (
     <div className={integrado ? 'operation-embedded' : 'page operation-page'}>
