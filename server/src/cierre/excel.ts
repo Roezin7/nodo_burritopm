@@ -35,7 +35,7 @@ async function datos(negocioId: bigint, semanaId: bigint) {
     },
   });
   if (!semana) throw new HttpError(404, 'Semana no encontrada');
-  const [pedidos, compras, comprasPendientes, producciones, snapshot, existenciasVivas, lotesVivos, productos, ubicaciones, facturasHistoricas, ajustes] = await Promise.all([
+  const [pedidos, compras, comprasPendientes, producciones, produccionesExtraordinarias, snapshot, existenciasVivas, lotesVivos, productos, ubicaciones, facturasHistoricas, ajustes] = await Promise.all([
     prisma.pedidos_operativos.findMany({
       where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['borrador', 'cancelado'] } },
       include: { ubicacion: true, empresa: true, lineas: { include: { producto: true, distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } } }, orderBy: { producto: { orden_operativo: 'asc' } } } },
@@ -55,6 +55,10 @@ async function datos(negocioId: bigint, semanaId: bigint) {
     prisma.producciones.findMany({
       where: { negocio_id: negocioId, fecha: { gte: semana.inicia_at, lte: semana.termina_at } },
       include: { materia_prima: true, salidas: { include: { producto: true } } }, orderBy: { fecha: 'asc' },
+    }),
+    prisma.producciones_extraordinarias.findMany({
+      where: { negocio_id: negocioId, fecha: { gte: semana.inicia_at, lte: semana.termina_at } },
+      include: { salidas: { include: { producto: true } } }, orderBy: { fecha: 'asc' },
     }),
     prisma.inventario_semanal.findMany({ where: { semana_id: semana.id }, include: { producto: true, ubicacion: true } }),
     prisma.existencias.findMany({ where: { negocio_id: negocioId }, include: { products: true, ubicaciones: true } }),
@@ -79,7 +83,7 @@ async function datos(negocioId: bigint, semanaId: bigint) {
   const existencias = snapshot.length
     ? snapshot.map((e) => ({ ...e, products: e.producto, ubicaciones: e.ubicacion }))
     : existenciasVivas.map((e) => ({ ...e, peso_total_lb: null, costo_total: null }));
-  return { semana, pedidos, compras, comprasPendientes, producciones, existencias, usaSnapshot: snapshot.length > 0, lotesVivos, productos, ubicaciones, facturasHistoricas, ajustes };
+  return { semana, pedidos, compras, comprasPendientes, producciones, produccionesExtraordinarias, existencias, usaSnapshot: snapshot.length > 0, lotesVivos, productos, ubicaciones, facturasHistoricas, ajustes };
 }
 
 type Datos = Awaited<ReturnType<typeof datos>>;
@@ -382,16 +386,23 @@ const FILA_PRODUCCION: Record<string, number> = {
   'MEAT-CHILE': 17, 'MEAT-DORADO': 19, 'MEAT-CARNITAS': 21, 'MEAT-TAPATIOS-TACO': 23,
 };
 
+function salidasProduccion(d: Datos) {
+  return [
+    ...d.producciones.flatMap((produccion) => produccion.salidas.map((salida) => ({ fecha: produccion.fecha, product_id: salida.product_id, cajas: salida.cajas, producto: salida.producto }))),
+    ...d.produccionesExtraordinarias.flatMap((produccion) => produccion.salidas.map((salida) => ({ fecha: produccion.fecha, product_id: salida.product_id, cajas: salida.cajas, producto: salida.producto }))),
+  ];
+}
+
 function llenarProduccion(wb: ExcelJS.Workbook, d: Datos) {
   const ws = hojaSemana(wb, /^Production \(/, d.semana.semana, `Production (${d.semana.semana})`);
   // Las semanas 27/28 llegaron con saldos y pedidos, pero sin batches históricos en
   // la base. La hoja original es la única fuente completa y no debe vaciarse.
-  if (d.semana.estado === 'cerrada' && d.producciones.length === 0
+  if (d.semana.estado === 'cerrada' && d.producciones.length === 0 && d.produccionesExtraordinarias.length === 0
     && [...new Set(Object.values(FILA_PRODUCCION))].some((row) => numeroCelda(ws.getCell(row, 35)) > 0)) return;
   const carniceria = d.ubicaciones.find((u) => u.codigo === 'CARN');
   const sinCelda = [
     ...d.compras.flatMap((c) => c.lineas.filter((l) => l.producto.tipo_operativo === 'materia_prima' && !GRUPOS_MATERIA[l.producto.sku]).map((l) => `compra / ${l.producto.nombre}`)),
-    ...d.producciones.flatMap((p) => p.salidas.filter((s) => !FILA_PRODUCCION[s.producto.sku]).map((s) => `producción / ${s.producto.nombre}`)),
+    ...salidasProduccion(d).filter((salida) => !FILA_PRODUCCION[salida.producto.sku]).map((salida) => `producción / ${salida.producto.nombre}`),
   ];
   errorCobertura('Production', sinCelda);
   for (const [sku, [inicio, totalRow]] of Object.entries(GRUPOS_MATERIA)) {
@@ -432,10 +443,10 @@ function llenarProduccion(wb: ExcelJS.Workbook, d: Datos) {
     const productos = d.productos.filter((p) => FILA_PRODUCCION[p.sku] === row);
     if (!productos.length) continue;
     const ids = new Set(productos.map((p) => p.id.toString()));
-    const salidas = d.producciones.flatMap((p) => p.salidas.map((s) => ({ fecha: p.fecha, salida: s }))).filter((x) => ids.has(x.salida.product_id.toString()));
+    const salidas = salidasProduccion(d).filter((salida) => ids.has(salida.product_id.toString()));
     const porFecha = [...new Set(salidas.map((x) => iso(x.fecha)))].sort().map((dia) =>
-      salidas.filter((x) => iso(x.fecha) === dia).reduce((a, x) => a + num0(x.salida.cajas), 0));
-    const producido = salidas.reduce((a, x) => a + num0(x.salida.cajas), 0);
+      salidas.filter((x) => iso(x.fecha) === dia).reduce((a, x) => a + num0(x.cajas), 0));
+    const producido = salidas.reduce((a, x) => a + num0(x.cajas), 0);
     const dias = compactarTotales(porFecha, 3);
     for (let i = 0; i < 3; i += 1) ws.getCell(row, 32 + i).value = dias[i] || null;
     ws.getCell(row, 35).value = producido || null;
@@ -727,7 +738,7 @@ function validarSalida(tipo: TipoExcel, wb: ExcelJS.Workbook, d: Datos) {
     escrito = Object.values(COLUMNAS_DESECHABLES).reduce((a, col) => a + Array.from({ length: 52 }, (_, i) => numeroCelda(ws.getCell(i + 2, col))).reduce((x, y) => x + y, 0), 0);
   } else if (tipo === 'production') {
     const ws = hojaSemana(wb, /^Production \(/, d.semana.semana, `Production (${d.semana.semana})`);
-    esperado = d.producciones.flatMap((p) => p.salidas).reduce((a, s) => a + num0(s.cajas), 0);
+    esperado = salidasProduccion(d).reduce((a, salida) => a + num0(salida.cajas), 0);
     escrito = [...new Set(Object.values(FILA_PRODUCCION))].reduce((a, row) => a + numeroCelda(ws.getCell(row, 35)), 0);
     if (esperado === 0 && d.semana.estado === 'cerrada' && escrito > 0) return;
   } else if (tipo === 'billing') {

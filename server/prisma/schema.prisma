@@ -99,6 +99,7 @@ model negocios {
   proveedores         proveedores[]
   compras             compras[]
   producciones        producciones[]
+  producciones_extraordinarias producciones_extraordinarias[]
   semanas_operativas  semanas_operativas[]
   inventario_semanal  inventario_semanal[]
   auditoria_operativa auditoria_operativa[]
@@ -166,6 +167,7 @@ model ubicaciones {
   plantilla_paradas   plantilla_ruta_paradas[]
   compras             compras[]
   producciones        producciones[]
+  producciones_extraordinarias producciones_extraordinarias[]
   facturas            facturas[]
   ajustes_facturacion ajustes_facturacion[]
   lotes_materia_prima lotes_materia_prima[]
@@ -323,6 +325,7 @@ model products {
   compra_lineas        compra_lineas[]
   produccion_materia   producciones[]            @relation("produccion_materia")
   produccion_salidas   produccion_salidas[]
+  produccion_extraordinaria_lineas produccion_extraordinaria_lineas[]
   factura_lineas       factura_lineas[]
   lotes_materia_prima  lotes_materia_prima[]
   inventario_semanal   inventario_semanal[]
@@ -920,6 +923,38 @@ model produccion_salidas {
   produccion producciones @relation(fields: [produccion_id], references: [id], onDelete: Cascade)
   producto   products     @relation(fields: [product_id], references: [id])
 
+  @@index([product_id])
+}
+
+// Capturas excepcionales de productos de precio fijo que se elaboran sin formar
+// parte del costeo, peso o yield de un batch regular de carne.
+model producciones_extraordinarias {
+  id              BigInt   @id @default(autoincrement())
+  negocio_id      BigInt
+  ubicacion_id    BigInt
+  fecha           DateTime @db.Date
+  registrado_por  BigInt
+  creado_at       DateTime @default(now()) @db.Timestamptz(6)
+  notas           String?
+  idempotency_key String?  @unique
+
+  negocio   negocios                           @relation(fields: [negocio_id], references: [id])
+  ubicacion ubicaciones                        @relation(fields: [ubicacion_id], references: [id])
+  salidas   produccion_extraordinaria_lineas[]
+
+  @@index([negocio_id, fecha])
+  @@index([ubicacion_id, fecha])
+}
+
+model produccion_extraordinaria_lineas {
+  produccion_id BigInt
+  product_id    BigInt
+  cajas         Decimal @db.Decimal(12, 3)
+
+  produccion producciones_extraordinarias @relation(fields: [produccion_id], references: [id], onDelete: Cascade)
+  producto   products                     @relation(fields: [product_id], references: [id])
+
+  @@id([produccion_id, product_id])
   @@index([product_id])
 }
 

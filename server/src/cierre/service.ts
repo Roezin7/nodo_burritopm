@@ -284,12 +284,13 @@ type SemanaCierre = Awaited<ReturnType<typeof asegurarSemana>>;
 async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
   // La valuación parte del ledger vivo; una operación posterior haría que la fotografía
   // histórica de esta semana fuera incorrecta.
-  const [comprasPosteriores, produccionesPosteriores, pedidosPosteriores] = await Promise.all([
+  const [comprasPosteriores, produccionesPosteriores, produccionesExtraordinariasPosteriores, pedidosPosteriores] = await Promise.all([
     prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at }, estado: { not: 'cancelada' } } }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at } } }),
+    prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at } } }),
     prisma.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gt: semana.termina_at }, estado: { not: 'cancelado' }, lineas: { some: {} } } }),
   ]);
-  if (comprasPosteriores || produccionesPosteriores || pedidosPosteriores) {
+  if (comprasPosteriores || produccionesPosteriores || produccionesExtraordinariasPosteriores || pedidosPosteriores) {
     throw new HttpError(409, 'Hay operación capturada en una semana posterior. Cierra las semanas en orden para que la fotografía de inventario sea correcta.');
   }
 
@@ -581,16 +582,17 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
   // Una reapertura modifica el ledger vivo. Permitirla detrás de semanas posteriores
   // haría que sus fotografías dejaran de corresponder al saldo actual. Las correcciones
   // históricas deben empezar siempre por la última semana con operación.
-  const [semanaPosterior, comprasPosteriores, produccionesPosteriores, pedidosPosteriores] = await Promise.all([
+  const [semanaPosterior, comprasPosteriores, produccionesPosteriores, produccionesExtraordinariasPosteriores, pedidosPosteriores] = await Promise.all([
     prisma.semanas_operativas.findFirst({
       where: { negocio_id: negocioId, inicia_at: { gt: s.inicia_at }, estado: 'cerrada' },
       orderBy: { inicia_at: 'asc' }, select: { anio: true, semana: true },
     }),
     prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at }, estado: { not: 'cancelada' } } }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at } } }),
+    prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at } } }),
     prisma.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gt: s.termina_at }, estado: { not: 'cancelado' }, lineas: { some: {} } } }),
   ]);
-  if (semanaPosterior || comprasPosteriores || produccionesPosteriores || pedidosPosteriores) {
+  if (semanaPosterior || comprasPosteriores || produccionesPosteriores || produccionesExtraordinariasPosteriores || pedidosPosteriores) {
     const detalle = semanaPosterior ? ` La semana ${semanaPosterior.semana} de ${semanaPosterior.anio} ya está cerrada.` : '';
     throw new HttpError(409, `Solo se puede reabrir la última semana con operación.${detalle} Corrige primero desde la semana más reciente para conservar la trazabilidad.`);
   }

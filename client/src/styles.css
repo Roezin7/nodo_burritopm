@@ -3466,6 +3466,10 @@ form > .form-actions .btn,
 
 .production-capture-head { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 0.9rem; }
 .production-capture-head > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-width: 0; }
+.production-head-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.45rem; }
+.extraordinary-production-modal { width: min(500px, 100%); }
+.extraordinary-production-fields { display: grid; gap: 0.65rem; margin: 1rem 0; }
+.extraordinary-production-modal .form-actions { margin-top: 1rem; }
 .production-day-picker { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; }
 .production-day-picker > span { color: var(--ink-2); font-size: 0.72rem; font-weight: 750; }
 .production-day-picker > div { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.35rem; }
@@ -3528,6 +3532,7 @@ form > .form-actions .btn,
 .batch-list-heading h2 { margin: 0; }
 .batch-list-heading p { margin: 0.18rem 0 0; color: var(--ink-3); font-size: 0.72rem; }
 .batch-card { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; }
+.batch-card--extraordinary { border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
 .batch-card > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; background: var(--surface-2); }
 .batch-card > header > div { display: flex; flex-direction: column; }
 .batch-card > header span { color: var(--ink-3); font-size: 0.76rem; }
@@ -3541,6 +3546,7 @@ form > .form-actions .btn,
 .batch-card.is-collapsed > header { min-height: 64px; }
 .batch-card-detail { border-top: 1px solid var(--border); }
 .yield-pill { align-self: center; padding: 0.3rem 0.6rem; border-radius: 999px; background: var(--info-bg); color: var(--info) !important; font-weight: 750; }
+.yield-pill--extraordinary { background: var(--brand-tint); color: var(--brand) !important; }
 .batch-metrics { display: grid; grid-template-columns: repeat(4, 1fr); padding: 0.8rem 1rem; border-bottom: 1px solid var(--border); }
 .batch-metrics > span { display: flex; flex-direction: column; gap: 0.1rem; padding-right: 0.7rem; }
 .batch-metrics small { color: var(--ink-3); }
@@ -4170,7 +4176,8 @@ form > .form-actions .btn,
 
 @media (max-width: 360px) {
   .production-capture-head > div:first-child { align-items: stretch; flex-direction: column; }
-  .production-capture-head > div:first-child .btn { width: 100%; }
+  .production-head-actions { display: grid; grid-template-columns: 1fr; }
+  .production-head-actions .btn { width: 100%; }
 }
 
 @media print {

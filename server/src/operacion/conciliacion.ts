@@ -74,13 +74,17 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
   });
   const ids = productos.map((p) => p.id);
-  const [existencias, compras, producciones, distribuciones, pedidos, inicial, final, cierreAnterior] = await Promise.all([
+  const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior] = await Promise.all([
     prisma.existencias.findMany({ where: { ubicacion_id: ubicacion.id, product_id: { in: ids } } }),
     prisma.compras.findMany({
       where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, estado: { not: 'cancelada' } },
       include: { lineas: true },
     }),
     prisma.producciones.findMany({
+      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin } },
+      include: { salidas: true },
+    }),
+    prisma.producciones_extraordinarias.findMany({
       where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin } },
       include: { salidas: true },
     }),
@@ -116,6 +120,9 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   }
   for (const p of producciones) {
     sumar(p.materia_prima_id, enPrimerCorte(p.fecha) ? 'produccionEntrada1' : 'produccionEntrada2', num0(p.cajas_materia_prima));
+    for (const s of p.salidas) sumar(s.product_id, enPrimerCorte(p.fecha) ? 'produccionSalida1' : 'produccionSalida2', num0(s.cajas));
+  }
+  for (const p of produccionesExtraordinarias) {
     for (const s of p.salidas) sumar(s.product_id, enPrimerCorte(p.fecha) ? 'produccionSalida1' : 'produccionSalida2', num0(s.cajas));
   }
   for (const d of distribuciones) for (const l of d.lineas) {
@@ -162,7 +169,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
       saldos_provisionales: filas.filter((f) => f.actual < -0.0001).length,
       cajas_perdidas: r3(filas.filter((f) => f.actual < -0.0001).reduce((total, f) => total + Math.abs(f.actual), 0)),
       diferencias_fisicas: filas.filter((f) => f.diferenciaFinal != null && Math.abs(f.diferenciaFinal) > 0.0001).length,
-      producciones: producciones.length,
+      producciones: producciones.length + produccionesExtraordinarias.length,
       pedidos: pedidos.length,
     },
   };
@@ -205,11 +212,12 @@ export async function fijarInventarioInicialSemanal(negocioId: bigint, usuarioId
 }
 
 export async function validarConciliacionParaCierre(negocioId: bigint, desde: string, hasta: string) {
-  const [pedidosCarne, producciones, negativos] = await Promise.all([
+  const [pedidosCarne, producciones, produccionesExtraordinarias, negativos] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) }, estado: { notIn: ['borrador', 'cancelado'] } },
     }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
+    prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
     prisma.existencias.findMany({
       where: { negocio_id: negocioId, ubicaciones: { tipo: 'bodega' }, cantidad_disponible: { lt: 0 } },
       include: { products: { select: { nombre: true } }, ubicaciones: { select: { nombre: true } } },
@@ -223,7 +231,7 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
       cantidad: r3(Math.abs(num0(e.cantidad_disponible))),
     })),
   };
-  if (!pedidosCarne && !producciones) return alertaNegativos;
+  if (!pedidosCarne && !producciones && !produccionesExtraordinarias) return alertaNegativos;
   const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
   if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
   // El físico final es una auditoría opcional. El cierre usa el saldo vivo que ya integra

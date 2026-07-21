@@ -22,6 +22,8 @@ const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 export const MARKUP_PROTEINA = 15;
+export const SKUS_PRODUCCION_EXTRAORDINARIA = ['MEAT-TAMAL', 'MEAT-ADOBO', 'MEAT-DORADO'] as const;
+const skusProduccionExtraordinaria = new Set<string>(SKUS_PRODUCCION_EXTRAORDINARIA);
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
@@ -193,6 +195,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       precio_pendiente: Boolean(rangoPrecio && p.tipo_operativo === 'proteina' && preciosSemana?.get(p.id.toString()) == null),
       precio_fijo: esAdmin ? num(p.precio_venta_fijo) : undefined, markup: esAdmin ? (p.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : num0(p.markup_caja)) : undefined,
       peso_caja_lb: num(p.peso_caja_lb), produccion_dias: p.produccion_dias,
+      produccion_extraordinaria: skusProduccionExtraordinaria.has(p.sku),
       es_cargo_compra: esAdmin ? p.es_cargo_compra : undefined,
     })),
     proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre })) : [],
@@ -1869,6 +1872,149 @@ export async function registrarProduccion(negocioId: bigint, usuarioId: bigint, 
   return resultado.producciones[0]!;
 }
 
+export interface ProduccionExtraordinariaInput {
+  ubicacion_id: number;
+  fecha: string;
+  notas?: string | null;
+  idempotency_key?: string;
+  salidas: { product_id: number; cajas: number }[];
+}
+
+const firmaProduccionExtraordinaria = (salidas: ProduccionExtraordinariaInput['salidas']) =>
+  salidas.map((salida) => `${salida.product_id}:${r3(salida.cajas)}`).sort();
+
+/** Registra producto terminado de precio fijo sin inventar materia prima, costo o yield. */
+export async function registrarProduccionExtraordinaria(
+  negocioId: bigint,
+  usuarioId: bigint,
+  input: ProduccionExtraordinariaInput,
+) {
+  await asegurarSemanaEditable(negocioId, input.fecha);
+  if (!input.salidas.length || input.salidas.some((salida) => salida.cajas <= 0)) {
+    throw new HttpError(400, 'Captura al menos una cantidad extraordinaria válida');
+  }
+  const ids = input.salidas.map((salida) => BigInt(salida.product_id));
+  if (new Set(ids.map(String)).size !== ids.length) throw new HttpError(400, 'La captura contiene productos repetidos');
+  const ubicacionId = BigInt(input.ubicacion_id);
+  const ubicacion = await prisma.ubicaciones.findFirst({
+    where: { id: ubicacionId, negocio_id: negocioId, codigo: 'CARN', tipo: 'bodega', activo: true },
+    select: { id: true },
+  });
+  if (!ubicacion) throw new HttpError(400, 'La producción extraordinaria solo puede registrarse en Carnicería');
+  await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
+
+  const ejecutar = () => transaccionSerializable(async (tx) => {
+    const productos = await tx.products.findMany({
+      where: {
+        id: { in: ids }, negocio_id: negocioId, activo: true, linea_operacion: 'carne',
+        tipo_operativo: 'precio_fijo', sku: { in: [...SKUS_PRODUCCION_EXTRAORDINARIA] },
+      },
+    });
+    if (productos.length !== ids.length || productos.some((producto) => producto.precio_venta_fijo == null)) {
+      throw new HttpError(400, 'Solo Tamal Rojo, Adobo Picadillo y Taco Dorado con precio fijo admiten esta captura');
+    }
+
+    const existente = input.idempotency_key
+      ? await tx.producciones_extraordinarias.findUnique({ where: { idempotency_key: input.idempotency_key }, include: { salidas: true } })
+      : null;
+    if (existente) {
+      const coincide = existente.negocio_id === negocioId
+        && existente.registrado_por === usuarioId
+        && existente.ubicacion_id === ubicacionId
+        && existente.fecha.getTime() === fecha(input.fecha).getTime()
+        && (existente.notas ?? null) === (input.notas ?? null)
+        && JSON.stringify(firmaProduccionExtraordinaria(existente.salidas.map((salida) => ({ product_id: Number(salida.product_id), cajas: num0(salida.cajas) }))))
+          === JSON.stringify(firmaProduccionExtraordinaria(input.salidas));
+      if (!coincide) throw new HttpError(409, 'Esta llave ya fue usada por una producción extraordinaria diferente');
+      return existente;
+    }
+
+    const produccion = await tx.producciones_extraordinarias.create({
+      data: {
+        negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(input.fecha), registrado_por: usuarioId,
+        notas: input.notas, idempotency_key: input.idempotency_key,
+      },
+    });
+    await tx.produccion_extraordinaria_lineas.createMany({
+      data: input.salidas.map((salida) => ({ produccion_id: produccion.id, product_id: BigInt(salida.product_id), cajas: r3(salida.cajas) })),
+    });
+    for (const [indice, salida] of input.salidas.entries()) {
+      const producto = productos.find((item) => item.id === BigInt(salida.product_id))!;
+      await aplicarMovimiento(tx, {
+        negocioId, productId: producto.id, tipo: 'ajuste_positivo', cantidad: salida.cajas, usuarioId,
+        destinoId: ubicacionId, documentoTipo: 'produccion_extraordinaria', documentoId: produccion.id,
+        costoUnitario: 0,
+        comentario: `Producción extraordinaria sin costo · ${producto.nombre}`,
+        idempotencyKey: `produccion-extraordinaria:${produccion.id}:salida:${indice}`,
+        deltas: [{ ubicacionId, productId: producto.id, disponible: salida.cajas, costoUnitario: 0 }],
+      });
+    }
+    return { ...produccion, salidas: input.salidas };
+  });
+
+  let produccion;
+  try {
+    produccion = await ejecutar();
+  } catch (error) {
+    if (!input.idempotency_key || !esErrorPrisma(error, 'P2002')) throw error;
+    produccion = await ejecutar();
+  }
+  return { id: Number(produccion.id), salidas: input.salidas.length };
+}
+
+export async function eliminarProduccionExtraordinaria(negocioId: bigint, produccionId: bigint, usuarioId: bigint) {
+  const produccion = await prisma.producciones_extraordinarias.findFirst({
+    where: { id: produccionId, negocio_id: negocioId }, include: { salidas: true },
+  });
+  if (!produccion) throw new HttpError(404, 'Producción extraordinaria no encontrada');
+  await asegurarSemanaEditable(negocioId, iso(produccion.fecha));
+  const semana = rangoSemana(iso(produccion.fecha));
+  const inventarioFinal = await prisma.conteos.findFirst({
+    where: {
+      negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id,
+      fecha: { gte: fecha(semana.desde), lte: fecha(semana.hasta) }, notas: { startsWith: 'inventario_final_operativo' },
+    },
+    select: { id: true },
+  });
+  if (inventarioFinal) throw new HttpError(409, 'Elimina primero el inventario final de la semana para corregir esta producción.');
+
+  await transaccionSerializable(async (tx) => {
+    for (const salida of produccion.salidas) {
+      const existencia = await tx.existencias.findUnique({
+        where: { ubicacion_id_product_id: { ubicacion_id: produccion.ubicacion_id, product_id: salida.product_id } },
+      });
+      const cantidadActual = num0(existencia?.cantidad_disponible);
+      const cantidadNueva = r3(cantidadActual - num0(salida.cajas));
+      const costoActual = num(existencia?.costo_promedio);
+      const costoRestante = cantidadNueva > 0 && costoActual != null
+        ? r4((Math.max(0, cantidadActual) * costoActual) / cantidadNueva)
+        : null;
+      await tx.existencias.upsert({
+        where: { ubicacion_id_product_id: { ubicacion_id: produccion.ubicacion_id, product_id: salida.product_id } },
+        create: {
+          negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id, product_id: salida.product_id,
+          cantidad_disponible: -num0(salida.cajas), costo_promedio: null,
+        },
+        update: { cantidad_disponible: cantidadNueva, costo_promedio: costoRestante },
+      });
+    }
+    await tx.movimientos_inventario.deleteMany({
+      where: { negocio_id: negocioId, documento_tipo: 'produccion_extraordinaria', documento_id: produccion.id },
+    });
+    await tx.producciones_extraordinarias.delete({ where: { id: produccion.id } });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar', entidad: 'produccion_extraordinaria', entidad_id: produccion.id,
+        datos: {
+          fecha: iso(produccion.fecha),
+          salidas: produccion.salidas.map((salida) => ({ product_id: Number(salida.product_id), cajas: num0(salida.cajas) })),
+        },
+      },
+    });
+  });
+  return { ok: true, produccion_id: Number(produccion.id), salidas_revertidas: produccion.salidas.length };
+}
+
 /** Revierte un batch capturado con error. Las salidas pueden dejar saldo provisional negativo
  * si ya fueron despachadas; la conciliación semanal muestra ese faltante hasta recapturarlo. */
 export async function eliminarProduccion(negocioId: bigint, produccionId: bigint, usuarioId: bigint) {
@@ -1954,10 +2100,15 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
 
 export async function resumenProduccion(negocioId: bigint, desde?: string, hasta?: string) {
   const rango = desde || hasta ? { gte: desde ? fecha(desde) : undefined, lte: hasta ? fecha(hasta) : undefined } : undefined;
-  const [compras, totalCompras, producciones, lotes] = await Promise.all([
+  const [compras, totalCompras, producciones, extraordinarias, lotes] = await Promise.all([
     prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
     prisma.compras.aggregate({ where: { negocio_id: negocioId, fecha: rango }, _sum: { total: true }, _count: { id: true } }),
     prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: { include: { unidad_distribucion: true } } } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }] }),
+    prisma.producciones_extraordinarias.findMany({
+      where: { negocio_id: negocioId, fecha: rango },
+      include: { salidas: { include: { producto: { include: { unidad_distribucion: true } } } } },
+      orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+    }),
     prisma.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 }, producto: { tipo_operativo: 'materia_prima' } }, include: { producto: true }, orderBy: [{ congelado: 'asc' }, { fecha: 'asc' }] }),
   ]);
   const proteinas = new Map<string, { product_id: number; producto: string; orden: number; cajas: number; costo_total: number }>();
@@ -1977,6 +2128,19 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
       product_id: p.product_id, producto: p.producto, ...calculo,
     };
   });
+  const historialProducciones = [
+    ...producciones.map((p) => ({
+      id: Number(p.id), token: `regular-${p.id}`, extraordinaria: false, fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre,
+      cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb),
+      desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), notas: p.notas,
+      salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, tipo: s.producto.tipo_operativo, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: num0(s.precio_venta_caja) })),
+    })),
+    ...extraordinarias.map((p) => ({
+      id: Number(p.id), token: `extraordinaria-${p.id}`, extraordinaria: true, fecha: iso(p.fecha), materia_prima: 'Producción extraordinaria',
+      cajas_entrada: 0, peso_entrada_lb: 0, peso_salida_lb: 0, desperdicio_lb: 0, yield: 0, costo: 0, notas: p.notas,
+      salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, tipo: s.producto.tipo_operativo, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: 0, precio: num0(s.producto.precio_venta_fijo) })),
+    })),
+  ].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.token.localeCompare(a.token));
   return {
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
@@ -1985,7 +2149,7 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
     // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.
-    producciones: producciones.map((p) => ({ id: Number(p.id), fecha: iso(p.fecha), materia_prima: p.materia_prima.nombre, cajas_entrada: num0(p.cajas_materia_prima), peso_entrada_lb: num0(p.peso_entrada_lb), peso_salida_lb: num0(p.peso_salida_lb), desperdicio_lb: num0(p.desperdicio_lb), yield: num0(p.yield_porcentaje), costo: num0(p.costo_entrada), salidas: p.salidas.map((s) => ({ producto: s.producto.nombre, sku: s.producto.sku, tipo: s.producto.tipo_operativo, unidad: s.producto.unidad_distribucion.nombre, cajas: num0(s.cajas), costo_caja: num0(s.costo_caja), precio: num0(s.precio_venta_caja) })) })),
+    producciones: historialProducciones,
     lotes: lotes.map((l) => ({ id: Number(l.id), fecha: iso(l.fecha), producto: l.producto.nombre, product_id: Number(l.product_id), cajas: num0(l.cajas_disponibles), peso_lb: num0(l.peso_disponible_lb), costo: num0(l.costo_disponible), congelado: l.congelado })),
   };
 }

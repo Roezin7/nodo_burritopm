@@ -125,7 +125,7 @@ dashboardRouter.get(
     const semana = await prisma.semanas_operativas.findUnique({
       where: { negocio_id_anio_semana: { negocio_id: negocioId, anio: periodo.anio, semana: periodo.semana } },
     });
-    const [empresas, facturasSemana, pedidos, existenciasVivas, snapshot, lotes, facturasPendientes, comprasPendientes, producciones, comprasSemana, distribuciones, parametros] = await Promise.all([
+    const [empresas, facturasSemana, pedidos, existenciasVivas, snapshot, lotes, facturasPendientes, comprasPendientes, producciones, produccionesExtraordinarias, comprasSemana, distribuciones, parametros] = await Promise.all([
       prisma.empresas_clientes.findMany({ where: { negocio_id: negocioId, activo: true }, orderBy: { codigo: 'asc' } }),
       semana ? prisma.facturas.findMany({
         where: { semana_id: semana.id, estado: { not: 'anulada' } },
@@ -154,6 +154,10 @@ dashboardRouter.get(
       }),
       prisma.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' } }),
       prisma.producciones.findMany({
+        where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado } },
+        include: { salidas: true },
+      }),
+      prisma.producciones_extraordinarias.findMany({
         where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado } },
         include: { salidas: true },
       }),
@@ -236,7 +240,8 @@ dashboardRouter.get(
 
     const pesoEntrada = producciones.reduce((a, p) => a + num0(p.peso_entrada_lb), 0);
     const pesoSalida = producciones.reduce((a, p) => a + num0(p.peso_salida_lb), 0);
-    const cajasProduccion = producciones.reduce((a, p) => a + p.salidas.reduce((x, s) => x + num0(s.cajas), 0), 0);
+    const cajasProduccion = producciones.reduce((a, p) => a + p.salidas.reduce((x, s) => x + num0(s.cajas), 0), 0)
+      + produccionesExtraordinarias.reduce((a, p) => a + p.salidas.reduce((x, s) => x + num0(s.cajas), 0), 0);
     const costoProduccion = producciones.reduce((a, p) => a + num0(p.costo_entrada), 0);
     const comprasTotal = comprasSemana.reduce((a, c) => a + num0(c.total), 0);
     const paradasPendientes = negocio?.reparto_habilitado

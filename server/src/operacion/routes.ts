@@ -203,6 +203,24 @@ operacionRouter.post('/produccion/lote', soloAdmin, asyncHandler(async (req, res
   res.status(201).json(await svc.registrarProducciones(req.auth!.negocioId, req.auth!.usuarioId, b.producciones));
 }));
 
+const produccionExtraordinariaSchema = z.object({
+  ubicacion_id: id,
+  fecha,
+  notas: z.string().trim().max(500).nullable().optional(),
+  idempotency_key: idempotencyKey.optional(),
+  salidas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive().max(100_000) })).min(1).max(3),
+});
+
+/** Producto terminado de precio fijo, sin materia prima, costo ni yield contable. */
+operacionRouter.post('/produccion-extraordinaria', soloAdmin, asyncHandler(async (req, res) => {
+  const b = produccionExtraordinariaSchema.parse(req.body);
+  res.status(201).json(await svc.registrarProduccionExtraordinaria(req.auth!.negocioId, req.auth!.usuarioId, b));
+}));
+
+operacionRouter.delete('/produccion-extraordinaria/:id', soloAdmin, asyncHandler(async (req, res) => {
+  res.json(await svc.eliminarProduccionExtraordinaria(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+}));
+
 /** Elimina un batch incorrecto y revierte materia prima, salidas y movimientos. */
 operacionRouter.delete('/produccion/:id', soloAdmin, asyncHandler(async (req, res) => {
   res.json(await svc.eliminarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
