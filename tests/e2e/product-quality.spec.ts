@@ -11,11 +11,14 @@ const tieneDemo = process.env.SEED_DEMO === '1' || Boolean(process.env.CI);
 async function entrar(page: Page, nombre: string, pin: string) {
   await page.addInitScript(() => {
     sessionStorage.setItem('bpm-splash', '1');
-    localStorage.removeItem('bpm_token');
-    localStorage.removeItem('bpm_ultimo_usuario');
+    if (!sessionStorage.getItem('bpm-e2e-storage-ready')) {
+      localStorage.removeItem('bpm_token');
+      localStorage.removeItem('bpm_ultimo_usuario');
+      sessionStorage.setItem('bpm-e2e-storage-ready', '1');
+    }
   });
   await page.goto('/');
-  await page.getByRole('button', { name: new RegExp(`^${nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`) }).click();
+  await page.getByRole('button', { name: nombre, exact: true }).click();
   for (const digito of pin) await page.getByRole('button', { name: digito, exact: true }).click();
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.locator('#main-content')).toBeVisible();

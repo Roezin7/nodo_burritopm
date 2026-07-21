@@ -56,8 +56,8 @@ export default function Login() {
         <p className="subtitle">¿Quién eres?</p>
 
         {ultimo && (
-          <button className="login-ultimo" onClick={() => setSel(ultimo)}>
-            <span className="avatar-sm">{ultimo.nombre[0]}</span>
+          <button className="login-ultimo" aria-label={`Continuar como ${ultimo.nombre}`} onClick={() => setSel(ultimo)}>
+            <span className="avatar-sm" aria-hidden="true">{ultimo.nombre[0]}</span>
             <span className="login-ultimo-text">
               <small className="muted">Continuar como</small>
               <strong>{ultimo.nombre}</strong>
@@ -79,8 +79,8 @@ export default function Login() {
         )}
         <div className="user-list">
           {lista.map((u) => (
-            <button key={u.id} className="user-row" onClick={() => setSel(u)}>
-              <span className="avatar-sm">{u.nombre[0]}</span>
+            <button key={u.id} className="user-row" aria-label={u.nombre} onClick={() => setSel(u)}>
+              <span className="avatar-sm" aria-hidden="true">{u.nombre[0]}</span>
               <span className="user-row-name">{u.nombre}</span>
               <small className="muted">{rolLabel(u.rol)}</small>
             </button>
