@@ -16,7 +16,7 @@ interface Item {
   ruta: string;
   label: string;
   icono: Parameters<typeof Icono>[0]['name'];
-  grupo: 'general' | 'captura' | 'proceso' | 'sistema';
+  grupo: 'general' | 'operacion_diaria' | 'control_semanal' | 'administracion';
   soloAdmin?: boolean;
   roles?: Rol[]; // si se define, solo estos roles ven el ítem
   requiereReparto?: boolean;
@@ -24,24 +24,24 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/semana/compras', label: 'Compras', icono: 'cart', grupo: 'captura', soloAdmin: true },
-  { ruta: '/semana/produccion', label: 'Producción', icono: 'factory', grupo: 'captura', soloAdmin: true },
-  { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'captura', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'proceso', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
-  { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'proceso', roles: ['encargado_sucursal'], requiereReparto: true },
-  { ruta: '/semana/inventario', label: 'Inventario', icono: 'boxes', grupo: 'proceso', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/semana/cierre', label: 'Cierre', icono: 'checks', grupo: 'proceso', soloAdmin: true },
-  { ruta: '/facturacion', label: 'Facturación', icono: 'wallet', grupo: 'sistema', soloAdmin: true },
-  { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'sistema', soloAdmin: true },
-  { ruta: '/semana/recepcion', label: 'Auditoría', icono: 'checks', grupo: 'sistema', soloAdmin: true },
+  { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'operacion_diaria', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'operacion_diaria', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'operacion_diaria', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
+  { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'operacion_diaria', roles: ['encargado_sucursal'], requiereReparto: true },
+  { ruta: '/semana/compras', label: 'Compras', icono: 'cart', grupo: 'control_semanal', soloAdmin: true },
+  { ruta: '/semana/produccion', label: 'Producción', icono: 'factory', grupo: 'control_semanal', soloAdmin: true },
+  { ruta: '/semana/inventario', label: 'Inventario', icono: 'boxes', grupo: 'control_semanal', roles: ['admin', 'encargado_bodega'] },
+  { ruta: '/semana/cierre', label: 'Cierre', icono: 'checks', grupo: 'control_semanal', soloAdmin: true },
+  { ruta: '/facturacion', label: 'Facturación', icono: 'wallet', grupo: 'administracion', soloAdmin: true },
+  { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'administracion', soloAdmin: true },
+  { ruta: '/semana/recepcion', label: 'Auditoría', icono: 'checks', grupo: 'administracion', soloAdmin: true },
 ];
 
 const GRUPOS = [
   { clave: 'general', label: 'General' },
-  { clave: 'captura', label: 'Captura' },
-  { clave: 'proceso', label: 'Proceso' },
-  { clave: 'sistema', label: 'Control' },
+  { clave: 'operacion_diaria', label: 'Operación diaria' },
+  { clave: 'control_semanal', label: 'Control semanal' },
+  { clave: 'administracion', label: 'Administración' },
 ] as const;
 
 // En móvil mostramos pocas pestañas y el resto en una hoja "Más" (accesible al pulgar).
