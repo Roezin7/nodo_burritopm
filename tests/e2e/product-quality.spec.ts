@@ -90,6 +90,27 @@ test('admin manipula pedidos masivos con teclado como hoja de cálculo', async (
   await expect(celdas.nth(1)).toHaveValue('12');
 });
 
+test('producción mantiene alineados los siete días y aprovecha el ancho disponible', async ({ page }, testInfo) => {
+  test.skip(!tieneDemo, 'Requiere la base de datos demo aislada usada por CI.');
+  test.skip(testInfo.project.name !== 'desktop-chromium', 'La distribución amplia se valida en escritorio.');
+  await entrar(page, 'Admin', '1234');
+  await page.goto('/semana/produccion');
+  const captura = page.locator('.production-capture');
+  await expect(captura).toBeVisible();
+
+  const dias = captura.locator('.production-day-picker button');
+  await expect(dias).toHaveCount(7);
+  const posiciones = await dias.evaluateAll((botones) => botones.map((boton) => boton.getBoundingClientRect().top));
+  expect(Math.max(...posiciones) - Math.min(...posiciones)).toBeLessThan(2);
+
+  const aprovechamiento = await captura.evaluate((elemento) => {
+    const contenedor = elemento.querySelector('.production-drafts')?.getBoundingClientRect();
+    const borrador = elemento.querySelector('.production-draft')?.getBoundingClientRect();
+    return contenedor && borrador ? borrador.width / contenedor.width : 0;
+  });
+  expect(aprovechamiento).toBeGreaterThan(0.95);
+});
+
 test('acceso público: identidad, adaptación y accesibilidad', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     sessionStorage.setItem('bpm-splash', '1');

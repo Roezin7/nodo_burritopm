@@ -3464,18 +3464,18 @@ form > .form-actions .btn,
   .purchase-record__detail > summary { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
 
-.production-capture-head { align-items: end; }
-.production-capture-head > div:first-child { flex: 1; min-width: 220px; }
-.production-day-picker { display: flex; flex-direction: column; gap: 0.35rem; width: min(670px, 100%); }
+.production-capture-head { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 0.9rem; }
+.production-capture-head > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-width: 0; }
+.production-day-picker { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; }
 .production-day-picker > span { color: var(--ink-2); font-size: 0.72rem; font-weight: 750; }
-.production-day-picker > div { display: grid; grid-template-columns: repeat(6, minmax(76px, 1fr)); gap: 0.35rem; }
+.production-day-picker > div { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.35rem; }
 .production-day-picker button { display: flex; align-items: center; justify-content: center; flex-direction: column; min-height: 54px; padding: 0.35rem 0.45rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink-2); }
 .production-day-picker button:hover { border-color: var(--brand); color: var(--ink); }
 .production-day-picker button strong { font-size: 0.76rem; }
 .production-day-picker button small { margin-top: 0.05rem; color: var(--ink-3); font-size: 0.62rem; font-weight: 600; text-transform: capitalize; }
 .production-day-picker button.is-active { border-color: var(--brand); background: var(--brand); color: white; box-shadow: var(--sh-sm); }
 .production-day-picker button.is-active small { color: color-mix(in srgb, white 78%, transparent); }
-.production-drafts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+.production-drafts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 620px), 1fr)); gap: 0.85rem; }
 .production-draft { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .production-draft.is-alert { border-color: var(--danger); }
 .production-draft > header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.8rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--surface-2); }
@@ -3606,6 +3606,13 @@ form > .form-actions .btn,
 .weekly-sales-toolbar-actions { display: flex; gap: 0.45rem; }
 .weekly-sales-sheets { display: flex; flex-direction: column; gap: 1rem; }
 .weekly-sales-sheet { padding: 0; overflow: hidden; }
+.weekly-sales-sheet--complete { border-color: color-mix(in srgb, var(--success) 58%, var(--border)); }
+.weekly-sales-sheet--complete > summary { background: var(--success-bg); }
+.weekly-sales-sheet--complete > summary:hover { background: color-mix(in srgb, var(--success) 16%, var(--surface)); }
+.weekly-sales-sheet--complete > summary .collapsible-section__title strong,
+.weekly-sales-sheet--complete > summary .collapsible-section__meta { color: var(--success); }
+.weekly-sales-sheet--complete > summary .collapsible-section__title small { color: color-mix(in srgb, var(--success) 76%, var(--ink-2)); }
+.weekly-sales-sheet--complete > summary .collapsible-section__meta b { background: color-mix(in srgb, var(--success) 50%, #08351c); color: white; }
 .weekly-sales-sheet .collapsible-section__body { padding: 0; }
 .weekly-sales-sheet .collapsible-section__body > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.65rem 1rem; border-bottom: 2px solid var(--ink); background: var(--surface-2); }
 .weekly-sales-sheet .collapsible-section__body > header > div { display: flex; flex-direction: column; min-width: 0; }
@@ -4076,6 +4083,7 @@ form > .form-actions .btn,
   .weekly-sales-toolbar-actions { justify-content: flex-end; }
   .production-capture-head, .production-capture-summary { align-items: stretch; flex-direction: column; }
   .production-day-picker { width: 100%; }
+  .production-day-picker > div { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .production-capture-summary > .btn { width: 100%; }
   .billing-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .billing-toolbar { grid-template-columns: 1fr 1fr; }
@@ -4158,6 +4166,11 @@ form > .form-actions .btn,
   .dispatch-page-head .page-actions { grid-template-columns: 1fr; }
   .dispatch-route-card > header { align-items: stretch; flex-direction: column; }
   .dispatch-route-card > header .btn { width: 100%; }
+}
+
+@media (max-width: 360px) {
+  .production-capture-head > div:first-child { align-items: stretch; flex-direction: column; }
+  .production-capture-head > div:first-child .btn { width: 100%; }
 }
 
 @media print {
@@ -4259,6 +4272,13 @@ form > .form-actions .btn,
 .capture-tabs a.is-active { border-color: color-mix(in srgb, var(--brand) 48%, var(--border)); color: var(--brand); background: var(--brand-tint); }
 .capture-tabs a.is-active > span { color: white; background: var(--brand); }
 .capture-tabs--role { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); max-width: none; }
+.capture-tabs--plain a { justify-content: center; }
+.weekly-work-areas { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 4fr); gap: 0.85rem; margin-bottom: 1rem; }
+.weekly-work-area { min-width: 0; padding: 0.7rem; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.weekly-work-area__label { margin: 0 0 0.5rem; color: var(--ink-3); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; }
+.weekly-work-area .capture-tabs { max-width: none; margin: 0; }
+.weekly-area-tabs { display: flex; overflow-x: auto; padding-bottom: 0.1rem; }
+.weekly-area-tabs a { flex: 1 0 104px; justify-content: center; min-height: 44px; padding: 0.5rem 0.7rem; text-align: center; }
 .weekly-flow-tabs { display: flex; max-width: none; overflow-x: auto; padding-bottom: 0.2rem; }
 .weekly-flow-tabs a { flex: 0 0 auto; min-width: 118px; min-height: 44px; padding: 0.5rem 0.65rem; }
 
@@ -4270,6 +4290,7 @@ form > .form-actions .btn,
   .configuration-nav > div > span, .configuration-nav button small { display: none; }
   .configuration-nav button { flex: 0 0 auto; width: auto; padding: 0.55rem 0.75rem; white-space: nowrap; }
   .weekly-operation__head { grid-template-columns: 1fr; gap: 0.7rem; }
+  .weekly-work-areas { grid-template-columns: 1fr; }
   .global-week-picker { grid-template-columns: auto minmax(0, 1fr) auto; }
   .global-week-summary { grid-column: 1 / 3; grid-row: 2; padding-left: 0; border-left: 0; }
   .global-week-picker > .btn { grid-column: 3; grid-row: 2; min-width: 0; }
@@ -4290,6 +4311,7 @@ form > .form-actions .btn,
   .weekly-next { justify-content: space-between; }
   .capture-tabs { grid-template-columns: repeat(3, minmax(92px, 1fr)); overflow-x: auto; }
   .capture-tabs a { flex-direction: column; gap: 0.25rem; text-align: center; }
+  .weekly-area-tabs a, .capture-tabs--plain a { flex-direction: row; }
   .weekly-flow-tabs { display: flex; grid-template-columns: none; }
   .weekly-flow-tabs a { flex-direction: row; min-width: 112px; text-align: left; }
   .global-week-picker { padding: 0.55rem; }
