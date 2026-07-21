@@ -76,18 +76,22 @@ test('admin manipula pedidos masivos con teclado como hoja de cálculo', async (
   expect(await celdas.count()).toBeGreaterThan(2);
 
   await celdas.nth(0).fill('11');
+  const filaInicial = Number(await celdas.nth(0).getAttribute('data-grid-row'));
+  const columnaInicial = Number(await celdas.nth(0).getAttribute('data-grid-column'));
+  const celdaAbajo = primeraFecha.locator(`input[data-grid-mode="desktop"][data-grid-row="${filaInicial + 1}"][data-grid-column="${columnaInicial}"]:not(:disabled)`);
   await celdas.nth(0).press('Enter');
-  await expect(celdas.nth(1)).toBeFocused();
-  await celdas.nth(1).fill('12');
+  await expect(celdaAbajo).toBeFocused();
+  await celdaAbajo.fill('12');
+  const celdaDerecha = primeraFecha.locator(`input[data-grid-mode="desktop"][data-grid-row="${filaInicial + 1}"][data-grid-column="${columnaInicial + 1}"]:not(:disabled)`);
   await page.keyboard.down('Shift');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.up('Shift');
-  await expect(celdas.nth(2)).toBeFocused();
+  await expect(celdaDerecha).toBeFocused();
   await page.keyboard.press('Delete');
-  await expect(celdas.nth(1)).toHaveValue('');
-  await expect(celdas.nth(2)).toHaveValue('');
+  await expect(celdaAbajo).toHaveValue('');
+  await expect(celdaDerecha).toHaveValue('');
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
-  await expect(celdas.nth(1)).toHaveValue('12');
+  await expect(celdaAbajo).toHaveValue('12');
 });
 
 test('producción mantiene alineados los siete días y aprovecha el ancho disponible', async ({ page }, testInfo) => {

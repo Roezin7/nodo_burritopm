@@ -360,9 +360,12 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
       return;
     }
 
-    const esAvance = evento.key === 'Enter' || evento.key === 'Tab';
+    const esEnter = evento.key === 'Enter';
     const esFlecha = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(evento.key);
-    if (!esAvance && !esFlecha) return;
+    if (!esEnter && !esFlecha) return;
+    // En las tarjetas móviles no existe una matriz horizontal. Dejamos izquierda,
+    // derecha, Inicio y Fin al comportamiento nativo del campo.
+    if (modo === 'mobile' && !esEnter && !['ArrowUp', 'ArrowDown'].includes(evento.key)) return;
     evento.preventDefault();
     const fecha = evento.currentTarget.dataset.gridDate;
     const celdas = [...document.querySelectorAll<HTMLInputElement>(`input[data-grid-mode="${modo}"][data-weekly-matrix-input]:not(:disabled)`)]
@@ -371,21 +374,24 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     const actual = celdas.indexOf(evento.currentTarget);
     if (actual < 0) return;
     let siguiente: HTMLInputElement | undefined;
-    if (modo === 'mobile' || esAvance) {
-      siguiente = celdas[actual + (evento.shiftKey ? -1 : 1)];
+    if (modo === 'mobile') {
+      if (esEnter || evento.key === 'ArrowDown') siguiente = celdas[actual + 1];
+      else if (evento.key === 'ArrowUp') siguiente = celdas[actual - 1];
+      else return;
     } else {
       const fila = Number(evento.currentTarget.dataset.gridRow);
       const columna = Number(evento.currentTarget.dataset.gridColumn);
       const candidatas = celdas.filter((input) => {
         const otraFila = Number(input.dataset.gridRow);
         const otraColumna = Number(input.dataset.gridColumn);
+        if (esEnter) return otraColumna === columna && (evento.shiftKey ? otraFila < fila : otraFila > fila);
         if (evento.key === 'ArrowLeft') return otraFila === fila && otraColumna < columna;
         if (evento.key === 'ArrowRight') return otraFila === fila && otraColumna > columna;
         if (evento.key === 'ArrowUp') return otraColumna === columna && otraFila < fila;
         if (evento.key === 'ArrowDown') return otraColumna === columna && otraFila > fila;
         return otraFila === fila;
       });
-      if (evento.key === 'ArrowLeft' || evento.key === 'ArrowUp' || evento.key === 'End') siguiente = candidatas.at(-1);
+      if ((esEnter && evento.shiftKey) || evento.key === 'ArrowLeft' || evento.key === 'ArrowUp' || evento.key === 'End') siguiente = candidatas.at(-1);
       else siguiente = candidatas[0];
     }
     if (!siguiente) return;
@@ -494,7 +500,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
     <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de {linea}</span><strong>{usd(importe)}</strong></div></div>
     <div className="matrix-edit-guide" role="note">
-      <span><strong>Captura rápida:</strong> Enter avanza por columnas · flechas para navegar · Shift extiende · Delete borra · ⌘/Ctrl+C, V y Z funcionan como en Excel.</span>
+      <span><strong>Captura rápida:</strong> Enter baja en la misma columna · flechas para navegar · Shift extiende · Delete borra · ⌘/Ctrl+C, V y Z funcionan como en Excel.</span>
       {seleccion && <div><b>{celdasEnSeleccion} {celdasEnSeleccion === 1 ? 'celda seleccionada' : 'celdas seleccionadas'}</b><button type="button" className="link-btn txt-danger" disabled={semanaCerrada} onClick={borrarSeleccion}>Borrar selección</button><button type="button" className="link-btn" onClick={() => setSeleccion(null)}>Cancelar</button></div>}
     </div>
     {cargando ? <Spinner label="Cargando semana…" /> : <div className="weekly-sales-sheets">{fechasVisibles.map((fechaEntrega, fechaIndice) => {
