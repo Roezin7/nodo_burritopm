@@ -962,6 +962,9 @@ model inventario_semanal {
   ubicacion_id        BigInt
   product_id          BigInt
   cantidad_disponible Decimal  @db.Decimal(12, 3)
+  // Déficit detectado al cerrar. Se conserva en la semana histórica aunque el
+  // saldo operativo de la semana siguiente comience en cero.
+  cantidad_faltante   Decimal  @default(0) @db.Decimal(12, 3)
   cantidad_reservada  Decimal  @db.Decimal(12, 3)
   cantidad_transito   Decimal  @db.Decimal(12, 3)
   costo_promedio      Decimal? @db.Decimal(12, 4)

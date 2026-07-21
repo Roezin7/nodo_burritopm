@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, numeroFactura } from './service.js';
+import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, numeroFactura, saldoParaCierreSemanal } from './service.js';
 
 describe('folios de cierre semanal', () => {
   it('no colisiona sucursales cuyos códigos comparten los primeros cinco caracteres', () => {
@@ -51,5 +51,18 @@ describe('ventana móvil de cuentas por cobrar', () => {
   it('incluye la semana del cierre y exactamente las dos anteriores', () => {
     expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-12T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-06-28');
     expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-19T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-07-05');
+  });
+});
+
+describe('corte semanal de faltantes', () => {
+  it('conserva el faltante en el cierre y abre la semana siguiente en cero', () => {
+    const cierre29 = saldoParaCierreSemanal(-13);
+
+    expect(cierre29).toEqual({ disponible: 0, faltante: 13, ajuste_apertura: 13 });
+    expect(-13 + cierre29.ajuste_apertura).toBe(0);
+  });
+
+  it('no altera existencias positivas ni inventa ajustes de apertura', () => {
+    expect(saldoParaCierreSemanal(8)).toEqual({ disponible: 8, faltante: 0, ajuste_apertura: 0 });
   });
 });

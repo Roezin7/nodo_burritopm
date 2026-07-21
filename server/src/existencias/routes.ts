@@ -314,7 +314,11 @@ existenciasRouter.get(
         disponible: disp,
         reservada: Math.max(0, num0(e?.cantidad_reservada)),
         transito,
-        faltante: Math.max(0, -saldoReal),
+        // Una semana cerrada consulta su fotografía: el saldo ya está valuado en
+        // cero, pero el faltante histórico debe seguir visible en esa semana.
+        faltante: usarSnapshot && e && 'cantidad_faltante' in e
+          ? Math.max(0, num0(e.cantidad_faltante))
+          : Math.max(0, -saldoReal),
         costo_promedio: costo,
         valor: costo != null ? Math.round((disp + transito) * costo * 100) / 100 : 0,
       };

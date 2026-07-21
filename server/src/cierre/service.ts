@@ -7,6 +7,7 @@ import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from 
 import { eliminarConteoEnTx } from '../conteos/service.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
+import { aplicarMovimiento } from '../ledger/service.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -16,6 +17,17 @@ const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400
 const hoyChicago = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
+
+/**
+ * Separa la pérdida histórica del saldo que abrirá la semana siguiente.
+ * El faltante se informa en el cierre, pero nunca se convierte en una deuda de
+ * inventario para la siguiente semana.
+ */
+export function saldoParaCierreSemanal(cantidad: number) {
+  const saldo = r3(cantidad);
+  const faltante = r3(Math.max(0, -saldo));
+  return { disponible: r3(Math.max(0, saldo)), faltante, ajuste_apertura: faltante };
+}
 
 export interface DocumentoCarteraCliente {
   id: string;
@@ -436,7 +448,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
-  const alertaInventario = await validarSemanaCerrable(negocioId, semana);
+  await validarSemanaCerrable(negocioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
   const cierre = await transaccionSerializable(async (tx) => {
@@ -471,30 +483,40 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       for (const l of p.lineas) await tx.pedido_operativo_lineas.update({ where: { id: l.id }, data: { precio_unitario: precios.get(l.product_id.toString()) ?? l.precio_unitario } });
     }
     await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'cerrado' } });
+    const [existencias, lotesCierre] = await Promise.all([
+      tx.existencias.findMany({
+        where: { negocio_id: negocioId },
+        include: { ubicaciones: { select: { tipo: true } } },
+      }),
+      tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
+    ]);
+    // Solo los saldos de bodega forman parte de la conciliación y alerta semanal.
+    const saldosCierre = existencias.flatMap((existencia) => {
+      const saldo = saldoParaCierreSemanal(num0(existencia.cantidad_disponible));
+      return existencia.ubicaciones.tipo === 'bodega' && saldo.faltante > 0
+        ? [{ existencia, cantidad: saldo.faltante }]
+        : [];
+    });
     // Un saldo negativo representa cajas que salieron sin respaldo registrado. No tiene valor
-    // contable ni bloquea el cierre: se conserva en el ledger y se abre una incidencia visible.
-    for (const saldo of alertaInventario.saldos) {
+    // contable ni bloquea el cierre: se conserva en la fotografía y se abre una incidencia visible.
+    for (const saldo of saldosCierre) {
       const existente = await tx.incidencias.findFirst({
         where: {
           negocio_id: negocioId, tipo: 'cajas_perdidas_inventario', estado: 'abierta',
           documento_tipo: 'cierre', documento_id: semana.id,
-          ubicacion_id: BigInt(saldo.ubicacion_id), product_id: BigInt(saldo.product_id),
+          ubicacion_id: saldo.existencia.ubicacion_id, product_id: saldo.existencia.product_id,
         },
         select: { id: true },
       });
       if (!existente) await tx.incidencias.create({
         data: {
           negocio_id: negocioId, tipo: 'cajas_perdidas_inventario', prioridad: 'alta',
-          ubicacion_id: BigInt(saldo.ubicacion_id), product_id: BigInt(saldo.product_id),
+          ubicacion_id: saldo.existencia.ubicacion_id, product_id: saldo.existencia.product_id,
           documento_tipo: 'cierre', documento_id: semana.id, responsable_id: usuarioId,
-          comentarios: `${saldo.cantidad} cajas faltantes al cerrar la semana ${semana.semana}. El saldo negativo se valuó como 0 y no bloqueó el cierre.`,
+          comentarios: `${saldo.cantidad} cajas faltantes al cerrar la semana ${semana.semana}. El saldo negativo se valuó como 0 y no se arrastrará a la semana siguiente.`,
         },
       });
     }
-    const [existencias, lotesCierre] = await Promise.all([
-      tx.existencias.findMany({ where: { negocio_id: negocioId } }),
-      tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
-    ]);
     const totalesLote = new Map<string, { peso: number; costo: number }>();
     for (const lote of lotesCierre) {
       const key = `${lote.ubicacion_id}:${lote.product_id}`;
@@ -506,16 +528,38 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       await tx.inventario_semanal.createMany({
         data: existencias.map((e) => {
           const lote = totalesLote.get(`${e.ubicacion_id}:${e.product_id}`);
-          const disponible = Math.max(0, num0(e.cantidad_disponible));
+          const saldo = saldoParaCierreSemanal(num0(e.cantidad_disponible));
+          const disponible = saldo.disponible;
           const reservada = Math.max(0, num0(e.cantidad_reservada));
           const transito = Math.max(0, num0(e.cantidad_transito));
           return {
           semana_id: semana.id, negocio_id: negocioId, ubicacion_id: e.ubicacion_id, product_id: e.product_id,
-          cantidad_disponible: disponible, cantidad_reservada: reservada,
+          cantidad_disponible: disponible, cantidad_faltante: saldo.faltante, cantidad_reservada: reservada,
           cantidad_transito: transito, costo_promedio: e.costo_promedio,
           peso_total_lb: lote?.peso ?? null,
           costo_total: lote?.costo ?? r2((disponible + transito) * num0(e.costo_promedio)),
         }; }),
+      });
+    }
+    // La incidencia y la fotografía se crean antes de este ajuste. El movimiento
+    // deja la nueva semana en cero y permite revertir exactamente el cierre.
+    for (const saldo of saldosCierre) {
+      await aplicarMovimiento(tx, {
+        negocioId,
+        productId: saldo.existencia.product_id,
+        tipo: 'ajuste_positivo',
+        cantidad: saldo.cantidad,
+        usuarioId,
+        destinoId: saldo.existencia.ubicacion_id,
+        documentoTipo: 'cierre_arrastre',
+        documentoId: semana.id,
+        comentario: `Inicio sin faltantes heredados después del cierre de semana ${semana.semana}`,
+        idempotencyKey: `cierre-arrastre:${semana.id}:${saldo.existencia.ubicacion_id}:${saldo.existencia.product_id}`,
+        deltas: [{
+          ubicacionId: saldo.existencia.ubicacion_id,
+          productId: saldo.existencia.product_id,
+          disponible: saldo.cantidad,
+        }],
       });
     }
     await tx.semanas_operativas.update({ where: { id: semana.id }, data: { estado: 'cerrada', cerrado_por: usuarioId, cerrado_at: new Date() } });
@@ -523,8 +567,8 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
     return {
       facturas: creadas.length,
       balance,
-      cajas_perdidas: alertaInventario.cajas_perdidas,
-      productos_con_faltante: alertaInventario.saldos.length,
+      cajas_perdidas: r3(saldosCierre.reduce((total, saldo) => total + saldo.cantidad, 0)),
+      productos_con_faltante: saldosCierre.length,
     };
   });
   return { semana_id: Number(semana.id), anio: semana.anio, semana: semana.semana, ...cierre };
@@ -583,6 +627,20 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
     await tx.semanas_operativas.update({ where: { id: s.id }, data: { estado: 'reabierta', cerrado_at: null, cerrado_por: null } });
     await tx.pedidos_operativos.updateMany({ where: { id: { in: conPreparacion } }, data: { estado: 'en_preparacion' } });
     await tx.pedidos_operativos.updateMany({ where: { id: { in: sinPreparacion } }, data: { estado: 'confirmado' } });
+    const ajustesArrastre = await tx.movimientos_inventario.findMany({
+      where: { negocio_id: negocioId, documento_tipo: 'cierre_arrastre', documento_id: s.id },
+      select: { product_id: true, ubicacion_destino_id: true, cantidad: true },
+    });
+    for (const ajuste of ajustesArrastre) {
+      if (!ajuste.ubicacion_destino_id) continue;
+      await tx.existencias.updateMany({
+        where: { ubicacion_id: ajuste.ubicacion_destino_id, product_id: ajuste.product_id },
+        data: { cantidad_disponible: { decrement: ajuste.cantidad } },
+      });
+    }
+    await tx.movimientos_inventario.deleteMany({
+      where: { negocio_id: negocioId, documento_tipo: 'cierre_arrastre', documento_id: s.id },
+    });
     // El ajuste físico y la semana se revierten juntos; nunca queda una reapertura parcial.
     for (const inventario of inventariosFinales) await eliminarConteoEnTx(tx, negocioId, inventario.id, usuarioId, 'reabrir_semana');
     await tx.inventario_semanal.deleteMany({ where: { semana_id: s.id } });
