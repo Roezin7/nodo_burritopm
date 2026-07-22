@@ -2257,9 +2257,10 @@ form > .form-actions,
 .invoice-print .dist-row { grid-template-columns: 1fr auto; }
 
 @media print {
-  body * { visibility: hidden; }
-  .invoice-print, .invoice-print * { visibility: visible; }
-  .invoice-print { position: fixed; inset: 0; width: 100%; max-height: none; box-shadow: none; }
+  html, body { height: auto !important; overflow: visible !important; }
+  body > *:not(.modal-backdrop) { display: none !important; }
+  .modal-backdrop { position: static !important; display: block !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
+  .invoice-print { position: static !important; inset: auto !important; width: 100% !important; max-height: none !important; overflow: visible !important; padding: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
   .invoice-print .btn, .invoice-print .icon-btn { display: none; }
 }
 
@@ -4181,9 +4182,10 @@ form > .form-actions .btn,
 }
 
 @media print {
+  @page { size: A4 landscape; margin: 8mm; }
   @page route-order { size: A4 landscape; margin: 8mm; }
   @page dispatch-landscape { size: A4 landscape; margin: 8mm; }
-  @page dispatch-portrait { size: A4 portrait; margin: 10mm; }
+  @page dispatch-portrait { size: A4 landscape; margin: 8mm; }
   .operation-order-print { position: absolute; inset: 0; overflow: visible; padding: 0; color: #111; background: white; }
   .operation-order-print .print-order-day { break-inside: avoid; }
   .operation-order-print .operation-order-sheet { font-size: 9pt; }
@@ -4193,11 +4195,11 @@ form > .form-actions .btn,
   .operation-order-print .print-order-day h3 { background: #eee; }
   .route-order-print { width: 100%; max-width: none; }
   .route-order-page {
-    width: 281mm;
-    min-height: 194mm;
+    width: 100%;
+    min-height: 0;
     margin: 0;
     padding: 0;
-    overflow: hidden;
+    overflow: visible;
     border: 0;
     break-inside: avoid-page;
     break-after: page;
@@ -4214,9 +4216,11 @@ form > .form-actions .btn,
   .route-order-page > footer { font-size: 6pt; }
   .dispatch-print { position: absolute; inset: 0; width: 100%; max-width: none; overflow: visible; padding: 0; background: #fff; }
   .dispatch-print-page {
+    width: 100%;
+    min-height: 0;
     margin: 0;
     padding: 0;
-    overflow: hidden;
+    overflow: visible;
     border: 0;
     break-inside: avoid-page;
     break-after: page;
@@ -4225,9 +4229,9 @@ form > .form-actions .btn,
   }
   .dispatch-print-page + .dispatch-print-page { break-before: page; page-break-before: always; }
   .dispatch-print-page:last-of-type { break-after: auto; page-break-after: auto; }
-  .dispatch-print-page--matrix { page: dispatch-landscape; width: 281mm; min-height: 194mm; }
-  .dispatch-print-page--tapatios { page: dispatch-landscape; width: 281mm; min-height: 194mm; }
-  .dispatch-print-page--ticket { page: dispatch-portrait; width: 190mm; min-height: 277mm; max-width: none; }
+  .dispatch-print-page--matrix { page: dispatch-landscape; }
+  .dispatch-print-page--tapatios { page: dispatch-landscape; }
+  .dispatch-print-page--ticket { page: dispatch-portrait; max-width: none; }
   .dispatch-sheet { font-size: 8pt; }
   .dispatch-sheet th, .dispatch-sheet td { height: 5mm; padding: 0.6mm 1mm; border-color: #000; }
   .dispatch-sheet-title { height: 21px !important; }
