@@ -4234,8 +4234,8 @@ form > .form-actions .btn,
   .dispatch-sheet { font-size: 8pt; }
   .dispatch-sheet th, .dispatch-sheet td { height: 5mm; padding: 0.6mm 1mm; border-color: #000; }
   .dispatch-sheet-title { height: 21px !important; }
-  .dispatch-print-page--desechables .dispatch-sheet--matrix { font-size: 7.5pt; }
-  .dispatch-print-page--desechables .dispatch-sheet--matrix th, .dispatch-print-page--desechables .dispatch-sheet--matrix td { height: 4.5mm; padding: 0.5mm 0.8mm; }
+  .dispatch-print-page--desechables .dispatch-sheet--matrix { font-size: 6.8pt; }
+  .dispatch-print-page--desechables .dispatch-sheet--matrix th, .dispatch-print-page--desechables .dispatch-sheet--matrix td { height: 3.6mm; padding: 0.25mm 0.65mm; line-height: 1.05; }
   .dispatch-print-page--desechables .dispatch-sheet-title { height: 18px !important; }
   .dispatch-sheet--individual { max-width: 100%; font-size: 10pt; }
   .dispatch-individual-document { width: 90%; max-width: none; margin-right: auto; margin-left: auto; }
