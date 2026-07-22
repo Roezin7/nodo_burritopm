@@ -2,14 +2,14 @@
    normaliza jerarquía, accesibilidad y adaptación entre móvil, tablet y escritorio. */
 
 :root {
-  --bg: #f7f6f2;
-  --surface: #ffffff;
-  --surface-2: #f1f0eb;
-  --ink: #191816;
-  --ink-2: #514d47;
-  --ink-3: #6d675f;
-  --border: #e3dfd7;
-  --border-strong: #ccc5ba;
+  --bg: #eee7da;
+  --surface: #faf6ee;
+  --surface-2: #e8dece;
+  --ink: #211b15;
+  --ink-2: #62584c;
+  --ink-3: #887b6c;
+  --border: #ddd0bd;
+  --border-strong: #cbbba4;
   --brand: #3f761f;
   --brand-strong: #315e17;
   --brand-tint: #e8f2df;
@@ -19,9 +19,9 @@
   --r-card: 16px;
   --control-h: 44px;
   --font-body: var(--font-ui);
-  --sh-sm: 0 1px 2px rgba(25, 24, 22, 0.04);
-  --sh-md: 0 5px 18px rgba(25, 24, 22, 0.07);
-  --sh-lg: 0 18px 48px rgba(25, 24, 22, 0.14);
+  --sh-sm: 0 1px 2px rgba(57, 43, 28, 0.05);
+  --sh-md: 0 5px 18px rgba(57, 43, 28, 0.08);
+  --sh-lg: 0 18px 48px rgba(57, 43, 28, 0.15);
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 260ms;
