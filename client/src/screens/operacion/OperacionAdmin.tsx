@@ -280,7 +280,7 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
         <div className="form-submit form-submit--summary purchase-submit"><div className="purchase-form-totals"><span><small>Inventario</small><strong>{usd(costoInventario)}</strong></span>{cargosContables > 0 && <span><small>Cargos contables</small><strong>{usd(cargosContables)}</strong></span>}<span className="purchase-form-grand-total"><small>{totalFactura === '' ? 'Total' : 'Total factura'}</small><strong>{usd(totalCompra)}</strong></span></div><div className="form-actions">{editandoId != null ? <button type="button" className="btn btn-ghost" disabled={busy} onClick={cancelarEdicion}>Cancelar</button> : capturaPendiente && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void limpiarCompra()}>Limpiar</button>}<button className="btn btn-primary" disabled={bloqueada || busy || !proveedor || !lineasValidas} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId == null ? 'Guardar compra' : 'Guardar cambios'}</button></div></div>
     </section>
 
-    {semana.actual && resumen.lotes.length > 0 && <CollapsibleSection title="Materia prima disponible" count={`${resumen.lotes.length} lotes`} defaultOpen={false}>
+    {semana.actual && resumen.lotes.length > 0 && <CollapsibleSection title="Materia prima disponible" count={`${resumen.lotes.length} lotes`} defaultOpen>
       <div className="lot-grid">{resumen.lotes.map((l) => <article className="lot-card" key={l.id}><div className="card-head"><strong>{l.producto}</strong><span className={`chip ${l.congelado ? 'chip--info' : 'chip--ok'}`}>{l.congelado ? 'Congelado' : 'Fresco'}</span></div><div className="lot-value">{l.cajas} <small>cajas</small></div><p>{l.peso_lb.toLocaleString('es-MX')} lb · {l.cajas > 0 ? (l.peso_lb / l.cajas).toFixed(2) : '0.00'} lb/caja<br />{usd(l.costo)} · {l.cajas > 0 ? usd(l.costo / l.cajas) : usd(0)}/caja</p><footer><span>{l.fecha}</span><button className="link-btn" disabled={busy} onClick={() => void cambiarLote(l.id, !l.congelado)}>{l.congelado ? 'Descongelar' : 'Congelar'}</button></footer></article>)}</div>
     </CollapsibleSection>}
 
@@ -656,7 +656,7 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
   if (!reporte) return <section className="workspace-card"><Spinner label="Calculando conciliación…" /></section>;
   return <section className="workspace-card weekly-reconciliation">
     <div className="workspace-card-head">
-      <div><span className="eyebrow">Auditoría de Carnicería</span><h2>Conciliación semanal</h2><p>Inicio + compras y producción − salidas reales = inventario final calculado. El conteo físico es opcional.</p></div>
+      <div><span className="eyebrow">Control de cierre</span><h2>Auditoría de inventario</h2><p>Compara el movimiento calculado con el conteo físico capturado en Inventario.</p></div>
       {!reporte.inicial_fijado && <button className="btn btn-primary" disabled={busy} onClick={() => void fijarInicio()}>Fijar inventario inicial</button>}
     </div>
     <div className="reconciliation-status">
@@ -665,7 +665,7 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
       {reporte.resumen.saldos_provisionales > 0 && <span className="chip chip--warn">{reporte.resumen.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas · no bloquean cierre</span>}
       {reporte.resumen.diferencias_fisicas > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fisicas} diferencias documentadas</span>}
     </div>
-    <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Hacer doble check físico (opcional)</Link></div>
+    <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Abrir inventario físico</Link></div>
     <CollapsibleSection title="Detalle de conciliación" count={reporte.filas.length} defaultOpen={false}><div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto</th><th>Inicio</th><th>+ Entradas L–X</th><th>− Uso/salida X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida S</th><th>Final calculado</th><th>Físico opcional</th><th>Diferencia</th></tr></thead><tbody>{reporte.filas.map((f) => {
       const entradas1 = f.compras1 + f.produccionSalida1; const salidas1 = f.produccionEntrada1 + f.salidas1;
       const entradas2 = f.compras2 + f.produccionSalida2; const salidas2 = f.produccionEntrada2 + f.salidas2;

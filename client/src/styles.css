@@ -4182,8 +4182,8 @@ form > .form-actions .btn,
 
 @media print {
   @page route-order { size: landscape; margin: 7mm; }
-  @page dispatch-landscape { size: landscape; margin: 5mm; }
-  @page dispatch-portrait { size: portrait; margin: 7mm; }
+  @page dispatch-landscape { size: letter landscape; margin: 7mm; }
+  @page dispatch-portrait { size: letter portrait; margin: 9mm; }
   .operation-order-print { position: absolute; inset: 0; overflow: visible; padding: 0; color: #111; background: white; }
   .operation-order-print .print-order-day { break-inside: avoid; }
   .operation-order-print .operation-order-sheet { font-size: 9pt; }
@@ -4204,15 +4204,15 @@ form > .form-actions .btn,
   .dispatch-print-page--matrix { page: dispatch-landscape; }
   .dispatch-print-page--tapatios { page: dispatch-landscape; }
   .dispatch-print-page--ticket { page: dispatch-portrait; max-width: none; }
-  .dispatch-sheet { font-size: 6.5pt; }
-  .dispatch-sheet th, .dispatch-sheet td { height: 15px; padding: 0 2px; border-color: #000; }
+  .dispatch-sheet { font-size: 8pt; }
+  .dispatch-sheet th, .dispatch-sheet td { height: 5mm; padding: 0.6mm 1mm; border-color: #000; }
   .dispatch-sheet-title { height: 21px !important; }
-  .dispatch-print-page--desechables .dispatch-sheet--matrix { font-size: 5.8pt; }
-  .dispatch-print-page--desechables .dispatch-sheet--matrix th, .dispatch-print-page--desechables .dispatch-sheet--matrix td { height: 3.05mm; padding: 0 0.4mm; }
+  .dispatch-print-page--desechables .dispatch-sheet--matrix { font-size: 7.5pt; }
+  .dispatch-print-page--desechables .dispatch-sheet--matrix th, .dispatch-print-page--desechables .dispatch-sheet--matrix td { height: 4.5mm; padding: 0.5mm 0.8mm; }
   .dispatch-print-page--desechables .dispatch-sheet-title { height: 18px !important; }
-  .dispatch-sheet--individual { max-width: 100%; font-size: 7.5pt; }
-  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual { width: 150mm; font-size: 6.8pt; }
-  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual th, .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual td { height: 4.05mm; padding: 0 1mm; }
+  .dispatch-sheet--individual { max-width: 100%; font-size: 10pt; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual { width: 170mm; font-size: 10pt; }
+  .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual th, .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual td { height: 7mm; padding: 0 2mm; }
   .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet-title { height: 8mm !important; font-size: 11pt; }
   .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet-day th, .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet-date th { height: 5mm; font-size: 7pt; }
   .dispatch-print-page--desechables.dispatch-print-page--ticket .dispatch-sheet--individual tfoot th { height: 6mm; font-size: 9pt; }

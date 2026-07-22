@@ -447,10 +447,11 @@ function TablaMatriz({ titulo, subtitulo, destinos, filas, linea }: {
   filas: FilaOrden[];
   linea: LineaOperacion;
 }) {
+  const filasConCantidad = filas.filter((fila) => destinos.some((destino) => cantidadFila(destino, fila) > 0));
   return <table className={`dispatch-sheet dispatch-sheet--matrix dispatch-sheet--${linea}`}>
     {linea === 'carne' && <caption><strong>{titulo}</strong><small>{subtitulo}</small></caption>}
     <thead><tr>{linea === 'desechables' ? <><th className="dispatch-matrix-name">DISPOSABLES</th><th>TOTAL</th></> : <><th>TOTAL</th><th className="dispatch-matrix-name">ITEM</th></>}{destinos.map((destino) => <th key={destino.clave} title={destino.nombre}>{nombreMatriz(destino.nombre)}</th>)}</tr></thead>
-    <tbody>{filas.map((fila) => {
+    <tbody>{filasConCantidad.map((fila) => {
       const cantidades = destinos.map((destino) => cantidadFila(destino, fila));
       const total = cantidades.reduce((suma, valor) => suma + valor, 0);
       return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}>{linea === 'desechables' ? <><th>{fila.nombre}</th><td>{total > 0 ? numero(total) : ''}</td></> : <><th>{total > 0 ? numero(total) : ''}</th><td>{fila.nombre}</td></>}{cantidades.map((cantidad, indice) => <td key={destinos[indice].clave}>{cantidad > 0 ? numero(cantidad) : ''}</td>)}</tr>;
@@ -471,8 +472,7 @@ function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
 }) {
   const fechaRuta = ruta.fecha_entrega || fecha;
   const destinosOrdenados = ordenarDestinosTapatios(destinos);
-  const totalesPorFila = filas.map((fila) => destinosOrdenados.reduce((total, destino) => total + cantidadFila(destino, fila), 0));
-  const totalRuta = totalesPorFila.reduce((total, cantidad) => total + cantidad, 0);
+  const filasConCantidad = filas.filter((fila) => destinosOrdenados.some((destino) => cantidadFila(destino, fila) > 0));
 
   return <div className="dispatch-tapatios-document">
     <MarcaMG />
@@ -481,24 +481,23 @@ function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
       <span>{fechaDocumento(fechaRuta)}</span>
     </header>
     <div className="dispatch-tapatios-grid">
-      {destinosOrdenados.map((destino, indiceDestino) => {
-        const cantidades = filas.map((fila) => cantidadFila(destino, fila));
+      {destinosOrdenados.map((destino) => {
+        const filasDestino = filasConCantidad.filter((fila) => cantidadFila(destino, fila) > 0);
+        const cantidades = filasDestino.map((fila) => cantidadFila(destino, fila));
         const totalDestino = cantidades.reduce((total, cantidad) => total + cantidad, 0);
-        const incluyeTotalRuta = indiceDestino === destinosOrdenados.length - 1;
-        return <section className={`dispatch-tapatios-stop ${incluyeTotalRuta ? 'dispatch-tapatios-stop--route-total' : ''}`} key={destino.clave}>
+        return <section className="dispatch-tapatios-stop" key={destino.clave}>
           <header>
             <strong>{destino.nombre}</strong>
             {destino.entregaEn !== destino.nombre && <small>ENTREGA EN {destino.entregaEn}</small>}
           </header>
           <div className="dispatch-tapatios-date">{fechaDocumento(fechaRuta)}</div>
           <table className="dispatch-tapatios-table">
-            <thead><tr><th>ITEM</th><th>QTY</th>{incluyeTotalRuta && <th>TOTAL</th>}</tr></thead>
-            <tbody>{filas.map((fila, indiceFila) => <tr key={`${destino.clave}:${fila.nombre}`}>
+            <thead><tr><th>ITEM</th><th>QTY</th></tr></thead>
+            <tbody>{filasDestino.map((fila, indiceFila) => <tr key={`${destino.clave}:${fila.nombre}`}>
               <td>{fila.nombre}</td>
-              <td>{cantidades[indiceFila] > 0 ? numero(cantidades[indiceFila]) : ''}</td>
-              {incluyeTotalRuta && <td>{totalesPorFila[indiceFila] > 0 ? numero(totalesPorFila[indiceFila]) : ''}</td>}
+              <td>{numero(cantidades[indiceFila])}</td>
             </tr>)}</tbody>
-            <tfoot><tr><th>TOTAL</th><th>{totalDestino > 0 ? numero(totalDestino) : ''}</th>{incluyeTotalRuta && <th>{totalRuta > 0 ? numero(totalRuta) : ''}</th>}</tr></tfoot>
+            <tfoot><tr><th>TOTAL</th><th>{numero(totalDestino)}</th></tr></tfoot>
           </table>
         </section>;
       })}
@@ -508,6 +507,7 @@ function HojaRutaTapatios({ ruta, destinos, filas, fecha }: {
 }
 
 function TablaIndividual({ destino, filas, linea, fecha }: { destino: DestinoDocumento; filas: FilaOrden[]; linea: LineaOperacion; fecha: string | null }) {
+  const filasConCantidad = filas.filter((fila) => cantidadFila(destino, fila) > 0);
   return <div className={`dispatch-individual-document dispatch-individual-document--${linea}`}>
     {linea === 'carne' && <MarcaMG />}
     <table className={`dispatch-sheet dispatch-sheet--individual dispatch-sheet--${linea}`}>
@@ -517,7 +517,7 @@ function TablaIndividual({ destino, filas, linea, fecha }: { destino: DestinoDoc
         <tr className="dispatch-sheet-date"><th colSpan={2}>{fechaDocumento(fecha)}</th></tr>
         <tr><th>ITEM</th><th>QTY</th></tr>
       </thead>
-      <tbody>{filas.map((fila) => { const cantidad = cantidadFila(destino, fila); return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><td>{fila.nombre}</td><td>{cantidad > 0 || linea === 'desechables' ? numero(cantidad) : ''}</td></tr>; })}</tbody>
+      <tbody>{filasConCantidad.map((fila) => { const cantidad = cantidadFila(destino, fila); return <tr key={`${fila.nombre}:${fila.skus.join('-')}`}><td>{fila.nombre}</td><td>{numero(cantidad)}</td></tr>; })}</tbody>
       <tfoot><tr><th>TOTAL</th><th>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</th></tr></tfoot>
     </table>
   </div>;
