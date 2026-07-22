@@ -20,7 +20,7 @@
   --surface-2: #e8dece;
   --ink: #211b15;
   --ink-2: #62584c;
-  --ink-3: #887b6c;
+  --ink-3: #6d604f;
   --border: #ddd0bd;
   --border-strong: #cbbba4;
 
@@ -4181,9 +4181,9 @@ form > .form-actions .btn,
 }
 
 @media print {
-  @page route-order { size: landscape; margin: 7mm; }
-  @page dispatch-landscape { size: letter landscape; margin: 7mm; }
-  @page dispatch-portrait { size: letter portrait; margin: 9mm; }
+  @page route-order { size: A4 landscape; margin: 8mm; }
+  @page dispatch-landscape { size: A4 landscape; margin: 8mm; }
+  @page dispatch-portrait { size: A4 portrait; margin: 10mm; }
   .operation-order-print { position: absolute; inset: 0; overflow: visible; padding: 0; color: #111; background: white; }
   .operation-order-print .print-order-day { break-inside: avoid; }
   .operation-order-print .operation-order-sheet { font-size: 9pt; }
@@ -4192,7 +4192,20 @@ form > .form-actions .btn,
   .operation-order-print .print-order-totals > div, .operation-order-print .print-location { border-color: #bbb; }
   .operation-order-print .print-order-day h3 { background: #eee; }
   .route-order-print { width: 100%; max-width: none; }
-  .route-order-page { min-height: 0; margin: 0; padding: 0; border: 0; }
+  .route-order-page {
+    width: 281mm;
+    min-height: 194mm;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    break-inside: avoid-page;
+    break-after: page;
+    page-break-inside: avoid;
+    page-break-after: always;
+  }
+  .route-order-page + .route-order-page { break-before: page; page-break-before: always; }
+  .route-order-page:last-of-type { break-after: auto; page-break-after: auto; }
   .route-order-grid { overflow: visible; gap: 4px; }
   .route-order-page--desechables .operation-order-sheet { font-size: 6.5pt; }
   .route-order-page--desechables .operation-order-sheet th, .route-order-page--desechables .operation-order-sheet td { height: 12px; padding: 0 2px; }
@@ -4200,10 +4213,21 @@ form > .form-actions .btn,
   .route-order-page--desechables .route-order-table tfoot th { height: 14px; }
   .route-order-page > footer { font-size: 6pt; }
   .dispatch-print { position: absolute; inset: 0; width: 100%; max-width: none; overflow: visible; padding: 0; background: #fff; }
-  .dispatch-print-page { margin: 0; padding: 0; border: 0; }
-  .dispatch-print-page--matrix { page: dispatch-landscape; }
-  .dispatch-print-page--tapatios { page: dispatch-landscape; }
-  .dispatch-print-page--ticket { page: dispatch-portrait; max-width: none; }
+  .dispatch-print-page {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    break-inside: avoid-page;
+    break-after: page;
+    page-break-inside: avoid;
+    page-break-after: always;
+  }
+  .dispatch-print-page + .dispatch-print-page { break-before: page; page-break-before: always; }
+  .dispatch-print-page:last-of-type { break-after: auto; page-break-after: auto; }
+  .dispatch-print-page--matrix { page: dispatch-landscape; width: 281mm; min-height: 194mm; }
+  .dispatch-print-page--tapatios { page: dispatch-landscape; width: 281mm; min-height: 194mm; }
+  .dispatch-print-page--ticket { page: dispatch-portrait; width: 190mm; min-height: 277mm; max-width: none; }
   .dispatch-sheet { font-size: 8pt; }
   .dispatch-sheet th, .dispatch-sheet td { height: 5mm; padding: 0.6mm 1mm; border-color: #000; }
   .dispatch-sheet-title { height: 21px !important; }
