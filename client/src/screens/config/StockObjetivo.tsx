@@ -99,7 +99,7 @@ export default function StockObjetivo() {
         <p className="muted">No hay productos activos. Crea productos en la pestaña Productos.</p>
       ) : (
         <>
-          <CollapsibleSection title="Productos" count={items.filter((item) => item.habilitado).length} summary={`${items.length} disponibles`} className="config-list-section"><div className={`so-grid-head ${esBodega ? 'so-grid-head--bodega' : 'so-grid-head--simple'}`}>
+          <CollapsibleSection title="Productos" count={items.filter((item) => item.habilitado).length} summary={`${items.length} disponibles`} className="config-list-section" defaultOpen><div className={`so-grid-head ${esBodega ? 'so-grid-head--bodega' : 'so-grid-head--simple'}`}>
             <span>Producto</span><span>Usa</span>{esBodega && <><span>Mín</span><span>Seguridad</span></>}
           </div><div className="so-rows">
             {items.map((it, idx) => (
