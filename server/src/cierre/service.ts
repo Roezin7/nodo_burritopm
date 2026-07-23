@@ -8,6 +8,7 @@ import { eliminarConteoEnTx } from '../conteos/service.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
 import { aplicarMovimiento } from '../ledger/service.js';
+import { avisarAdminFaltantesInventario } from '../push/service.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -572,6 +573,14 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       productos_con_faltante: saldosCierre.length,
     };
   });
+  if (cierre.productos_con_faltante > 0) {
+    void avisarAdminFaltantesInventario(
+      negocioId,
+      semana.semana,
+      cierre.cajas_perdidas,
+      cierre.productos_con_faltante,
+    ).catch(() => {});
+  }
   return { semana_id: Number(semana.id), anio: semana.anio, semana: semana.semana, ...cierre };
 }
 

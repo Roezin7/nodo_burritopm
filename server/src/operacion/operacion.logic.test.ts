@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, fechasDespachables, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, fechasDespachables, loteCompraTrasCubrirNegativo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
+
+describe('compra posterior a un despacho negativo', () => {
+  it('cubre primero el faltante y deja en FIFO solo el remanente', () => {
+    expect(loteCompraTrasCubrirNegativo(5, 50, -3)).toEqual({
+      cubiertas: 3,
+      disponibles: 2,
+      costo_disponible: 20,
+    });
+    expect(loteCompraTrasCubrirNegativo(2, 20, -3)).toEqual({
+      cubiertas: 2,
+      disponibles: 0,
+      costo_disponible: 0,
+    });
+  });
+});
 
 describe('cobertura configurada de BPM', () => {
   it('respeta rutas por día y puntos físicos de entrega compartidos', () => {

@@ -752,7 +752,13 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
       let salidaFifo: Awaited<ReturnType<typeof prepararSalidaFifo>> | null = null;
       if (cargada > 0 && producto?.linea_operacion === 'desechables') {
         salidaFifo = await prepararSalidaFifo(tx, {
-          negocioId, ubicacionId: bodega.id, productId: l.product_id, cantidad: cargada, producto: producto.nombre,
+          negocioId,
+          ubicacionId: bodega.id,
+          productId: l.product_id,
+          cantidad: cargada,
+          producto: producto.nombre,
+          permitirFaltante: true,
+          costoFaltante: costo,
         });
         costo = salidaFifo.costo_unitario;
       }
@@ -781,7 +787,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
                 { ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada },
                 { ubicacionId: l.ubicacion_destino_id, productId: l.product_id, disponible: cargada, costoUnitario: costo },
               ],
-          permitirDisponibleNegativo: bodega.codigo === 'CARN',
+          permitirDisponibleNegativo: bodega.codigo === 'CARN' || producto?.linea_operacion === 'desechables',
         });
         if (aplicada && salidaFifo) {
           const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: `carga:${l.id}` }, select: { id: true } });

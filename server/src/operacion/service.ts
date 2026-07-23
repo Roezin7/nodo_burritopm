@@ -1148,6 +1148,18 @@ export interface CompraInput {
   lineas: { product_id: number; cajas: number; peso_total_lb?: number; costo_total: number; congelado?: boolean }[];
 }
 
+/** Cubre primero las salidas de desechables capturadas antes que su compra.
+ * Existencia recibe toda la compra; FIFO conserva únicamente el remanente físico. */
+export function loteCompraTrasCubrirNegativo(cajas: number, costoTotal: number, saldoAntes: number) {
+  const cubiertas = Math.min(cajas, Math.max(0, -saldoAntes));
+  const disponibles = r3(Math.max(0, cajas - cubiertas));
+  return {
+    cubiertas: r3(cubiertas),
+    disponibles,
+    costo_disponible: cajas > 0 ? r2(costoTotal * disponibles / cajas) : 0,
+  };
+}
+
 function firmaLineasCompra(lineas: CompraInput['lineas']): string[] {
   return lineas.map((linea) => [
     linea.product_id, r3(linea.cajas), r3(linea.peso_total_lb ?? 0), r2(linea.costo_total), Boolean(linea.congelado),
@@ -1242,9 +1254,12 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
         : cajasPrev * (num(prod.peso_caja_lb) ?? (pesoTotal > 0 ? pesoTotal / l.cajas : 0));
       const pesoCaja = esMateriaPrima ? r3((pesoPrev + pesoTotal) / (cajasPrev + l.cajas)) : num(prod.peso_caja_lb);
       const costoCaja = r4(l.costo_total / l.cajas);
+      const saldoLote = prod.linea_operacion === 'desechables'
+        ? loteCompraTrasCubrirNegativo(l.cajas, l.costo_total, num0(actual?.cantidad_disponible))
+        : { disponibles: r3(l.cajas), costo_disponible: r2(l.costo_total) };
       if (manejaLote) {
         await tx.lotes_materia_prima.create({
-          data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: pid, compra_linea_id: cl.id, fecha: f, congelado: esMateriaPrima && (l.congelado ?? false), cajas_iniciales: r3(l.cajas), cajas_disponibles: r3(l.cajas), peso_inicial_lb: esMateriaPrima ? r3(pesoTotal) : 0, peso_disponible_lb: esMateriaPrima ? r3(pesoTotal) : 0, costo_inicial: r2(l.costo_total), costo_disponible: r2(l.costo_total) },
+          data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: pid, compra_linea_id: cl.id, fecha: f, congelado: esMateriaPrima && (l.congelado ?? false), cajas_iniciales: r3(l.cajas), cajas_disponibles: saldoLote.disponibles, peso_inicial_lb: esMateriaPrima ? r3(pesoTotal) : 0, peso_disponible_lb: esMateriaPrima ? r3(pesoTotal) : 0, costo_inicial: r2(l.costo_total), costo_disponible: saldoLote.costo_disponible },
         });
       }
       await aplicarMovimiento(tx, {
@@ -1371,8 +1386,15 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
       const cajasPrevias = lotesPrevios.reduce((suma, lote) => suma + num0(lote.cajas_disponibles), 0);
       const pesoPrevio = lotesPrevios.reduce((suma, lote) => suma + num0(lote.peso_disponible_lb), 0);
       const costoCaja = r4(linea.costo_total / linea.cajas);
+      const existenciaAntes = await tx.existencias.findUnique({
+        where: { ubicacion_id_product_id: { ubicacion_id: ubicacion.id, product_id: productId } },
+        select: { cantidad_disponible: true },
+      });
+      const saldoLote = producto.linea_operacion === 'desechables'
+        ? loteCompraTrasCubrirNegativo(linea.cajas, linea.costo_total, num0(existenciaAntes?.cantidad_disponible))
+        : { disponibles: r3(linea.cajas), costo_disponible: r2(linea.costo_total) };
       if (manejaLote) await tx.lotes_materia_prima.create({
-        data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: productId, compra_linea_id: compraLinea.id, fecha: nuevaFecha, congelado: materiaPrima && (linea.congelado ?? false), cajas_iniciales: r3(linea.cajas), cajas_disponibles: r3(linea.cajas), peso_inicial_lb: materiaPrima ? r3(pesoTotal) : 0, peso_disponible_lb: materiaPrima ? r3(pesoTotal) : 0, costo_inicial: r2(linea.costo_total), costo_disponible: r2(linea.costo_total) },
+        data: { negocio_id: negocioId, ubicacion_id: ubicacion.id, product_id: productId, compra_linea_id: compraLinea.id, fecha: nuevaFecha, congelado: materiaPrima && (linea.congelado ?? false), cajas_iniciales: r3(linea.cajas), cajas_disponibles: saldoLote.disponibles, peso_inicial_lb: materiaPrima ? r3(pesoTotal) : 0, peso_disponible_lb: materiaPrima ? r3(pesoTotal) : 0, costo_inicial: r2(linea.costo_total), costo_disponible: saldoLote.costo_disponible },
       });
       await aplicarMovimiento(tx, {
         negocioId, productId, tipo: 'compra_recibida', cantidad: linea.cajas, usuarioId,

@@ -72,6 +72,22 @@ export async function avisarAdminRezagados(negocioId: bigint, pendientes: number
   });
 }
 
+/** Avisa a administración cuando el cierre convierte faltantes negativos en apertura cero. */
+export async function avisarAdminFaltantesInventario(
+  negocioId: bigint,
+  semana: number,
+  cajas: number,
+  productos: number,
+) {
+  if (!pushHabilitado || cajas <= 0 || productos <= 0) return;
+  const admins = await usuariosAdmin(negocioId);
+  await enviarAUsuarios(admins, {
+    titulo: 'Faltante de inventario auditado',
+    cuerpo: `Semana ${semana}: ${cajas} cajas faltantes en ${productos} producto${productos === 1 ? '' : 's'}. La nueva semana inicia en cero.`,
+    url: '/semana/cierre',
+  });
+}
+
 /** Usuarios activos asignados a una ubicación (para avisarles). */
 export async function usuariosDeUbicacion(ubicacionId: bigint): Promise<bigint[]> {
   const filas = await prisma.usuario_ubicaciones.findMany({
