@@ -94,7 +94,7 @@ export default function Login() {
 
   // --- Paso 2: PIN ---
   return (
-    <div className="login">
+    <div className="login login--pin">
       <button className="link-btn" onClick={() => { setSel(null); setPin(''); setError(''); }}>
         <Icono name="back" size={17} /> cambiar usuario
       </button>
