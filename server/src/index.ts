@@ -67,12 +67,13 @@ const limiteGeneral = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.originalUrl.startsWith('/api/auth/login'),
+  skip: (req) => env.NODE_ENV === 'test' || req.originalUrl.startsWith('/api/auth/login'),
 });
 // Límite estricto al login (anti fuerza bruta del PIN).
 const limiteLogin = rateLimit({
   windowMs: 15 * 60_000,
   max: 10,
+  skip: () => env.NODE_ENV === 'test',
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,

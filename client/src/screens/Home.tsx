@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { lazy, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth, type Rol } from '../auth';
 import { Icono } from '../icons';
 import ActivarAvisos from '../components/ActivarAvisos';
-import PanelAdmin from './PanelAdmin';
 import { useOperacionConfig } from '../operacion-config';
+
+const PanelAdmin = lazy(() => import('./PanelAdmin'));
 
 interface Tarea { titulo: string; sub: string; ruta: string }
 

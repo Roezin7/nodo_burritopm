@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const apiPort = Number(process.env.E2E_API_PORT ?? 3100);
+const webPort = Number(process.env.E2E_WEB_PORT ?? 5188);
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -8,7 +11,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: [['html', { open: 'never' }], ['list']],
   use: {
-    baseURL: 'http://127.0.0.1:5188',
+    baseURL: `http://127.0.0.1:${webPort}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -16,13 +19,13 @@ export default defineConfig({
   webServer: [
     {
       command: 'npm run dev -w server',
-      url: 'http://127.0.0.1:3100/api/health',
+      url: `http://127.0.0.1:${apiPort}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
     {
-      command: 'npm run dev -w client -- --host 127.0.0.1 --port 5188 --strictPort',
-      url: 'http://127.0.0.1:5188',
+      command: `npm run dev -w client -- --host 127.0.0.1 --port ${webPort} --strictPort`,
+      url: `http://127.0.0.1:${webPort}`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

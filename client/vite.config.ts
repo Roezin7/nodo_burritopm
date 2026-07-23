@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const apiPort = Number(process.env.E2E_API_PORT ?? 3100);
+
 // Single-service deploy: el build de la PWA se emite a server/public,
 // y el servidor Node sirve estos archivos + la API bajo /api.
 export default defineConfig({
@@ -18,6 +20,21 @@ export default defineConfig({
       includeAssets: ['favicon.svg', 'favicon-16x16.png', 'favicon-32x32.png', 'mask-icon.svg', 'apple-touch-icon.png', 'burrito-logo.png'],
       injectManifest: {
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        globIgnores: ['og-image.png'],
+        // La instalación inicial conserva acceso, menú e inicio sin descargar de fondo todas
+        // las áreas administrativas. Los chunks de cada operación se guardan al visitarlos.
+        globPatterns: [
+          '**/*.{html,webmanifest,css,woff2,png,svg}',
+          'assets/index-*.js',
+          'assets/Login-*.js',
+          'assets/Shell-*.js',
+          'assets/Home-*.js',
+          'assets/BurritoLockup-*.js',
+          'assets/offline-*.js',
+          'assets/UpdateBanner-*.js',
+          'assets/pwaUpdate-*.js',
+          'assets/workbox-window*.js',
+        ],
       },
       manifest: {
         id: '/',
@@ -54,7 +71,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3100',
+      '/api': `http://127.0.0.1:${apiPort}`,
     },
   },
 });

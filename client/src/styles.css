@@ -26,7 +26,7 @@
 
   /* Marca Burrito Parrilla — verde del logo real (idéntico en claro y oscuro) */
   --logo-verde: #3f761f;
-  --brand: #3f761f;
+  --brand: #37691a;
   --brand-strong: #315e17;
   --brand-tint: #e8f2df;
 
@@ -35,7 +35,7 @@
   --accent-tint: #fde6e3;
 
   /* Acción primaria = verde un punto más oscuro (legible con texto blanco) */
-  --primary: #3f761f;
+  --primary: #37691a;
   --primary-hover: #315e17;
   --on-primary: #ffffff;
 

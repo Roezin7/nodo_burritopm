@@ -22,10 +22,15 @@ precacheAndRoute(self.__WB_MANIFEST);
 // como respaldo sin conexión; así un service worker activo no mantiene una versión anterior.
 const appShellOffline = createHandlerBoundToURL('/index.html');
 registerRoute(new NavigationRoute(async (options) => {
+  const controller = new AbortController();
+  // En una conexión muy lenta es mejor abrir el shell ya instalado y dejar que sus datos
+  // se actualicen dentro de la app que mantener una pantalla blanca esperando el HTML.
+  const timeout = setTimeout(() => controller.abort(), 2_500);
   try {
-    const response = await fetch(options.request, { cache: 'no-store' });
+    const response = await fetch(options.request, { cache: 'no-store', signal: controller.signal });
     if (response.ok) return response;
   } catch { /* sin conexión: usar el app-shell precargado */ }
+  finally { clearTimeout(timeout); }
   return appShellOffline(options);
 }, { denylist: [/^\/api/] }));
 

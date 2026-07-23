@@ -9,6 +9,7 @@ import { api, ApiError } from './api';
 import { useSemanaGlobal } from './semana-context';
 import Modal from './components/Modal';
 import SyncCenter from './components/SyncCenter';
+import OfflineBanner from './OfflineBanner';
 
 import type { Rol } from './auth';
 
@@ -121,6 +122,7 @@ export default function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="shell">
+      <OfflineBanner />
       <a className="skip-link" href="#main-content">Saltar al contenido</a>
       <aside className="nav-rail">
         <div className="nav-brand">

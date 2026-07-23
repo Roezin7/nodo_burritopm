@@ -16,6 +16,7 @@ export const authRouter = Router();
 const limiteUsuarios = rateLimit({
   windowMs: 15 * 60_000,
   max: 30,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
 });

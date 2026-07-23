@@ -1,9 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth, type Rol } from './auth';
 import { ToastProvider } from './toast';
-import OfflineBanner from './OfflineBanner';
-import UpdateBanner from './UpdateBanner';
-import Shell from './Shell';
 import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
 import { Component, Suspense, lazy, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
@@ -14,14 +11,34 @@ import { usePageTitle } from './page-title';
 
 // Cada área grande se descarga solo cuando el rol la necesita. Además de acelerar el arranque,
 // esto evita que el teléfono evalúe la consola administrativa para capturar un pedido sencillo.
-const Login = lazy(() => import('./screens/Login'));
-const Home = lazy(() => import('./screens/Home'));
+const cargarLogin = () => import('./screens/Login');
+const cargarHome = () => import('./screens/Home');
+const cargarShell = () => import('./Shell');
+const cargarSemana = () => import('./screens/operacion/SemanaOperacion');
+const Login = lazy(cargarLogin);
+const Home = lazy(cargarHome);
+const Shell = lazy(cargarShell);
+const UpdateBanner = lazy(() => import('./UpdateBanner'));
 const ConteosInventario = lazy(() => import('./screens/inventario/Inventario'));
 const Incidencias = lazy(() => import('./screens/incidencias/Incidencias'));
 const Configuracion = lazy(() => import('./screens/config/Configuracion'));
 const OperacionAdmin = lazy(() => import('./screens/operacion/OperacionAdmin'));
-const SemanaOperacion = lazy(() => import('./screens/operacion/SemanaOperacion'));
+const SemanaOperacion = lazy(cargarSemana);
 const Facturacion = lazy(() => import('./screens/Facturacion'));
+
+// Comienza en paralelo el único camino que probablemente se mostrará. Evita una cascada
+// base → autenticación → menú → pantalla, sin descargar rutas que el usuario no abrió.
+try {
+  if (localStorage.getItem('bpm_token')) {
+    void cargarShell();
+    if (window.location.pathname.startsWith('/semana')) void cargarSemana();
+    else if (window.location.pathname === '/') void cargarHome();
+  } else {
+    void cargarLogin();
+  }
+} catch {
+  void cargarLogin();
+}
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean }> {
   state = { fallo: false };
@@ -67,8 +84,8 @@ function AppBody() {
   if (!usuario) return <Suspense fallback={<div className="app-shell"><Spinner label="Preparando acceso…" /></div>}><Login /></Suspense>;
 
   return (
-    <Shell>
-      <OfflineBanner />
+    <Suspense fallback={<div className="app-shell"><Spinner label="Preparando menú…" /></div>}>
+      <Shell>
       <Suspense fallback={<div className="route-skeleton" role="status" aria-label="Cargando pantalla"><span /><span /><span /></div>}>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -91,19 +108,36 @@ function AppBody() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
-    </Shell>
+      </Shell>
+    </Suspense>
   );
 }
 
 function debeMostrarSplash() {
-  try { return !sessionStorage.getItem('bpm-splash'); } catch { return true; }
+  try {
+    const conexion = (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }).connection;
+    if (conexion?.saveData || ['slow-2g', '2g'].includes(conexion?.effectiveType ?? '')) return false;
+    return !sessionStorage.getItem('bpm-splash');
+  } catch { return true; }
 }
 
 export default function App() {
   const [splash, setSplash] = useState(debeMostrarSplash);
+  const [serviciosListos, setServiciosListos] = useState(false);
+  useEffect(() => {
+    const mostrar = () => setServiciosListos(true);
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(mostrar, { timeout: 2_000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = globalThis.setTimeout(mostrar, 500);
+    return () => globalThis.clearTimeout(id);
+  }, []);
   return (
     <AppErrorBoundary>
-      <UpdateBanner />
+      {serviciosListos && <Suspense fallback={null}><UpdateBanner /></Suspense>}
       {splash && (
         <SplashIntro
           onDone={() => {

@@ -1,7 +1,9 @@
 // Cliente HTTP mínimo para la API. Guarda el JWT en localStorage.
-import { encolar } from './offline';
 
 const TOKEN_KEY = 'bpm_token';
+const CACHE_GET_MS = 15_000;
+const cacheGet = new Map<string, { hasta: number; datos: unknown }>();
+const getEnCurso = new Map<string, Promise<unknown>>();
 
 /** Llave estable para reintentar una mutación sin duplicarla en el servidor. */
 export function nuevaClaveIdempotencia(alcance: string): string {
@@ -48,37 +50,56 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const { method = 'GET', body, auth = true } = opts;
   const esMutacion = method !== 'GET' && method !== 'HEAD';
+  const token = auth ? getToken() : null;
+  const claveGet = `${token ?? 'publico'}:${path}`;
+  if (method === 'GET') {
+    const guardado = cacheGet.get(claveGet);
+    if (guardado && guardado.hasta > Date.now()) return guardado.datos as T;
+    const pendiente = getEnCurso.get(claveGet);
+    if (pendiente) return pendiente as Promise<T>;
+  }
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (auth) {
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) headers.Authorization = `Bearer ${token}`;
 
-  let res: Response;
+  const ejecutar = async (): Promise<T> => {
+    let res: Response;
+    try {
+      res = await fetch(`/api${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) {
+      // La implementación de IndexedDB se descarga únicamente si la red realmente falla.
+      if (esMutacion && admiteColaOffline(method, path)) {
+        const { encolar } = await import('./offline');
+        await encolar({ method, path, body, token });
+        return { queued: true } as T;
+      }
+      throw new ApiError(0, 'Sin conexión');
+    }
+
+    if (res.status === 204) return undefined as T;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) {
+        setToken(null);
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('bpm-auth-expired'));
+      }
+      throw new ApiError(res.status, (data as { error?: string }).error ?? 'Error de red');
+    }
+    if (method === 'GET') cacheGet.set(claveGet, { hasta: Date.now() + CACHE_GET_MS, datos: data });
+    else cacheGet.clear();
+    return data as T;
+  };
+
+  const solicitud = ejecutar();
+  if (method !== 'GET') return solicitud;
+  getEnCurso.set(claveGet, solicitud);
   try {
-    res = await fetch(`/api${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch (e) {
-    // Solo las capturas idempotentes de campo pueden continuar sin red.
-    if (esMutacion && admiteColaOffline(method, path)) {
-      await encolar({ method, path, body, token: auth ? getToken() : null });
-      return { queued: true } as T;
-    }
-    throw new ApiError(0, 'Sin conexión');
+    return await solicitud;
+  } finally {
+    getEnCurso.delete(claveGet);
   }
-
-  if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    if (res.status === 401) {
-      setToken(null);
-      if (typeof window !== 'undefined') window.dispatchEvent(new Event('bpm-auth-expired'));
-    }
-    throw new ApiError(res.status, (data as { error?: string }).error ?? 'Error de red');
-  }
-  return data as T;
 }
