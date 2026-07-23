@@ -40,8 +40,10 @@ export function EstadoDistChip({ estado }: { estado: string }) {
 // ── Fase del pedido: agrupa los 16 estados en 4 fases legibles (para no confundir al admin) ──
 export type FaseDist = 'planeacion' | 'bodega' | 'ruta' | 'recibido' | 'cancelada';
 const FASE_DE: Record<string, FaseDist> = {
-  borrador: 'planeacion', esperando_conteos: 'planeacion', calculada: 'planeacion', en_revision: 'planeacion', aprobada: 'planeacion',
-  en_preparacion: 'bodega', preparada: 'bodega', verificada: 'bodega', en_carga: 'bodega', cargada: 'bodega',
+  borrador: 'planeacion', esperando_conteos: 'planeacion', calculada: 'planeacion', en_revision: 'planeacion',
+  // Al aprobarse, el despacho ya fue programado y sus pedidos quedaron vinculados.
+  // Aún no afecta existencias: el descuento ocurre una sola vez al confirmar la carga.
+  aprobada: 'bodega', en_preparacion: 'bodega', preparada: 'bodega', verificada: 'bodega', en_carga: 'bodega', cargada: 'bodega',
   en_transito: 'ruta', parcialmente_entregada: 'ruta',
   entregada: 'recibido', cerrada: 'recibido', cerrada_con_incidencias: 'recibido',
   cancelada: 'cancelada',

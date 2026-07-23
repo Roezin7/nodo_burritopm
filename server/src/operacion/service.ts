@@ -857,7 +857,59 @@ export async function sincronizarDespachosConfirmados(
   for (const linea of ['carne', 'desechables'] as const) {
     resultados.push({ linea, ...(await consolidarPedidosSiCompletos(negocioId, usuarioId, linea, desde, hasta)) });
   }
-  return resultados;
+  const negocio = await prisma.negocios.findUnique({
+    where: { id: negocioId },
+    select: { reparto_habilitado: true },
+  });
+  let reparados = 0;
+  if (negocio && !negocio.reparto_habilitado) {
+    const rango = { gte: fecha(desde), lte: fecha(hasta) };
+    // Recupera preparaciones creadas antes de apagar Reparto o por el botón manual.
+    // En este modo no deben esperar aprobación, surtido ni carga.
+    const editables = await prisma.distribuciones.findMany({
+      where: {
+        negocio_id: negocioId,
+        fecha_entrega: rango,
+        estado: { in: ['calculada', 'en_revision'] },
+      },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    for (const distribucion of editables) {
+      await prisma.$transaction(async (tx) => {
+        const lineasSinAprobar = await tx.distribucion_lineas.findMany({
+          where: { distribucion_id: distribucion.id, cantidad_aprobada: null },
+        });
+        for (const lineaDistribucion of lineasSinAprobar) {
+          await tx.distribucion_lineas.update({
+            where: { id: lineaDistribucion.id },
+            data: {
+              cantidad_aprobada: lineaDistribucion.cantidad_sugerida,
+              costo_total: r2(num0(lineaDistribucion.cantidad_sugerida) * (num(lineaDistribucion.costo_unitario) ?? 0)),
+            },
+          });
+        }
+        await tx.distribuciones.update({
+          where: { id: distribucion.id },
+          data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
+        });
+      });
+    }
+    const pendientes = await prisma.distribuciones.findMany({
+      where: {
+        negocio_id: negocioId,
+        fecha_entrega: rango,
+        estado: { in: ['aprobada', 'verificada'] },
+      },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    for (const distribucion of pendientes) {
+      await confirmarCarga(negocioId, distribucion.id, usuarioId);
+      reparados += 1;
+    }
+  }
+  return { lineas: resultados, reparados };
 }
 
 /** Confirma todos los borradores con cantidades; los vacíos nunca pasan a preparación. */
@@ -997,7 +1049,43 @@ export async function crearDistribucionOperativa(
     });
     return { d, rutasCreadas };
   });
-  return { id: Number(resultado.d.id), pedidos: pedidos.length, rutas: resultado.rutasCreadas };
+
+  // Cuando Reparto está desactivado no existe una etapa manual de surtido/carga:
+  // crear el despacho equivale a aprobarlo y entregarlo. Se hace después de crear todas
+  // sus líneas para que confirmarCarga registre una sola salida FIFO por renglón.
+  const negocio = await prisma.negocios.findUnique({
+    where: { id: negocioId },
+    select: { reparto_habilitado: true },
+  });
+  let despachoAutomatico = false;
+  if (negocio && !negocio.reparto_habilitado) {
+    await prisma.$transaction(async (tx) => {
+      const lineasSinAprobar = await tx.distribucion_lineas.findMany({
+        where: { distribucion_id: resultado.d.id, cantidad_aprobada: null },
+      });
+      for (const lineaDistribucion of lineasSinAprobar) {
+        await tx.distribucion_lineas.update({
+          where: { id: lineaDistribucion.id },
+          data: {
+            cantidad_aprobada: lineaDistribucion.cantidad_sugerida,
+            costo_total: r2(num0(lineaDistribucion.cantidad_sugerida) * (num(lineaDistribucion.costo_unitario) ?? 0)),
+          },
+        });
+      }
+      await tx.distribuciones.update({
+        where: { id: resultado.d.id },
+        data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
+      });
+    });
+    await confirmarCarga(negocioId, resultado.d.id, usuarioId);
+    despachoAutomatico = true;
+  }
+  return {
+    id: Number(resultado.d.id),
+    pedidos: pedidos.length,
+    rutas: resultado.rutasCreadas,
+    despacho_automatico: despachoAutomatico,
+  };
 }
 
 /** Crea de una vez todos los despachos que tengan líneas de venta todavía sin vincular. */

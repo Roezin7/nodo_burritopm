@@ -39,6 +39,15 @@ export interface FilaConciliacionCalculable extends Acumulado {
   fisicoFinal: number | null;
 }
 
+/**
+ * La apertura representa inventario físico disponible, por lo que nunca puede ser
+ * negativa. Un faltante permanece visible como diferencia de la semana donde ocurrió,
+ * pero no se convierte en una deuda que contamine todas las semanas posteriores.
+ */
+export function normalizarSaldoApertura(cantidad: number) {
+  return r3(Math.max(0, cantidad));
+}
+
 /** Ecuación operativa: inicio + entradas − salidas, separada en los cortes de miércoles y sábado. */
 export function calcularFilaConciliacion(f: FilaConciliacionCalculable) {
   const entradas1 = f.compras1 + f.produccionSalida1;
@@ -142,11 +151,12 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     const actual = actualDe.get(p.id.toString()) ?? 0;
     // El cierre físico anterior es la apertura más confiable. Solo si no existe se
     // reconstruye hacia atrás desde el saldo vivo y los movimientos de la semana.
-    const inicialCalculado = cierreAnterior
+    const inicialCalculado = normalizarSaldoApertura(cierreAnterior
       ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
       : r3(actual - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
-        + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2);
-    const inicialCantidad = inicialDe.get(p.id.toString()) ?? inicialCalculado;
+        + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2));
+    // También protege semanas que ya tenían una apertura histórica negativa fijada.
+    const inicialCantidad = normalizarSaldoApertura(inicialDe.get(p.id.toString()) ?? inicialCalculado);
     const fisicoFinal = fisicoDe.has(p.id.toString()) ? fisicoDe.get(p.id.toString())! : null;
     return {
       product_id: Number(p.id), sku: p.sku, nombre: p.nombre, tipo: p.tipo_operativo,

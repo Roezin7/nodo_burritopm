@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcularFilaConciliacion, rangoSemana } from './conciliacion.js';
+import { calcularFilaConciliacion, normalizarSaldoApertura, rangoSemana } from './conciliacion.js';
 
 describe('conciliación semanal de inventario', () => {
   it('incluye el domingo dentro de la semana que cierra el sábado siguiente', () => {
@@ -55,5 +55,10 @@ describe('conciliación semanal de inventario', () => {
     expect(r.saldoMiercoles).toBe(18);
     expect(r.teoricoFinal).toBe(14);
     expect(r.diferenciaFinal).toBe(-1);
+  });
+
+  it('no arrastra un faltante negativo como inventario inicial de la semana siguiente', () => {
+    expect(normalizarSaldoApertura(-7.25)).toBe(0);
+    expect(normalizarSaldoApertura(12.3454)).toBe(12.345);
   });
 });
