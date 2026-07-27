@@ -23,7 +23,7 @@ interface Resumen {
   cantidad_compras: number;
   resumen_proteinas: { product_id: number; producto: string; cajas: number; costo_total: number; costo_caja: number; markup_caja: number; precio_venta_caja: number; venta_total: number }[];
   compras: { id: number; fecha: string; vence_at: string; proveedor_id: number; ubicacion_id: number; proveedor: string; referencia: string | null; total: number; estado: string; lineas: { product_id: number; producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean; es_cargo_compra: boolean }[] }[];
-  producciones: { id: number; token: string; extraordinaria: boolean; fecha: string; materia_prima: string; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; notas: string | null; salidas: { producto: string; sku: string; unidad: string; tipo: string | null; cajas: number; costo_caja: number; precio: number }[] }[];
+  producciones: { id: number; token: string; extraordinaria: boolean; fecha: string; materia_prima: string; materia_prima_id: number | null; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; notas: string | null; salidas: { product_id: number; producto: string; sku: string; unidad: string; tipo: string | null; cajas: number; costo_caja: number; precio: number }[] }[];
   lotes: { id: number; fecha: string; producto: string; product_id: number; cajas: number; peso_lb: number; costo: number; congelado: boolean }[];
 }
 interface Cierre {
@@ -338,6 +338,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const crearBorrador = (materia = String(materias[0]?.id ?? '')): ProduccionBorrador => ({ id: siguienteId.current++, idempotencyKey: nuevaClaveIdempotencia('produccion'), materia, entrada: '', salidas: {} });
   const [fecha, setFecha] = useState(fechaDentroDeSemana(semana));
   const [borradores, setBorradores] = useState<ProduccionBorrador[]>(() => [{ id: 1, idempotencyKey: nuevaClaveIdempotencia('produccion'), materia: String(materias[0]?.id ?? ''), entrada: '', salidas: {} }]);
+  const [editandoId, setEditandoId] = useState<number | null>(null);
   const [borradorHidratado, setBorradorHidratado] = useState<string | null>(null);
   const [produccionesAbiertas, setProduccionesAbiertas] = useState<Set<string>>(() => new Set());
   const [extraordinariaAbierta, setExtraordinariaAbierta] = useState(false);
@@ -365,6 +366,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     const filasGuardadas = guardado?.valor.borradores?.map((fila) => ({ ...fila, idempotencyKey: fila.idempotencyKey ?? nuevaClaveIdempotencia('produccion') }));
     if (filasGuardadas?.length) siguienteId.current = Math.max(...filasGuardadas.map((fila) => fila.id)) + 1;
     setBorradores(filasGuardadas ?? [crearBorrador()]);
+    setEditandoId(null);
     setProduccionesAbiertas(new Set());
     setExtraordinariaAbierta(false);
     setCantidadesExtraordinarias({});
@@ -418,7 +420,11 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     const recetasMateria = catalogo.recetas_produccion.filter((r) => r.materia_prima_id === materia?.id);
     const terminados = recetasMateria.map((r) => catalogo.productos.find((p) => p.id === r.producto_salida_id)).filter((p): p is Catalogo['productos'][number] => Boolean(p));
     const subproductos = new Set(recetasMateria.filter((r) => r.sin_costo).map((r) => r.producto_salida_id));
-    const lotesMateria = resumen.lotes.filter((l) => String(l.product_id) === borrador.materia);
+    const produccionEditada = editandoId == null ? null : resumen.producciones.find((p) => p.id === editandoId && !p.extraordinaria);
+    const loteRestaurado = produccionEditada?.materia_prima_id === Number(borrador.materia)
+      ? [{ id: -produccionEditada.id, fecha: produccionEditada.fecha, producto: produccionEditada.materia_prima, product_id: produccionEditada.materia_prima_id, cajas: produccionEditada.cajas_entrada, peso_lb: produccionEditada.peso_entrada_lb, costo: produccionEditada.costo, congelado: false }]
+      : [];
+    const lotesMateria = [...resumen.lotes.filter((l) => String(l.product_id) === borrador.materia), ...loteRestaurado];
     const lotesFrescos = lotesMateria.filter((l) => !l.congelado && l.fecha <= semana.fin).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
     const cajasFrescas = lotesFrescos.reduce((a, l) => a + l.cajas, 0);
     const cajasCongeladas = lotesMateria.filter((l) => l.congelado).reduce((a, l) => a + l.cajas, 0);
@@ -448,25 +454,51 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
     if (!capturaValida) { setError('Completa cada producto y revisa que la producción no exceda la materia prima disponible.'); return; }
     setBusy(true); setError('');
     try {
-      await api('/operacion/produccion/lote', {
-        method: 'POST',
-        body: {
-          producciones: calculos.map((c) => ({
+      const producciones = calculos.map((c) => ({
             ubicacion_id: carniceria.id,
             materia_prima_id: Number(c.borrador.materia),
             fecha,
             cajas_materia_prima: c.entrada,
             idempotency_key: c.borrador.idempotencyKey,
             salidas: c.terminados.filter((p) => Number(c.borrador.salidas[p.id] || 0) > 0).map((p) => ({ product_id: p.id, cajas: Number(c.borrador.salidas[p.id]) })),
-          })),
-        },
-      });
+          }));
+      if (editandoId == null) {
+        await api('/operacion/produccion/lote', { method: 'POST', body: { producciones } });
+      } else {
+        await api(`/operacion/produccion/${editandoId}`, { method: 'PATCH', body: producciones[0] });
+      }
       const cantidad = borradores.length;
       setBorradores([crearBorrador()]);
+      const fueEdicion = editandoId != null;
+      setEditandoId(null);
       guardarBorradorLocal(claveBorradorProduccion, null);
       await onDone();
-      toast.ok(`${cantidad} ${cantidad === 1 ? 'producción guardada' : 'producciones guardadas'} correctamente.`);
+      toast.ok(fueEdicion ? 'Producción corregida y saldos recalculados.' : `${cantidad} ${cantidad === 1 ? 'producción guardada' : 'producciones guardadas'} correctamente.`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar la producción.'); } finally { setBusy(false); }
+  }
+  async function editar(produccion: Resumen['producciones'][number]) {
+    if (produccion.extraordinaria || produccion.materia_prima_id == null) return;
+    if (capturaProduccionPendiente && !await dialog.confirm({
+      title: 'Editar producción registrada',
+      description: 'La captura que tienes en curso será reemplazada por este batch.',
+      confirmLabel: 'Cargar batch',
+    })) return;
+    setFecha(produccion.fecha);
+    setBorradores([{
+      id: siguienteId.current++,
+      idempotencyKey: nuevaClaveIdempotencia(`editar-produccion-${produccion.id}`),
+      materia: String(produccion.materia_prima_id),
+      entrada: String(produccion.cajas_entrada),
+      salidas: Object.fromEntries(produccion.salidas.map((salida) => [salida.product_id, String(salida.cajas)])),
+    }]);
+    setEditandoId(produccion.id);
+    setError('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function cancelarEdicion() {
+    setEditandoId(null);
+    setBorradores([crearBorrador()]);
+    guardarBorradorLocal(claveBorradorProduccion, null);
   }
   async function guardarExtraordinaria() {
     if (!carniceria) { setError('Falta crear la ubicación Carnicería.'); return; }
@@ -558,7 +590,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
   const todasProduccionesAbiertas = resumen.producciones.length > 0 && resumen.producciones.every((p) => produccionesAbiertas.has(p.token));
   return <div className="operation-stack">
     <section className="workspace-card production-capture">
-      <div className="workspace-card-head production-capture-head"><div><h2>Nueva producción</h2><div className="production-head-actions"><button type="button" className="btn btn-ghost btn-sm" disabled={busy || bloqueada || !productosExtraordinarios.length} onClick={() => setExtraordinariaAbierta(true)}>+ Extraordinaria</button><button type="button" className="btn btn-secondary btn-sm" onClick={cargarPlanDelDia}>Cargar plan del día</button></div></div><div className="production-day-picker"><span>Día · semana {semana.numero}</span><div role="group" aria-label={`Día de producción de la semana ${semana.numero}`}>{fechasProduccion.map((opcion) => <button type="button" key={opcion.fecha} className={fecha === opcion.fecha ? 'is-active' : ''} aria-pressed={fecha === opcion.fecha} onClick={() => setFecha(opcion.fecha)}><strong>{opcion.dia}</strong><small>{opcion.numero} {opcion.mes}</small></button>)}</div></div></div>
+      <div className="workspace-card-head production-capture-head"><div><h2>{editandoId == null ? 'Nueva producción' : 'Editar producción'}</h2><div className="production-head-actions">{editandoId != null && <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={cancelarEdicion}>Cancelar edición</button>}<button type="button" className="btn btn-ghost btn-sm" disabled={busy || bloqueada || editandoId != null || !productosExtraordinarios.length} onClick={() => setExtraordinariaAbierta(true)}>+ Extraordinaria</button><button type="button" className="btn btn-secondary btn-sm" disabled={editandoId != null} onClick={cargarPlanDelDia}>Cargar plan del día</button></div></div><div className="production-day-picker"><span>Día · semana {semana.numero}</span><div role="group" aria-label={`Día de producción de la semana ${semana.numero}`}>{fechasProduccion.map((opcion) => <button type="button" key={opcion.fecha} className={fecha === opcion.fecha ? 'is-active' : ''} aria-pressed={fecha === opcion.fecha} onClick={() => setFecha(opcion.fecha)}><strong>{opcion.dia}</strong><small>{opcion.numero} {opcion.mes}</small></button>)}</div></div></div>
       <div className="production-drafts">
         {calculos.map((calculo, indice) => {
           const { borrador, materia, terminados, cajasFrescas, cajasCongeladas, consumo, pesoSalida, insuficiente, pesoExcedido } = calculo;
@@ -579,8 +611,8 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
           </article>;
         })}
       </div>
-      <button type="button" className="btn btn-secondary production-add" disabled={busy || bloqueada || borradores.length >= 12 || !materias.length} onClick={agregarProducto}>+ Agregar otro producto</button>
-      <div className="production-capture-summary"><div><span><small>Productos</small><strong>{productosTerminadosTotal}</strong></span><span><small>Materia prima</small><strong>{cajasEntradaTotal.toLocaleString('es-MX')} cajas</strong></span><span><small>Producto terminado</small><strong>{cajasSalidaTotal.toLocaleString('es-MX')} cajas{piezasSubproductoTotal > 0 ? ` · ${piezasSubproductoTotal.toLocaleString('es-MX')} piezas` : ''}</strong></span><span><small>Yield principal</small><strong>{pesoEntradaTotal > 0 ? ((pesoSalidaTotal / pesoEntradaTotal) * 100).toFixed(1) : '0.0'}%</strong></span></div><button className="btn btn-primary" disabled={bloqueada || busy || !capturaValida} onClick={() => void guardar()}>{busy ? 'Guardando todo…' : bloqueada ? 'Semana cerrada' : borradores.length === 1 ? 'Guardar producción' : `Guardar ${borradores.length} producciones`}</button></div>
+      <button type="button" className="btn btn-secondary production-add" disabled={busy || bloqueada || editandoId != null || borradores.length >= 12 || !materias.length} onClick={agregarProducto}>+ Agregar otro producto</button>
+      <div className="production-capture-summary"><div><span><small>Productos</small><strong>{productosTerminadosTotal}</strong></span><span><small>Materia prima</small><strong>{cajasEntradaTotal.toLocaleString('es-MX')} cajas</strong></span><span><small>Producto terminado</small><strong>{cajasSalidaTotal.toLocaleString('es-MX')} cajas{piezasSubproductoTotal > 0 ? ` · ${piezasSubproductoTotal.toLocaleString('es-MX')} piezas` : ''}</strong></span><span><small>Yield principal</small><strong>{pesoEntradaTotal > 0 ? ((pesoSalidaTotal / pesoEntradaTotal) * 100).toFixed(1) : '0.0'}%</strong></span></div><button className="btn btn-primary" disabled={bloqueada || busy || !capturaValida} onClick={() => void guardar()}>{busy ? 'Guardando…' : bloqueada ? 'Semana cerrada' : editandoId != null ? 'Guardar corrección' : borradores.length === 1 ? 'Guardar producción' : `Guardar ${borradores.length} producciones`}</button></div>
     </section>
 
     {extraordinariaAbierta && <Modal className="payment-dialog extraordinary-production-modal" ariaLabelledBy="extraordinary-production-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => !busy && setExtraordinariaAbierta(false)}>
@@ -611,7 +643,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
           const abierta = produccionesAbiertas.has(p.token);
           const resumenSalidas = p.salidas.map((s) => `${s.producto}: ${s.cajas}`).join(' · ');
           return <article className={`batch-card ${p.extraordinaria ? 'batch-card--extraordinary' : ''} ${abierta ? 'is-open' : 'is-collapsed'}`} key={p.token}>
-            <header><button type="button" className="batch-collapse-button" aria-expanded={abierta} aria-controls={`batch-${p.token}`} onClick={() => alternarProduccion(p.token)}><span><strong>{p.materia_prima}</strong><small>{resumenSalidas || 'Sin salidas registradas'}</small></span><i aria-hidden="true">⌄</i></button><div className="batch-card-actions"><span className={`yield-pill ${p.extraordinaria ? 'yield-pill--extraordinary' : ''}`}>{p.extraordinaria ? 'Sin costo' : `Yield ${p.yield.toFixed(1)}%`}</span><button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p)}>Eliminar</button></div></header>
+            <header><button type="button" className="batch-collapse-button" aria-expanded={abierta} aria-controls={`batch-${p.token}`} onClick={() => alternarProduccion(p.token)}><span><strong>{p.materia_prima}</strong><small>{resumenSalidas || 'Sin salidas registradas'}</small></span><i aria-hidden="true">⌄</i></button><div className="batch-card-actions"><span className={`yield-pill ${p.extraordinaria ? 'yield-pill--extraordinary' : ''}`}>{p.extraordinaria ? 'Sin costo' : `Yield ${p.yield.toFixed(1)}%`}</span>{!p.extraordinaria && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => void editar(p)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminar(p)}>Eliminar</button></div></header>
             {abierta && <div id={`batch-${p.token}`} className="batch-card-detail">{p.extraordinaria ? <div className="batch-metrics"><span><small>Tipo</small><strong>Producción extraordinaria</strong></span><span><small>Costo asignado</small><strong>{usd(0)}</strong></span>{p.notas && <span><small>Nota</small><strong>{p.notas}</strong></span>}</div> : <div className="batch-metrics"><span><small>Materia prima</small><strong>{p.cajas_entrada} cajas compradas · {p.peso_entrada_lb} lb</strong></span><span><small>Producto terminado</small><strong>{p.peso_salida_lb} lb</strong></span><span><small>Remanente / subproductos</small><strong>{p.desperdicio_lb} lb</strong></span><span><small>Costo total del batch</small><strong>{usd(p.costo)}</strong></span></div>}<div className="batch-outputs">{p.salidas.map((s, i) => { const esProteina = s.tipo === 'proteina'; const precioCaja = esProteina ? s.costo_caja + MARKUP_PROTEINA : s.precio; return <div key={i}><span><strong>{s.producto}</strong><small>{s.cajas} {s.unidad.toLowerCase()}{s.cajas === 1 ? '' : 's'} terminada{s.cajas === 1 ? '' : 's'}</small></span><span className="batch-output-prices"><small>Costo por {s.unidad.toLowerCase()}</small><strong>{usd(s.costo_caja)}</strong><small>Venta por {s.unidad.toLowerCase()}</small><strong>{usd(precioCaja)}</strong>{esProteina && <em>+{usd(MARKUP_PROTEINA)} por caja</em>}</span></div>; })}</div></div>}
           </article>;
         })}</div>

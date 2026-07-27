@@ -195,6 +195,12 @@ operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => 
   res.status(201).json(await svc.registrarProduccion(req.auth!.negocioId, req.auth!.usuarioId, b));
 }));
 
+/** Corrige un batch completo y recalcula FIFO, costos, yield y existencias. */
+operacionRouter.patch('/produccion/:id', soloAdmin, asyncHandler(async (req, res) => {
+  const b = produccionSchema.parse(req.body);
+  res.json(await svc.editarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, b));
+}));
+
 /** Captura varios productos del mismo día sin guardar batches incompletos. */
 operacionRouter.post('/produccion/lote', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({ producciones: z.array(produccionSchema).min(1).max(12) })
