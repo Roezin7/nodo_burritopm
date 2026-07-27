@@ -82,8 +82,9 @@ export function calcularCostoSalidaProduccion(costoEntrada: number, pesoSalidaTo
   return { costoTotal, costoUnidad: cantidad > 0 ? r4(costoTotal / cantidad) : 0 };
 }
 
-/** Para proteínas, el precio no existe hasta tener producción en la semana:
- * costo total producido / cajas producidas + markup. Nunca arrastra el costo de otra semana. */
+/** Para proteínas producidas en la semana usa costo total / cajas + markup. Si una
+ * proteína se vende desde inventario inicial, conserva el costo de la fotografía
+ * cerrada anterior; no obliga a inventar una producción para poder facturarla. */
 export async function preciosVentaSemana(
   negocioId: bigint,
   productos: ProductoPrecioSemanal[],
@@ -98,6 +99,27 @@ export async function preciosVentaSemana(
     },
     select: { product_id: true, cajas: true, costo_total: true },
   }) : [];
+  const semanaAnterior = proteinas.length ? await prisma.semanas_operativas.findFirst({
+    where: { negocio_id: negocioId, termina_at: { lt: fecha(desde) }, estado: 'cerrada' },
+    orderBy: { termina_at: 'desc' },
+    include: {
+      inventario_semanal: {
+        where: {
+          product_id: { in: proteinas.map((p) => p.id) },
+          ubicacion: { tipo: 'bodega' },
+          cantidad_disponible: { gt: 0 },
+        },
+        select: { product_id: true, costo_promedio: true },
+      },
+    },
+  }) : null;
+  const costoAnterior = new Map<string, number>();
+  for (const inventario of semanaAnterior?.inventario_semanal ?? []) {
+    const costo = num(inventario.costo_promedio);
+    if (costo != null && !costoAnterior.has(inventario.product_id.toString())) {
+      costoAnterior.set(inventario.product_id.toString(), costo);
+    }
+  }
   const producido = new Map<string, { cajas: number; costo: number }>();
   for (const salida of salidas) {
     const clave = salida.product_id.toString();
@@ -109,7 +131,12 @@ export async function preciosVentaSemana(
   return new Map(productos.map((p) => {
     if (p.tipo_operativo !== 'proteina') return [p.id.toString(), precioVentaProducto(p)] as const;
     const total = producido.get(p.id.toString());
-    const precio = total ? calcularPrecioProteinaSemanal(total.cajas, total.costo) : null;
+    const costoArrastrado = costoAnterior.get(p.id.toString());
+    const precio = total
+      ? calcularPrecioProteinaSemanal(total.cajas, total.costo)
+      : costoArrastrado != null
+        ? r4(costoArrastrado + MARKUP_PROTEINA)
+        : null;
     return [p.id.toString(), precio] as const;
   }));
 }

@@ -206,7 +206,11 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
+async function valuacionInventario(
+  negocioId: bigint,
+  db: Db = prisma,
+  cantidadesAisladas: Map<string, number> = new Map(),
+) {
   const [existencias, lotes] = await Promise.all([
     db.existencias.findMany({
       // Billing valúa únicamente lo que pertenece al centro de operación. Lo ya entregado
@@ -214,7 +218,9 @@ async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
       where: {
         negocio_id: negocioId,
         ubicaciones: { tipo: 'bodega' },
-        OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }],
+        ...(cantidadesAisladas.size
+          ? {}
+          : { OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }] }),
       },
       include: { products: { select: { linea_operacion: true, tipo_operativo: true } }, ubicaciones: { select: { nombre: true } } },
     }),
@@ -223,7 +229,9 @@ async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
   let desechables = 0;
   let terminada = 0;
   for (const e of existencias) {
-    const valor = (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio);
+    const cantidad = cantidadesAisladas.get(`${e.ubicacion_id}:${e.product_id}`)
+      ?? num0(e.cantidad_disponible);
+    const valor = (Math.max(0, cantidad) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio);
     if (e.products.linea_operacion === 'desechables') desechables += valor;
     else if (e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima') terminada += valor;
   }
@@ -233,16 +241,23 @@ async function valuacionInventario(negocioId: bigint, db: Db = prisma) {
   return { valor_carne: r2(terminada + fresca), valor_congelado: r2(congelada), valor_desechables: r2(desechables) };
 }
 
-async function calcularBalance(negocioId: bigint, semanaId: bigint, terminaAt: Date, db: Db = prisma, usarInventarioVivo = false) {
+async function calcularBalance(
+  negocioId: bigint,
+  semanaId: bigint,
+  terminaAt: Date,
+  db: Db = prisma,
+  usarInventarioVivo = false,
+  inventarioForzado?: Awaited<ReturnType<typeof valuacionInventario>>,
+) {
   const semana = await db.semanas_operativas.findUnique({
     where: { id: semanaId },
     select: { estado: true, inicia_at: true, valor_carne: true, valor_congelado: true, valor_desechables: true },
   });
   // Después del cierre el inventario guardado es la fotografía contable. Cobrar o pagar
   // días después solo actualiza cartera; nunca sustituye esa foto con el inventario vivo.
-  const inv = semana?.estado === 'cerrada' && !usarInventarioVivo
+  const inv = inventarioForzado ?? (semana?.estado === 'cerrada' && !usarInventarioVivo
     ? { valor_carne: num0(semana.valor_carne), valor_congelado: num0(semana.valor_congelado), valor_desechables: num0(semana.valor_desechables) }
-    : await valuacionInventario(negocioId, db);
+    : await valuacionInventario(negocioId, db));
   const facturas = await db.facturas.findMany({
     // Billing trabaja con una ventana móvil: semana del cierre + dos anteriores.
     where: {
@@ -283,18 +298,6 @@ async function actualizarUltimoBalance(negocioId: bigint) {
 type SemanaCierre = Awaited<ReturnType<typeof asegurarSemana>>;
 
 async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
-  // La valuación parte del ledger vivo; una operación posterior haría que la fotografía
-  // histórica de esta semana fuera incorrecta.
-  const [comprasPosteriores, produccionesPosteriores, produccionesExtraordinariasPosteriores, pedidosPosteriores] = await Promise.all([
-    prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at }, estado: { not: 'cancelada' } } }),
-    prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at } } }),
-    prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gt: semana.termina_at } } }),
-    prisma.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gt: semana.termina_at }, estado: { not: 'cancelado' }, lineas: { some: {} } } }),
-  ]);
-  if (comprasPosteriores || produccionesPosteriores || produccionesExtraordinariasPosteriores || pedidosPosteriores) {
-    throw new HttpError(409, 'Hay operación capturada en una semana posterior. Cierra las semanas en orden para que la fotografía de inventario sea correcta.');
-  }
-
   const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
   const [pedidosSinPreparar, borradoresConVenta, distribucionesActivas, coberturaCarne, coberturaDesechables] = await Promise.all([
     prisma.pedidos_operativos.count({
@@ -385,7 +388,10 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   }).sort((a, b) => a.ubicacion.localeCompare(b.ubicacion, 'es') || a.linea.localeCompare(b.linea));
 
   const [inventario, facturasAnteriores, comprasPendientes] = await Promise.all([
-    valuacionInventario(negocioId),
+    valuacionInventario(negocioId, prisma, new Map(alertaInventario.inventario.map((saldo) => [
+      `${saldo.ubicacion_id}:${saldo.product_id}`,
+      saldo.cantidad,
+    ]))),
     prisma.facturas.findMany({
       where: {
         negocio_id: negocioId,
@@ -450,7 +456,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
-  await validarSemanaCerrable(negocioId, semana);
+  const alertaInventario = await validarSemanaCerrable(negocioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
   const cierre = await transaccionSerializable(async (tx) => {
@@ -492,12 +498,19 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       }),
       tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
     ]);
-    // Solo los saldos de bodega forman parte de la conciliación y alerta semanal.
-    const saldosCierre = existencias.flatMap((existencia) => {
-      const saldo = saldoParaCierreSemanal(num0(existencia.cantidad_disponible));
-      return existencia.ubicaciones.tipo === 'bodega' && saldo.faltante > 0
-        ? [{ existencia, cantidad: saldo.faltante }]
-        : [];
+    const existenciaDe = new Map(existencias.map((existencia) => [
+      `${existencia.ubicacion_id}:${existencia.product_id}`,
+      existencia,
+    ]));
+    const inventarioAisladoDe = new Map(alertaInventario.inventario.map((saldo) => [
+      `${saldo.ubicacion_id}:${saldo.product_id}`,
+      saldo.cantidad,
+    ]));
+    // Los faltantes se calculan con la ecuación de la semana seleccionada. El saldo vivo
+    // puede incluir ya movimientos posteriores y no debe contaminar la fotografía histórica.
+    const saldosCierre = alertaInventario.saldos.flatMap((saldo) => {
+      const existencia = existenciaDe.get(`${saldo.ubicacion_id}:${saldo.product_id}`);
+      return existencia ? [{ existencia, cantidad: saldo.cantidad }] : [];
     });
     // Un saldo negativo representa cajas que salieron sin respaldo registrado. No tiene valor
     // contable ni bloquea el cierre: se conserva en la fotografía y se abre una incidencia visible.
@@ -530,7 +543,9 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       await tx.inventario_semanal.createMany({
         data: existencias.map((e) => {
           const lote = totalesLote.get(`${e.ubicacion_id}:${e.product_id}`);
-          const saldo = saldoParaCierreSemanal(num0(e.cantidad_disponible));
+          const cantidadSemanal = inventarioAisladoDe.get(`${e.ubicacion_id}:${e.product_id}`)
+            ?? num0(e.cantidad_disponible);
+          const saldo = saldoParaCierreSemanal(cantidadSemanal);
           const disponible = saldo.disponible;
           const reservada = Math.max(0, num0(e.cantidad_reservada));
           const transito = Math.max(0, num0(e.cantidad_transito));
@@ -564,8 +579,9 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
         }],
       });
     }
+    const inventarioCierre = await valuacionInventario(negocioId, tx, inventarioAisladoDe);
     await tx.semanas_operativas.update({ where: { id: semana.id }, data: { estado: 'cerrada', cerrado_por: usuarioId, cerrado_at: new Date() } });
-    const balance = await calcularBalance(negocioId, semana.id, semana.termina_at, tx, true);
+    const balance = await calcularBalance(negocioId, semana.id, semana.termina_at, tx, false, inventarioCierre);
     return {
       facturas: creadas.length,
       balance,

@@ -61,4 +61,25 @@ describe('conciliación semanal de inventario', () => {
     expect(normalizarSaldoApertura(-7.25)).toBe(0);
     expect(normalizarSaldoApertura(12.3454)).toBe(12.345);
   });
+
+  it('aísla el saldo semanal aunque el inventario vivo ya tenga movimientos posteriores', () => {
+    const base = {
+      inicial: 10,
+      fisicoFinal: null,
+      compras1: 0,
+      compras2: 0,
+      produccionEntrada1: 0,
+      produccionEntrada2: 0,
+      produccionSalida1: 20,
+      produccionSalida2: 0,
+      salidas1: 8,
+      salidas2: 7,
+      pedidos1: 8,
+      pedidos2: 7,
+    };
+
+    expect(calcularFilaConciliacion({ ...base, actual: 15 }).teoricoFinal).toBe(15);
+    // La semana siguiente ya consumió 12 cajas y el saldo vivo bajó a 3.
+    expect(calcularFilaConciliacion({ ...base, actual: 3 }).teoricoFinal).toBe(15);
+  });
 });

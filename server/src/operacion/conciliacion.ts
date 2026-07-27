@@ -83,7 +83,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
   });
   const ids = productos.map((p) => p.id);
-  const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior] = await Promise.all([
+  const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior, semanaAnterior] = await Promise.all([
     prisma.existencias.findMany({ where: { ubicacion_id: ubicacion.id, product_id: { in: ids } } }),
     prisma.compras.findMany({
       where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, estado: { not: 'cancelada' } },
@@ -117,6 +117,16 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
       where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio }, notas: { startsWith: 'inventario_final_operativo' } },
       include: { lineas: true }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     }),
+    prisma.semanas_operativas.findFirst({
+      where: { negocio_id: negocioId, termina_at: { lt: inicio }, estado: 'cerrada' },
+      orderBy: { termina_at: 'desc' },
+      include: {
+        inventario_semanal: {
+          where: { ubicacion_id: ubicacion.id },
+          select: { product_id: true, cantidad_disponible: true },
+        },
+      },
+    }),
   ]);
 
   const acumulados = new Map(ids.map((id) => [id.toString(), vacio()]));
@@ -145,16 +155,20 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   const actualDe = new Map(existencias.map((e) => [e.product_id.toString(), num0(e.cantidad_disponible)]));
   const inicialDe = new Map(inicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const cierreAnteriorDe = new Map(cierreAnterior?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
+  const snapshotAnteriorDe = new Map(semanaAnterior?.inventario_semanal
+    .map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)] as const) ?? []);
   const fisicoDe = new Map(final?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const filas = productos.map((p) => {
     const a = acumulados.get(p.id.toString()) ?? vacio();
     const actual = actualDe.get(p.id.toString()) ?? 0;
     // El cierre físico anterior es la apertura más confiable. Solo si no existe se
     // reconstruye hacia atrás desde el saldo vivo y los movimientos de la semana.
-    const inicialCalculado = normalizarSaldoApertura(cierreAnterior
-      ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
-      : r3(actual - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
-        + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2));
+    const inicialCalculado = normalizarSaldoApertura(semanaAnterior
+      ? (snapshotAnteriorDe.get(p.id.toString()) ?? 0)
+      : cierreAnterior
+        ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
+        : r3(actual - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
+          + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2));
     // También protege semanas que ya tenían una apertura histórica negativa fijada.
     const inicialCantidad = normalizarSaldoApertura(inicialDe.get(p.id.toString()) ?? inicialCalculado);
     const fisicoFinal = fisicoDe.has(p.id.toString()) ? fisicoDe.get(p.id.toString())! : null;
@@ -171,7 +185,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
     periodo: { desde, hasta, corte_miercoles: iso(corte) },
     inicial_fijado: Boolean(inicial), inventario_inicial_id: inicial ? Number(inicial.id) : null,
-    origen_inicial: inicial ? 'fijado' : (cierreAnterior ? 'cierre_anterior' : 'reconstruido'),
+    origen_inicial: inicial ? 'fijado' : (semanaAnterior || cierreAnterior ? 'cierre_anterior' : 'reconstruido'),
     inventario_anterior_id: cierreAnterior ? Number(cierreAnterior.id) : null,
     final_capturado: Boolean(final), inventario_final_id: final ? Number(final.id) : null,
     filas,
@@ -222,31 +236,37 @@ export async function fijarInventarioInicialSemanal(negocioId: bigint, usuarioId
 }
 
 export async function validarConciliacionParaCierre(negocioId: bigint, desde: string, hasta: string) {
-  const [pedidosCarne, producciones, produccionesExtraordinarias, negativos] = await Promise.all([
+  const [pedidosCarne, producciones, produccionesExtraordinarias] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) }, estado: { notIn: ['borrador', 'cancelado'] } },
     }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
     prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
-    prisma.existencias.findMany({
-      where: { negocio_id: negocioId, ubicaciones: { tipo: 'bodega' }, cantidad_disponible: { lt: 0 } },
-      include: { products: { select: { nombre: true } }, ubicaciones: { select: { nombre: true } } },
-    }),
   ]);
+  const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
+  if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
+  const saldos = reporte.filas
+    .filter((fila) => fila.teoricoFinal < -0.0001)
+    .map((fila) => ({
+      product_id: fila.product_id,
+      ubicacion_id: reporte.ubicacion.id,
+      producto: fila.nombre,
+      ubicacion: reporte.ubicacion.nombre,
+      cantidad: r3(Math.abs(fila.teoricoFinal)),
+    }));
   const alertaNegativos = {
-    cajas_perdidas: r3(negativos.reduce((total, e) => total + Math.abs(num0(e.cantidad_disponible)), 0)),
-    saldos: negativos.map((e) => ({
-      product_id: Number(e.product_id), ubicacion_id: Number(e.ubicacion_id),
-      producto: e.products.nombre, ubicacion: e.ubicaciones.nombre,
-      cantidad: r3(Math.abs(num0(e.cantidad_disponible))),
+    cajas_perdidas: r3(saldos.reduce((total, saldo) => total + saldo.cantidad, 0)),
+    saldos,
+    inventario: reporte.filas.map((fila) => ({
+      product_id: fila.product_id,
+      ubicacion_id: reporte.ubicacion.id,
+      cantidad: r3(fila.teoricoFinal),
     })),
   };
   if (!pedidosCarne && !producciones && !produccionesExtraordinarias) return alertaNegativos;
-  const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
-  if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
   // El físico final es una auditoría opcional. El cierre usa el saldo vivo que ya integra
-  // compras + producción − despachos; los negativos se reportan como cajas perdidas y se
-  // valúan en cero. Si hubo conteo físico, sus ajustes ya forman parte de ese mismo saldo.
+  // exclusivamente apertura + compras + producción − despachos del periodo seleccionado.
+  // Los movimientos de semanas posteriores nunca alteran esta conciliación.
   return alertaNegativos;
 }
 
