@@ -62,8 +62,11 @@ cierreRouter.delete('/facturas/:id/pago', asyncHandler(async (req, res) => {
 }));
 
 cierreRouter.post('/compras/:id/pagar', asyncHandler(async (req, res) => {
-  const { fecha_pago } = z.object({ fecha_pago: fecha }).parse(req.body);
-  res.json(await svc.pagarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), fecha_pago));
+  const { fecha_pago, monto } = z.object({
+    fecha_pago: fecha,
+    monto: z.coerce.number().positive().max(1_000_000).optional(),
+  }).parse(req.body);
+  res.json(await svc.pagarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, fecha_pago, monto));
 }));
 
 cierreRouter.post('/compras/pagar-lote', asyncHandler(async (req, res) => {

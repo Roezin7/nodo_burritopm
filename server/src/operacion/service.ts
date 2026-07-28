@@ -1366,10 +1366,14 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
   return transaccionSerializable(async (tx) => {
     const anterior = await tx.compras.findFirst({
       where: { id: compraId, negocio_id: negocioId },
-      include: { lineas: { include: { producto: true, lote: { include: { _count: { select: { consumos: true, ajustes: true, salidas_inventario: true } } } } } } },
+      include: {
+        pagos: { select: { id: true } },
+        lineas: { include: { producto: true, lote: { include: { _count: { select: { consumos: true, ajustes: true, salidas_inventario: true } } } } } },
+      },
     });
     if (!anterior) throw new HttpError(404, 'Compra no encontrada');
     if (anterior.estado !== 'pendiente') throw new HttpError(409, 'Solo se pueden editar compras pendientes de pago.');
+    if (anterior.pagos.length > 0) throw new HttpError(409, 'La compra tiene pagos registrados. Reviértelos antes de editarla.');
     if (anterior.ubicacion_id !== ubicacion.id) throw new HttpError(409, 'No se puede cambiar el almacén de una compra existente.');
 
     const gruposAnteriores = new Map<string, { productId: bigint; cajas: number; costo: number; materiaPrima: boolean; manejaLote: boolean; nombre: string }>();
@@ -1497,6 +1501,7 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
     const compra = await tx.compras.findFirst({
       where: { id: compraId, negocio_id: negocioId },
       include: {
+        pagos: { select: { id: true } },
         lineas: {
           include: {
             producto: true,
@@ -1506,6 +1511,7 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
       },
     });
     if (!compra) throw new HttpError(404, 'Compra no encontrada');
+    if (compra.pagos.length > 0) throw new HttpError(409, 'La compra tiene pagos registrados. Reviértelos antes de eliminarla.');
     const datosAuditoria = {
       fecha: iso(compra.fecha), referencia: compra.referencia, total: num0(compra.total),
       lineas: compra.lineas.map((l) => ({ product_id: Number(l.product_id), cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total) })),

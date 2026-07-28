@@ -48,9 +48,12 @@ async function datos(negocioId: bigint, semanaId: bigint) {
     prisma.compras.findMany({
       where: {
         negocio_id: negocioId, fecha: { lte: semana.termina_at }, estado: { not: 'cancelada' },
-        OR: [{ estado: 'pendiente' }, { estado: 'pagada', pagado_at: { gt: semana.termina_at } }],
       },
-      include: { proveedor: true }, orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
+      include: {
+        proveedor: true,
+        pagos: { where: { pagado_at: { lte: semana.termina_at } }, select: { monto: true } },
+      },
+      orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
     }),
     prisma.producciones.findMany({
       where: { negocio_id: negocioId, fecha: { gte: semana.inicia_at, lte: semana.termina_at } },
@@ -591,7 +594,11 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const cuentasPorCobrar = saldos.reduce((a, x) => a + x, 0);
   formula(ws, 'BW9', 'SUM(BW3:BW8)', inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrar);
 
-  const porProveedor = [...d.comprasPendientes.reduce((mapa, c) => mapa.set(c.proveedor.nombre, (mapa.get(c.proveedor.nombre) ?? 0) + num0(c.total)), new Map<string, number>())]
+  const porProveedor = [...d.comprasPendientes.reduce((mapa, c) => {
+    const saldo = Math.max(0, num0(c.total) - c.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
+    if (saldo > 0) mapa.set(c.proveedor.nombre, (mapa.get(c.proveedor.nombre) ?? 0) + saldo);
+    return mapa;
+  }, new Map<string, number>())]
     .map(([nombre, total]) => ({ nombre, total }));
   const proveedores = porProveedor.length <= 5 ? porProveedor : [
     ...porProveedor.slice(0, 4),

@@ -43,6 +43,7 @@ interface FacturaRecibida {
   vence_at: string;
   estado: 'pendiente' | 'pagada';
   total: number;
+  pagado: number;
   saldo: number;
   pagado_at: string | null;
   lineas: { producto: string; cantidad: number; unidad: string; peso_lb: number; importe: number }[];
@@ -75,7 +76,7 @@ interface Cartera {
 }
 
 type Detalle = { tipo: 'cobrar'; factura: FacturaEmitida } | { tipo: 'pagar'; factura: FacturaRecibida };
-type Movimiento = { ids: number[]; titulo: string; monto: number };
+type Movimiento = { ids: number[]; titulo: string; saldo: number; permiteParcial: boolean };
 
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -92,6 +93,7 @@ export default function Facturacion() {
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [movimiento, setMovimiento] = useState<Movimiento | null>(null);
   const [fechaPago, setFechaPago] = useState(hoy());
+  const [montoPago, setMontoPago] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [seleccionPagar, setSeleccionPagar] = useState<Set<number>>(() => new Set());
@@ -128,7 +130,11 @@ export default function Facturacion() {
     try {
       const lote = movimiento.ids.length > 1;
       const ruta = lote ? '/cierre/compras/pagar-lote' : `/cierre/compras/${movimiento.ids[0]}/pagar`;
-      await api(ruta, { method: 'POST', body: lote ? { ids: movimiento.ids, fecha_pago: fechaPago } : { fecha_pago: fechaPago } });
+      const monto = Number(montoPago);
+      await api(ruta, {
+        method: 'POST',
+        body: lote ? { ids: movimiento.ids, fecha_pago: fechaPago } : { fecha_pago: fechaPago, monto },
+      });
       setMovimiento(null); setDetalle(null);
       setSeleccionPagar(new Set());
       await cargar();
@@ -139,7 +145,8 @@ export default function Facturacion() {
 
   function prepararMovimiento(id: number, titulo: string, monto: number) {
     setFechaPago(hoy());
-    setMovimiento({ ids: [id], titulo, monto });
+    setMontoPago(monto.toFixed(2));
+    setMovimiento({ ids: [id], titulo, saldo: monto, permiteParcial: true });
   }
 
   function prepararLote() {
@@ -147,7 +154,8 @@ export default function Facturacion() {
     const documentos = recibidas.filter((f) => ids.includes(f.id));
     const monto = documentos.reduce((suma, documento) => suma + documento.saldo, 0);
     setFechaPago(hoy());
-    setMovimiento({ ids, titulo: `${ids.length} documentos seleccionados`, monto });
+    setMontoPago(monto.toFixed(2));
+    setMovimiento({ ids, titulo: `${ids.length} documentos seleccionados`, saldo: monto, permiteParcial: false });
   }
 
   async function revertirMovimiento(id: number) {
@@ -209,12 +217,13 @@ export default function Facturacion() {
 
   function filaRecibida(factura: FacturaRecibida) {
     const vencida = factura.estado === 'pendiente' && factura.vence_at < hoy();
+    const abonada = factura.estado === 'pendiente' && factura.pagado > 0;
     return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
       {factura.estado === 'pendiente' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar compra ${factura.referencia ?? factura.id}`} checked={seleccionPagar.has(factura.id)} onChange={() => alternarSeleccion(factura.id)} />}
       <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'pagar', factura })}><strong>{factura.referencia || `Compra #${factura.id}`}</strong><span>{factura.proveedor}</span><small>{factura.ubicacion}</small></button>
       <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
-      <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
-      <div className="billing-row-actions">{factura.estado === 'pendiente' ? <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
+      <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : abonada ? 'Pago parcial' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{abonada ? `${usd(factura.pagado)} abonado` : factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
+      <div className="billing-row-actions">{factura.estado === 'pendiente' ? <><button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button>{abonada && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir pagos</button>}</> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
     </article>;
   }
 
@@ -292,9 +301,10 @@ export default function Facturacion() {
 
     {movimiento && <Modal className="payment-dialog" ariaLabelledBy="payment-dialog-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => setMovimiento(null)}>
       <div className="card-head"><div><span className="eyebrow">Pago a proveedor</span><strong id="payment-dialog-title">{movimiento.titulo}</strong></div><button className="icon-btn" aria-label="Cerrar" disabled={busy} onClick={() => setMovimiento(null)}><Icono name="x" /></button></div>
-      <div className="payment-dialog-amount"><span>Monto total</span><strong>{usd(movimiento.monto)}</strong></div>
+      <div className="payment-dialog-amount"><span>{movimiento.permiteParcial ? 'Saldo pendiente' : 'Monto total'}</span><strong>{usd(movimiento.saldo)}</strong></div>
+      <label className="field"><span>Monto del pago</span><input type="number" min="0.01" max={movimiento.saldo} step="0.01" inputMode="decimal" value={montoPago} disabled={!movimiento.permiteParcial} onChange={(e) => setMontoPago(e.target.value)} />{movimiento.permiteParcial && <small>Puedes registrar un abono o liquidar el saldo completo.</small>}</label>
       <label className="field"><span>Fecha del pago</span><input type="date" max={hoy()} value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} /></label>
-      <div className="form-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setMovimiento(null)}>Cancelar</button><button className="btn btn-primary" disabled={busy || !fechaPago} onClick={() => void registrarMovimiento()}>{busy ? 'Guardando…' : 'Confirmar pago'}</button></div>
+      <div className="form-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setMovimiento(null)}>Cancelar</button><button className="btn btn-primary" disabled={busy || !fechaPago || Number(montoPago) <= 0 || Number(montoPago) > movimiento.saldo} onClick={() => void registrarMovimiento()}>{busy ? 'Guardando…' : Number(montoPago) < movimiento.saldo ? 'Registrar abono' : 'Confirmar pago'}</button></div>
     </Modal>}
 
     {mostrarCredito && <Modal className="payment-dialog" ariaLabelledBy="credit-dialog-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => setMostrarCredito(false)}>

@@ -280,11 +280,12 @@ async function calcularBalance(
       negocio_id: negocioId,
       fecha: { lte: terminaAt },
       estado: { not: 'cancelada' },
-      OR: [{ estado: 'pendiente' }, { estado: 'pagada', pagado_at: { gt: terminaAt } }],
     },
-    select: { total: true },
+    select: { total: true, pagos: { where: { pagado_at: { lte: terminaAt } }, select: { monto: true } } },
   });
-  const pagar = r2(compras.reduce((a, c) => a + num0(c.total), 0));
+  const pagar = r2(compras.reduce((a, c) => a + Math.max(0,
+    num0(c.total) - c.pagos.reduce((total, pago) => total + num0(pago.monto), 0),
+  ), 0));
   const balance = r2(inv.valor_carne + inv.valor_congelado + inv.valor_desechables + cobrar - pagar);
   await db.semanas_operativas.update({ where: { id: semanaId }, data: { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance } });
   return { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance };
@@ -406,8 +407,8 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       include: { pagos: true },
     }),
     prisma.compras.findMany({
-      where: { negocio_id: negocioId, estado: 'pendiente', fecha: { lte: semana.termina_at } },
-      select: { total: true },
+      where: { negocio_id: negocioId, estado: { not: 'cancelada' }, fecha: { lte: semana.termina_at } },
+      select: { total: true, pagos: { where: { pagado_at: { lte: semana.termina_at } }, select: { monto: true } } },
     }),
   ]);
   const documentosAnteriores: DocumentoCarteraCliente[] = facturasAnteriores.map((factura) => ({
@@ -425,7 +426,9 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   }));
   const porCobrar = r2([...distribuirCreditosCliente([...documentosAnteriores, ...documentosProyectados]).saldos.values()]
     .reduce((total, saldo) => total + saldo, 0));
-  const porPagar = r2(comprasPendientes.reduce((total, compra) => total + num0(compra.total), 0));
+  const porPagar = r2(comprasPendientes.reduce((total, compra) => total + Math.max(0,
+    num0(compra.total) - compra.pagos.reduce((pagado, pago) => pagado + num0(pago.monto), 0),
+  ), 0));
   const inventarioTotal = r2(inventario.valor_carne + inventario.valor_congelado + inventario.valor_desechables);
 
   return {
@@ -712,6 +715,7 @@ export async function listarCartera(negocioId: bigint) {
       include: {
         proveedor: { select: { nombre: true } },
         ubicacion: { select: { nombre: true } },
+        pagos: { orderBy: [{ pagado_at: 'desc' }, { id: 'desc' }] },
         lineas: { include: { producto: { select: { nombre: true, es_cargo_compra: true, unidad_distribucion: { select: { nombre: true } } } } } },
       },
       orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
@@ -755,17 +759,21 @@ export async function listarCartera(negocioId: bigint) {
       lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })),
     };
   });
-  const recibidas = compras.map((c) => ({
+  const recibidas = compras.map((c) => {
+    const pagado = r2(c.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
+    const saldo = Math.max(0, r2(num0(c.total) - pagado));
+    return {
     id: Number(c.id),
     referencia: c.referencia,
     proveedor: c.proveedor.nombre,
     ubicacion: c.ubicacion.nombre,
     recibida_at: iso(c.fecha),
     vence_at: iso(c.vence_at),
-    estado: c.estado,
+    estado: saldo <= 0 ? 'pagada' : 'pendiente',
     total: num0(c.total),
-    saldo: c.estado === 'pendiente' ? num0(c.total) : 0,
-    pagado_at: c.pagado_at ? iso(c.pagado_at) : null,
+    pagado,
+    saldo,
+    pagado_at: c.pagos[0] ? iso(c.pagos[0].pagado_at) : null,
     lineas: c.lineas.map((l) => ({
       producto: l.producto.nombre,
       cantidad: l.producto.es_cargo_compra ? 1 : num0(l.cajas),
@@ -773,7 +781,7 @@ export async function listarCartera(negocioId: bigint) {
       peso_lb: l.producto.es_cargo_compra ? 0 : num0(l.peso_total_lb),
       importe: num0(l.costo_total),
     })),
-  }));
+  }});
   const pendientesEmitidas = emitidas.filter((f) => f.en_ciclo && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
   const hoy = hoyChicago();
@@ -888,14 +896,39 @@ export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuario
   return { ok: true, monto: saldo };
 }
 
-export async function pagarCompra(negocioId: bigint, compraId: bigint, fechaPago: string) {
-  const c = await prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId, estado: 'pendiente' } });
-  if (!c) throw new HttpError(404, 'Compra pendiente no encontrada');
-  if (fechaPago < iso(c.fecha)) throw new HttpError(400, 'La fecha de pago no puede ser anterior a la compra');
-  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
-  await prisma.compras.update({ where: { id: c.id }, data: { estado: 'pagada', pagado_at: fecha(fechaPago) } });
+export async function pagarCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint, fechaPago: string, montoSolicitado?: number) {
+  const resultado = await transaccionSerializable(async (tx) => {
+    const c = await tx.compras.findFirst({
+      where: { id: compraId, negocio_id: negocioId, estado: { not: 'cancelada' } },
+      include: { pagos: true },
+    });
+    if (!c) throw new HttpError(404, 'Compra pendiente no encontrada');
+    if (fechaPago < iso(c.fecha)) throw new HttpError(400, 'La fecha de pago no puede ser anterior a la compra');
+    if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
+    const pagado = r2(c.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
+    const saldo = Math.max(0, r2(num0(c.total) - pagado));
+    if (saldo <= 0) throw new HttpError(409, 'La compra ya está pagada. Recarga la cartera.');
+    const monto = montoSolicitado === undefined ? saldo : r2(montoSolicitado);
+    if (!Number.isFinite(monto) || monto <= 0) throw new HttpError(400, 'El monto del pago debe ser mayor a cero');
+    if (monto > saldo) throw new HttpError(409, `El pago no puede superar el saldo pendiente de ${saldo.toFixed(2)}`);
+    const saldoNuevo = r2(saldo - monto);
+    await tx.pagos_compra.create({
+      data: { compra_id: c.id, monto, pagado_at: fecha(fechaPago), registrado_por: usuarioId },
+    });
+    await tx.compras.update({
+      where: { id: c.id },
+      data: { estado: saldoNuevo <= 0 ? 'pagada' : 'pendiente', pagado_at: saldoNuevo <= 0 ? fecha(fechaPago) : null },
+    });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId, usuario_id: usuarioId, accion: saldoNuevo <= 0 ? 'pagar_compra' : 'abonar_compra',
+        entidad: 'compra', entidad_id: c.id, datos: { fecha_pago: fechaPago, monto, saldo_anterior: saldo, saldo_nuevo: saldoNuevo },
+      },
+    });
+    return { monto, saldo: saldoNuevo, liquidada: saldoNuevo <= 0 };
+  });
   await actualizarUltimoBalance(negocioId);
-  return { ok: true, monto: num0(c.total) };
+  return { ok: true, ...resultado };
 }
 
 export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[], usuarioId: bigint, fechaPago: string) {
@@ -929,10 +962,22 @@ export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[],
 export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], usuarioId: bigint, fechaPago: string) {
   if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
   const resultado = await transaccionSerializable(async (tx) => {
-    const compras = await tx.compras.findMany({ where: { id: { in: compraIds }, negocio_id: negocioId, estado: 'pendiente' } });
+    const compras = await tx.compras.findMany({
+      where: { id: { in: compraIds }, negocio_id: negocioId, estado: { not: 'cancelada' } },
+      include: { pagos: true },
+    });
     if (compras.length !== new Set(compraIds.map(String)).size) throw new HttpError(409, 'Una o más compras ya no están pendientes. Recarga la cartera.');
     for (const compra of compras) if (fechaPago < iso(compra.fecha)) throw new HttpError(400, `Compra #${compra.id}: la fecha es anterior a la compra`);
-    const total = r2(compras.reduce((suma, compra) => suma + num0(compra.total), 0));
+    const saldos = new Map(compras.map((compra) => [compra.id.toString(), Math.max(0, r2(
+      num0(compra.total) - compra.pagos.reduce((total, pago) => total + num0(pago.monto), 0),
+    ))]));
+    if ([...saldos.values()].some((saldo) => saldo <= 0)) throw new HttpError(409, 'Una o más compras ya están pagadas. Recarga la cartera.');
+    const total = r2([...saldos.values()].reduce((suma, saldo) => suma + saldo, 0));
+    await tx.pagos_compra.createMany({
+      data: compras.map((compra) => ({
+        compra_id: compra.id, monto: saldos.get(compra.id.toString())!, pagado_at: fecha(fechaPago), registrado_por: usuarioId,
+      })),
+    });
     await tx.compras.updateMany({ where: { id: { in: compraIds } }, data: { estado: 'pagada', pagado_at: fecha(fechaPago) } });
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'compras', datos: { ids: compraIds.map(Number), fecha_pago: fechaPago, total } } });
     return { compras: compras.length, total };
@@ -955,14 +1000,19 @@ export async function revertirPagoFactura(negocioId: bigint, facturaId: bigint, 
 }
 
 export async function revertirPagoCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint) {
-  const compra = await prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId, estado: 'pagada' } });
-  if (!compra) throw new HttpError(404, 'Compra pagada no encontrada');
+  const compra = await prisma.compras.findFirst({
+    where: { id: compraId, negocio_id: negocioId, estado: { not: 'cancelada' } },
+    include: { pagos: true },
+  });
+  if (!compra || compra.pagos.length === 0) throw new HttpError(404, 'La compra no tiene pagos para revertir');
+  const monto = r2(compra.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
   await prisma.$transaction(async (tx) => {
+    await tx.pagos_compra.deleteMany({ where: { compra_id: compra.id } });
     await tx.compras.update({ where: { id: compra.id }, data: { estado: 'pendiente', pagado_at: null } });
-    await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'revertir_pago', entidad: 'compra', entidad_id: compra.id, datos: { monto: num0(compra.total) } } });
+    await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'revertir_pago', entidad: 'compra', entidad_id: compra.id, datos: { monto } } });
   });
   await actualizarUltimoBalance(negocioId);
-  return { ok: true, monto: num0(compra.total) };
+  return { ok: true, monto };
 }
 
 export async function detalleFactura(negocioId: bigint, facturaId: bigint) {
