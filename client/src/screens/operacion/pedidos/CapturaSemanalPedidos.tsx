@@ -73,21 +73,6 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   useEffect(() => { setSeleccion(null); }, [linea, semana.inicio, semana.fin, buscar]);
 
   useEffect(() => {
-    const actualizarSiSeguro = () => {
-      if (document.visibilityState === 'visible' && cambios.length === 0) setRefresco((actual) => actual + 1);
-    };
-    const alCambiarVisibilidad = () => { if (document.visibilityState === 'visible') actualizarSiSeguro(); };
-    window.addEventListener('focus', actualizarSiSeguro);
-    document.addEventListener('visibilitychange', alCambiarVisibilidad);
-    const intervalo = window.setInterval(actualizarSiSeguro, 45_000);
-    return () => {
-      window.removeEventListener('focus', actualizarSiSeguro);
-      document.removeEventListener('visibilitychange', alCambiarVisibilidad);
-      window.clearInterval(intervalo);
-    };
-  }, [cambios.length]);
-
-  useEffect(() => {
     let vigente = true;
     setCargando(true); setError('');
     api<Pedido[]>(`/operacion/pedidos?desde=${semana.inicio}&hasta=${semana.fin}`)
