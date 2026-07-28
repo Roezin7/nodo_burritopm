@@ -65,6 +65,16 @@ describe('corte semanal de faltantes', () => {
   it('no altera existencias positivas ni inventa ajustes de apertura', () => {
     expect(saldoParaCierreSemanal(8)).toEqual({ disponible: 8, faltante: 0, ajuste_apertura: 0 });
   });
+
+  it('limpia solo el faltante de la semana cerrada y conserva movimientos de la siguiente', () => {
+    // Producción: semana 30 termina en -24 y el saldo vivo ya contiene otras -15
+    // cajas vendidas en semana 31. El cierre no puede borrar esas ventas posteriores.
+    const saldoSemana30 = -24;
+    const saldoVivoConSemana31 = -39;
+    const cierre = saldoParaCierreSemanal(saldoSemana30);
+
+    expect(saldoVivoConSemana31 + cierre.ajuste_apertura).toBe(-15);
+  });
 });
 
 describe('cuentas por pagar al cierre', () => {
