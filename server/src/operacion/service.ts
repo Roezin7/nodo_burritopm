@@ -553,6 +553,21 @@ async function guardarPedidoEnTx(
     const distribucionesBase = (pedidoExistente?.lineas ?? [])
       .flatMap((linea) => linea.distribucion_lineas)
       .sort((a, b) => Number(b.distribucion_id - a.distribucion_id));
+    const distribucionBasePersistida = consolidado && distribucionesBase.length === 0
+      ? await tx.distribucion_lineas.findFirst({
+          where: {
+            ubicacion_destino_id: ubicacion.id,
+            distribuciones: {
+              negocio_id: negocioId,
+              linea_operacion: input.linea,
+              fecha_entrega: fecha(input.fecha_entrega),
+              estado: { not: 'cancelada' },
+            },
+          },
+          include: { distribuciones: true },
+          orderBy: { id: 'desc' },
+        })
+      : null;
 
     for (const lineaExistente of pedidoExistente?.lineas ?? []) {
       const entrada = nuevas.get(lineaExistente.product_id.toString());
@@ -598,7 +613,10 @@ async function guardarPedidoEnTx(
         },
       });
       if (consolidado) {
-        const base = distribucionesBase[0];
+        // Si una corrección anterior dejó la venta sin renglones, las líneas del despacho
+        // siguen existiendo pero ya no apuntan al pedido. Recuperamos una del mismo destino,
+        // línea y fecha exacta; así nunca se cruza con el despacho de otra semana.
+        const base = distribucionesBase[0] ?? distribucionBasePersistida;
         if (!base) throw new HttpError(409, 'La venta procesada no conserva un despacho al cual agregar el producto');
         const nuevaDistribuida = await tx.distribucion_lineas.create({
           data: {

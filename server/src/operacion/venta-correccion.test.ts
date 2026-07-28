@@ -181,6 +181,36 @@ describe('corrección de una venta procesada', () => {
     expect(Number(existencia.cantidad_transito)).toBe(9);
     expect(await prisma.distribuciones.count({ where: { negocio_id: negocioId } })).toBe(1);
     expect(await prisma.auditoria_operativa.count({ where: { negocio_id: negocioId, accion: 'corregir_venta_procesada' } })).toBe(2);
+
+    const vaciada = await guardarPedido(negocioId, usuarioId, {
+      ubicacion_id: Number(sucursalId),
+      linea: 'carne',
+      fecha_entrega: '2037-07-15',
+      actualizado_at: aumentada.actualizado_at,
+      lineas: [],
+    }, true);
+    expect((await listarPedidos(negocioId, {
+      desde: '2037-07-15',
+      hasta: '2037-07-15',
+      ubicacionId: sucursalId,
+    }))[0]?.lineas).toHaveLength(0);
+
+    const recapturada = await guardarPedido(negocioId, usuarioId, {
+      ubicacion_id: Number(sucursalId),
+      linea: 'carne',
+      fecha_entrega: '2037-07-15',
+      actualizado_at: vaciada.actualizado_at,
+      lineas: [{ product_id: Number(productoId), cantidad: 6 }],
+    }, true);
+    expect(recapturada.estado).toBe('despachado');
+    const lineaRecapturada = await prisma.pedido_operativo_lineas.findFirstOrThrow({
+      where: { pedido_id: pedidoId, product_id: productoId },
+      include: { distribucion_lineas: true },
+    });
+    expect(lineaRecapturada.distribucion_lineas).toHaveLength(1);
+    expect(lineaRecapturada.distribucion_lineas[0]?.distribucion_id).toBe(distribucionId);
+    expect(Number(lineaRecapturada.distribucion_lineas[0]?.cantidad_cargada)).toBe(6);
+    expect(await prisma.distribuciones.count({ where: { negocio_id: negocioId } })).toBe(1);
   });
 
   it('corrige una entrega de desechables y restaura/consume únicamente la diferencia FIFO', async () => {
