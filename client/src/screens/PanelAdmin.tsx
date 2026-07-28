@@ -10,7 +10,7 @@ interface Panorama {
   periodo: { anio: number; semana: number; inicia_at: string; termina_at: string; estado: string };
   ventas: { fuente: 'facturado' | 'proyectado'; total: number; carne: number; desechables: number; markup_proteina: number; por_empresa: { codigo: string; nombre: string; carne: number; desechables: number; total: number }[] };
   inventario: { total: number; materia_prima_fresca: number; materia_prima_congelada: number; carne_terminada: number; desechables: number };
-  cartera: { por_cobrar: number; vencido_cobrar: number; facturas_pendientes: number; por_pagar: number; vencido_pagar: number; compras_pendientes: number; balance_neto: number };
+  cartera: { por_cobrar: number; facturas_pendientes: number; por_pagar: number; compras_pendientes: number; balance_neto: number };
   produccion: { costo: number; cajas: number; yield: number; compras_semana: number };
   operacion: { pedidos_confirmados: number; pedidos_borrador: number; distribuciones_abiertas: number; paradas_pendientes: number; productos_bajo_minimo: number };
   alertas: { tipo: string; titulo: string; detalle: string; ruta: string }[];
@@ -53,8 +53,7 @@ export default function PanelAdmin() {
 
     <div className="kpi-grid overview-kpis">
       <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
-      <div className="kpi-card"><span className="kpi-label">Markup de proteína</span><span className="big-number">{usd(p.ventas.markup_proteina)}</span><small>$15 por caja producida vendida</small></div>
-      <div className="kpi-card"><span className="kpi-label">Inventario y reservas</span><span className="big-number">{usd(p.inventario.total)}</span><small>Carne, materia prima, desechables y compras en hold</small></div>
+      <div className="kpi-card"><span className="kpi-label">Inventario al corte</span><span className="big-number">{usd(p.inventario.total)}</span><small>Materia prima, carne terminada y desechables</small></div>
       <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + ciclo por cobrar de 3 semanas − por pagar</small></div>
     </div>
 
@@ -70,8 +69,8 @@ export default function PanelAdmin() {
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Cobros y pagos</strong><div className="muted">Saldo pendiente</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
-        <div className="cash-grid"><div><small>Por cobrar · ciclo 3 semanas</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>semana actual + 2 anteriores</span></div><div className={p.cartera.vencido_cobrar > 0 ? 'cash-warn' : ''}><small>Con fecha vencida</small><strong>{usd(p.cartera.vencido_cobrar)}</strong><span>sale automáticamente del ciclo</span></div><div><small>Total por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras pendientes</span></div><div className={p.cartera.vencido_pagar > 0 ? 'cash-warn' : ''}><small>De ese total, vencido</small><strong>{usd(p.cartera.vencido_pagar)}</strong><span>requiere pago manual</span></div></div>
+        <div className="card-head"><div><strong>Cuentas del cierre</strong><div className="muted">Importes usados para calcular el balance</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
+        <div className="cash-grid"><div><small>Por cobrar · ciclo 3 semanas</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>semana actual + 2 anteriores</span></div><div><small>Por pagar al corte</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras con saldo</span></div><div><small>Balance operativo</small><strong>{usd(p.cartera.balance_neto)}</strong><span>inventario + por cobrar − por pagar</span></div></div>
       </section>
 
       <section className="card overview-card">

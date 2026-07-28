@@ -5,7 +5,8 @@ import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
 import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, semanaDeFecha } from '../cierre/service.js';
 import { preciosVentaSemana } from '../operacion/service.js';
-import type { Prisma } from '@prisma/client';
+import { validarConciliacionParaCierre } from '../operacion/conciliacion.js';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
 export const dashboardRouter = Router();
@@ -18,6 +19,12 @@ const EN_RUTA_O_DESPUES = new Set(['en_transito', 'parcialmente_entregada', 'ent
 const DIST_FINAL = ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'] as const;
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
+const cantidadFacturable = (l: {
+  cantidad: Prisma.Decimal;
+  distribucion_lineas: { cantidad_recibida: Prisma.Decimal | null; cantidad_cargada: Prisma.Decimal | null; cantidad_aprobada: Prisma.Decimal | null; cantidad_sugerida: Prisma.Decimal }[];
+}) => l.distribucion_lineas.length
+  ? l.distribucion_lineas.reduce((total, d) => total + num0(d.cantidad_recibida ?? d.cantidad_cargada ?? d.cantidad_aprobada ?? d.cantidad_sugerida), 0)
+  : num0(l.cantidad);
 const precioPedido = (l: { precio_unitario: Prisma.Decimal | null; producto: { id: bigint; precio_venta_fijo: Prisma.Decimal | null; ultimo_costo: Prisma.Decimal | null; costo_promedio: Prisma.Decimal | null; tipo_operativo: string | null; markup_caja: Prisma.Decimal } }, preciosSemanales?: Map<string, number | null>) => {
   const guardado = num(l.precio_unitario);
   if (guardado != null) return guardado;
@@ -119,13 +126,12 @@ dashboardRouter.get(
     const tz = negocio?.zona_horaria ?? 'America/Chicago';
     const hoyISO = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const referencia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(hoyISO).parse(req.query.semana);
-    const hoy = new Date(`${hoyISO}T00:00:00.000Z`);
     const periodo = semanaDeFecha(new Date(`${referencia}T00:00:00.000Z`));
 
     const semana = await prisma.semanas_operativas.findUnique({
       where: { negocio_id_anio_semana: { negocio_id: negocioId, anio: periodo.anio, semana: periodo.semana } },
     });
-    const [empresas, facturasSemana, pedidos, existenciasVivas, snapshot, lotes, facturasPendientes, comprasPendientes, producciones, produccionesExtraordinarias, comprasSemana, distribuciones, parametros] = await Promise.all([
+    const [empresas, facturasSemana, pedidos, existenciasVivas, snapshot, lotes, facturasPendientes, comprasPendientes, producciones, produccionesExtraordinarias, comprasSemana, distribuciones, parametros, ajustesSemana, ultimoCreditoLisle] = await Promise.all([
       prisma.empresas_clientes.findMany({ where: { negocio_id: negocioId, activo: true }, orderBy: { codigo: 'asc' } }),
       semana ? prisma.facturas.findMany({
         where: { semana_id: semana.id, estado: { not: 'anulada' } },
@@ -133,7 +139,15 @@ dashboardRouter.get(
       }) : Promise.resolve([]),
       prisma.pedidos_operativos.findMany({
         where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.domingo, lte: periodo.sabado }, estado: { not: 'cancelado' } },
-        include: { empresa: true, lineas: { include: { producto: true } } },
+        include: {
+          empresa: true,
+          lineas: {
+            include: {
+              producto: true,
+              distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } },
+            },
+          },
+        },
       }),
       prisma.existencias.findMany({
         where: { negocio_id: negocioId, ubicaciones: { tipo: 'bodega', activo: true } },
@@ -152,7 +166,10 @@ dashboardRouter.get(
         },
         include: { pagos: true },
       }),
-      prisma.compras.findMany({ where: { negocio_id: negocioId, estado: 'pendiente' } }),
+      prisma.compras.findMany({
+        where: { negocio_id: negocioId, fecha: { lte: periodo.sabado }, estado: { not: 'cancelada' } },
+        include: { pagos: { select: { monto: true } } },
+      }),
       prisma.producciones.findMany({
         where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado } },
         include: { salidas: true },
@@ -170,10 +187,38 @@ dashboardRouter.get(
         where: { negocio_id: negocioId, habilitado: true, stock_min: { gt: 0 }, ubicaciones: { tipo: 'bodega', activo: true } },
         select: { ubicacion_id: true, product_id: true, stock_min: true },
       }),
+      semana ? prisma.ajustes_facturacion.findMany({
+        where: { negocio_id: negocioId, semana_id: semana.id, estado: { in: ['abierto', 'aplicado'] } },
+        select: { ubicacion_id: true, empresa_cliente_id: true, linea_operacion: true, tipo: true, monto: true },
+      }) : Promise.resolve([]),
+      prisma.ajustes_facturacion.findFirst({
+        where: {
+          negocio_id: negocioId,
+          tipo: 'credito',
+          ubicacion: { codigo: 'LISLE' },
+          semana: { inicia_at: { lt: periodo.domingo } },
+        },
+        select: { ubicacion_id: true, empresa_cliente_id: true, linea_operacion: true, tipo: true, monto: true },
+        orderBy: [{ semana: { inicia_at: 'desc' } }, { id: 'desc' }],
+      }),
     ]);
+    const conciliacion = snapshot.length ? null : await validarConciliacionParaCierre(
+      negocioId,
+      iso(periodo.domingo),
+      iso(periodo.sabado),
+    ).catch(() => null);
+    const saldoConciliado = new Map((conciliacion?.inventario ?? []).map((saldo) => [
+      `${saldo.ubicacion_id}:${saldo.product_id}`,
+      saldo.cantidad,
+    ]));
     const existencias = snapshot.length
       ? snapshot.map((e) => ({ ...e, products: e.producto, ubicaciones: e.ubicacion }))
-      : existenciasVivas;
+      : existenciasVivas.map((e) => ({
+        ...e,
+        cantidad_disponible: saldoConciliado.has(`${e.ubicacion_id}:${e.product_id}`)
+          ? new Prisma.Decimal(saldoConciliado.get(`${e.ubicacion_id}:${e.product_id}`)!)
+          : e.cantidad_disponible,
+      }));
     const productosPedidos = [...new Map(pedidos.flatMap((p) => p.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
     const preciosSemanales = await preciosVentaSemana(negocioId, productosPedidos, iso(periodo.domingo), iso(periodo.sabado));
     const proteinasSinPrecio = productosPedidos.filter((p) => p.tipo_operativo === 'proteina' && preciosSemanales.get(p.id.toString()) == null);
@@ -184,10 +229,12 @@ dashboardRouter.get(
     let ventaCarne = 0;
     let ventaDesechables = 0;
     let markupProteina = 0;
+    const ventaPorUbicacion = new Map<string, number>();
     if (usarFacturas) {
       for (const f of facturasOperativas) {
         const total = num0(f.total);
         if (f.linea_operacion === 'carne') ventaCarne += total; else ventaDesechables += total;
+        ventaPorUbicacion.set(f.ubicacion_id.toString(), r2((ventaPorUbicacion.get(f.ubicacion_id.toString()) ?? 0) + total));
         const g = porEmpresa.get(f.empresa_cliente_id.toString());
         if (g) { g[f.linea_operacion] += total; g.total += total; }
         for (const l of f.lineas) if (l.producto?.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * MARKUP_PROTEINA;
@@ -196,12 +243,22 @@ dashboardRouter.get(
       for (const p of pedidos.filter((x) => x.estado !== 'borrador')) {
         const g = porEmpresa.get(p.empresa_cliente_id.toString());
         for (const l of p.lineas) {
-          const total = num0(l.cantidad) * precioPedido(l, preciosSemanales);
+          const cantidad = cantidadFacturable(l);
+          const total = cantidad * precioPedido(l, preciosSemanales);
           const linea = l.producto.linea_operacion ?? p.linea_operacion;
           if (linea === 'carne') ventaCarne += total; else ventaDesechables += total;
+          ventaPorUbicacion.set(p.ubicacion_id.toString(), r2((ventaPorUbicacion.get(p.ubicacion_id.toString()) ?? 0) + total));
           if (g) { g[linea] += total; g.total += total; }
-          if (l.producto.tipo_operativo === 'proteina') markupProteina += num0(l.cantidad) * MARKUP_PROTEINA;
+          if (l.producto.tipo_operativo === 'proteina') markupProteina += cantidad * MARKUP_PROTEINA;
         }
+      }
+      const ajustesProyectados = ajustesSemana.length ? ajustesSemana : (ultimoCreditoLisle ? [ultimoCreditoLisle] : []);
+      for (const ajuste of ajustesProyectados) {
+        const monto = num0(ajuste.monto) * (ajuste.tipo === 'credito' ? -1 : 1);
+        if (ajuste.linea_operacion === 'carne') ventaCarne += monto; else ventaDesechables += monto;
+        ventaPorUbicacion.set(ajuste.ubicacion_id.toString(), r2((ventaPorUbicacion.get(ajuste.ubicacion_id.toString()) ?? 0) + monto));
+        const g = porEmpresa.get(ajuste.empresa_cliente_id.toString());
+        if (g) { g[ajuste.linea_operacion] += monto; g.total += monto; }
       }
     }
 
@@ -225,18 +282,31 @@ dashboardRouter.get(
       ? num0(semana.valor_carne) + num0(semana.valor_congelado) + num0(semana.valor_desechables)
       : materiaFresca + materiaCongelada + carneTerminada + desechables;
 
-    const carteraClientes = distribuirCreditosCliente(facturasPendientes.map((f) => ({
+    const documentosCartera = facturasPendientes.map((f) => ({
       id: f.id.toString(), ubicacion_id: f.ubicacion_id.toString(), semana_id: f.semana_id.toString(),
       emitida_at: f.emitida_at, total: num0(f.total), pagado: 0,
-    })));
+    }));
+    if (!usarFacturas) {
+      for (const [ubicacionId, total] of ventaPorUbicacion) documentosCartera.push({
+        id: `proyectado:${ubicacionId}`,
+        ubicacion_id: ubicacionId,
+        semana_id: semana?.id.toString() ?? `semana:${periodo.anio}:${periodo.semana}`,
+        emitida_at: periodo.sabado,
+        total,
+        pagado: 0,
+      });
+    }
+    const carteraClientes = distribuirCreditosCliente(documentosCartera);
     const saldoFactura = (f: (typeof facturasPendientes)[number]) => carteraClientes.saldos.get(f.id.toString()) ?? 0;
     const facturasAbiertas = facturasPendientes.filter((f) => saldoFactura(f) > 0);
-    const porCobrarVivo = facturasAbiertas.reduce((a, f) => a + saldoFactura(f), 0);
+    const porCobrarVivo = [...carteraClientes.saldos.values()].reduce((a, saldo) => a + saldo, 0);
     const porCobrar = snapshot.length && semana ? num0(semana.cuentas_por_cobrar) : porCobrarVivo;
-    const vencidoCobrar = facturasAbiertas.filter((f) => f.vence_at < hoy).reduce((a, f) => a + saldoFactura(f), 0);
-    const porPagarVivo = comprasPendientes.reduce((a, c) => a + num0(c.total), 0);
+    const saldosCompras = comprasPendientes.map((compra) => Math.max(0, r2(
+      num0(compra.total) - compra.pagos.reduce((total, pago) => total + num0(pago.monto), 0),
+    )));
+    const porPagarVivo = saldosCompras.reduce((a, saldo) => a + saldo, 0);
     const porPagar = snapshot.length && semana ? num0(semana.cuentas_por_pagar) : porPagarVivo;
-    const vencidoPagar = comprasPendientes.filter((c) => c.vence_at < hoy).reduce((a, c) => a + num0(c.total), 0);
+    const comprasAbiertas = saldosCompras.filter((saldo) => saldo > 0);
 
     const pesoEntrada = producciones.reduce((a, p) => a + num0(p.peso_entrada_lb), 0);
     const pesoSalida = producciones.reduce((a, p) => a + num0(p.peso_salida_lb), 0);
@@ -251,13 +321,14 @@ dashboardRouter.get(
       : 0;
     const existenciaDe = new Map(existencias.map((e) => [`${e.ubicacion_id}:${e.product_id}`, num0(e.cantidad_disponible)]));
     const bajoMinimo = parametros.filter((p) => (existenciaDe.get(`${p.ubicacion_id}:${p.product_id}`) ?? 0) < num0(p.stock_min)).length;
-    const saldosNegativos = existencias.filter((e) => num0(e.cantidad_disponible) < -0.0001);
-    const provisionales = saldosNegativos.length;
-    const cajasPerdidas = r2(saldosNegativos.reduce((total, e) => total + Math.abs(num0(e.cantidad_disponible)), 0));
+    const provisionales = snapshot.length
+      ? snapshot.filter((e) => num0(e.cantidad_faltante) > 0).length
+      : conciliacion?.saldos.length ?? existencias.filter((e) => num0(e.cantidad_disponible) < -0.0001).length;
+    const cajasPerdidas = snapshot.length
+      ? r2(snapshot.reduce((total, e) => total + num0(e.cantidad_faltante), 0))
+      : r2(conciliacion?.cajas_perdidas ?? existencias.reduce((total, e) => total + Math.max(0, -num0(e.cantidad_disponible)), 0));
 
-    const alertas: { tipo: 'cobro' | 'pago' | 'inventario' | 'pedido' | 'reparto'; titulo: string; detalle: string; ruta: string }[] = [];
-    if (vencidoCobrar > 0) alertas.push({ tipo: 'cobro', titulo: 'Facturas vencidas', detalle: `${facturasAbiertas.filter((f) => f.vence_at < hoy).length} facturas · $${r2(vencidoCobrar).toLocaleString('en-US')}`, ruta: '/facturacion' });
-    if (vencidoPagar > 0) alertas.push({ tipo: 'pago', titulo: 'Compras vencidas', detalle: `${comprasPendientes.filter((c) => c.vence_at < hoy).length} compras · $${r2(vencidoPagar).toLocaleString('en-US')}`, ruta: '/facturacion' });
+    const alertas: { tipo: 'inventario' | 'pedido' | 'reparto'; titulo: string; detalle: string; ruta: string }[] = [];
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
     if (provisionales > 0) alertas.unshift({
       tipo: 'inventario',
@@ -277,7 +348,13 @@ dashboardRouter.get(
         por_empresa: [...porEmpresa.values()].map((g) => ({ ...g, carne: r2(g.carne), desechables: r2(g.desechables), total: r2(g.total) })),
       },
       inventario: { total: r2(inventarioTotal), materia_prima_fresca: r2(materiaFresca), materia_prima_congelada: r2(materiaCongelada), carne_terminada: r2(carneTerminada), desechables: r2(desechables) },
-      cartera: { por_cobrar: r2(porCobrar), vencido_cobrar: r2(vencidoCobrar), facturas_pendientes: facturasAbiertas.length, por_pagar: r2(porPagar), vencido_pagar: r2(vencidoPagar), compras_pendientes: comprasPendientes.length, balance_neto: r2(snapshot.length && semana ? num0(semana.balance_neto) : inventarioTotal + porCobrar - porPagar) },
+      cartera: {
+        por_cobrar: r2(porCobrar),
+        facturas_pendientes: facturasAbiertas.length,
+        por_pagar: r2(porPagar),
+        compras_pendientes: comprasAbiertas.length,
+        balance_neto: r2(snapshot.length && semana ? num0(semana.balance_neto) : inventarioTotal + porCobrar - porPagar),
+      },
       produccion: { costo: r2(costoProduccion), cajas: r2(cajasProduccion), yield: pesoEntrada > 0 ? r2((pesoSalida / pesoEntrada) * 100) : 0, compras_semana: r2(comprasTotal) },
       operacion: { pedidos_confirmados: pedidos.filter((p) => !['borrador', 'cancelado'].includes(p.estado)).length, pedidos_borrador: borradores, distribuciones_abiertas: distribuciones.length, paradas_pendientes: paradasPendientes, productos_bajo_minimo: bajoMinimo },
       alertas,
