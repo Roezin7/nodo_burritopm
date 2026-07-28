@@ -35,9 +35,23 @@ interface Factura { id: number; numero: string; version: number; empresa: string
 interface VistaPreviaCierre {
   semana: { anio: number; numero: number; inicia_at: string; termina_at: string };
   generado_at: string;
-  ventas: { carne: number; desechables: number; total: number };
+  ventas: {
+    carne: number;
+    desechables: number;
+    bruta: number;
+    ajustes: number;
+    total: number;
+    por_ubicacion: { ubicacion: string; empresa: string; linea: string; unidades: number; total: number }[];
+    detalle: { ubicacion: string; empresa: string; linea: string; descripcion: string; cantidad: number; precio: number; importe: number; ajuste: boolean }[];
+  };
   inventario: { valor_carne: number; valor_congelado: number; valor_desechables: number; total: number };
-  cartera: { por_cobrar_actual: number; por_cobrar_al_cierre: number; por_pagar: number };
+  cartera: {
+    por_cobrar_actual: number;
+    por_cobrar_al_cierre: number;
+    por_pagar: number;
+    por_pagar_proveedor: { proveedor: string; saldo: number }[];
+    documentos_por_pagar: { id: number; proveedor: string; referencia: string | null; fecha: string; total: number; pagado: number; saldo: number }[];
+  };
   balance_estimado: number;
   cajas_perdidas: number;
   productos_con_faltante: number;
@@ -743,12 +757,23 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     </section>) : <div className="empty-state workspace-card"><strong>Semana {semana.numero} todavía abierta</strong><span>Al cerrarla se generarán facturas, balances y libros Excel de este periodo.</span></div>}</div>
     {vistaPrevia && <Modal className="close-preview-modal" ariaLabelledBy="close-preview-title" closeOnBackdrop={!busy} closeOnEscape={!busy} onClose={() => setVistaPrevia(null)}>
       <div className="card-head"><div><span className="eyebrow">Vista previa · Semana {vistaPrevia.semana.numero}</span><h2 id="close-preview-title">Resultado estimado del cierre</h2><p>{vistaPrevia.semana.inicia_at} al {vistaPrevia.semana.termina_at}</p></div><button className="icon-btn" disabled={busy} aria-label="Cerrar" onClick={() => setVistaPrevia(null)}><Icono name="x" /></button></div>
-      <div className="close-preview-total"><span>Venta que se facturará</span><strong>{usd(vistaPrevia.ventas.total)}</strong><small>Carne {usd(vistaPrevia.ventas.carne)} · Desechables {usd(vistaPrevia.ventas.desechables)}</small></div>
-      {vistaPrevia.ajustes.length > 0 && <div className="notice"><strong>Ajustes incluidos:</strong> {vistaPrevia.ajustes.map((ajuste) => `${ajuste.ubicacion}: ${ajuste.descripcion} (${usd(ajuste.monto)})`).join(' · ')}</div>}
+      <div className="close-preview-total"><span>Venta neta que se facturará</span><strong>{usd(vistaPrevia.ventas.total)}</strong><small>Venta bruta {usd(vistaPrevia.ventas.bruta)} · ajustes {usd(vistaPrevia.ventas.ajustes)}</small></div>
+      {vistaPrevia.ajustes.length > 0
+        ? <div className="notice"><strong>Ajustes incluidos en la venta neta:</strong> {vistaPrevia.ajustes.map((ajuste) => `${ajuste.ubicacion}: ${ajuste.descripcion} (${usd(ajuste.monto)})`).join(' · ')}</div>
+        : <div className="notice notice--warning"><strong>Sin créditos ni ajustes registrados para esta semana.</strong> Si Billing incluye crédito de Lisle, agrégalo antes de confirmar el cierre.</div>}
       <details className="operation-help"><summary>Cómo se calcula el inventario</summary><p>Saldo inicial + compras + producción − ventas. El conteo físico es opcional; los saldos negativos se reportan como cajas perdidas y se valúan en cero.</p></details>
       <div className="metric-strip metric-strip--three"><div><span>Inventario final</span><strong>{usd(vistaPrevia.inventario.total)}</strong><small>Incluye carne, congelado y desechables</small></div><div><span>Por cobrar · ciclo 3 semanas</span><strong>{usd(vistaPrevia.cartera.por_cobrar_al_cierre)}</strong><small>Dos semanas anteriores {usd(vistaPrevia.cartera.por_cobrar_actual)} + semana actual</small></div><div><span>Por pagar</span><strong>{usd(vistaPrevia.cartera.por_pagar)}</strong><small>Compras pendientes</small></div></div>
       <div className="close-preview-balance"><span>Balance estimado</span><strong>{usd(vistaPrevia.balance_estimado)}</strong></div>
       {vistaPrevia.cajas_perdidas > 0 && <p className="notice notice--warning"><strong>{vistaPrevia.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas</strong> en {vistaPrevia.productos_con_faltante} {vistaPrevia.productos_con_faltante === 1 ? 'producto' : 'productos'}. Se valuarán como cero y se crearán incidencias; no bloquean el cierre.</p>}
+      <CollapsibleSection title="Venta por ubicación y línea" count={vistaPrevia.ventas.por_ubicacion.length} defaultOpen>
+        <div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Ubicación</span><span>Empresa</span><span>Línea</span><span>Unidades</span><span>Total neto</span></div>{vistaPrevia.ventas.por_ubicacion.map((fila) => <div className="invoice-row" key={`${fila.ubicacion}:${fila.linea}`}><span><strong>{fila.ubicacion}</strong></span><span>{fila.empresa}</span><span><span className="chip">{fila.linea}</span></span><span>{fila.unidades.toLocaleString('es-MX')}</span><span><strong>{usd(fila.total)}</strong></span></div>)}</div>
+      </CollapsibleSection>
+      <CollapsibleSection title="Productos y precios usados por Billing" count={vistaPrevia.ventas.detalle.length}>
+        <div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Ubicación / producto</span><span>Línea</span><span>Cantidad</span><span>Precio</span><span>Importe</span></div>{vistaPrevia.ventas.detalle.map((fila, indice) => <div className="invoice-row" key={`${fila.ubicacion}:${fila.linea}:${fila.descripcion}:${indice}`}><span><strong>{fila.ubicacion}</strong><small>{fila.descripcion}{fila.ajuste ? ' · ajuste explícito' : ''}</small></span><span><span className="chip">{fila.linea}</span></span><span>{fila.cantidad.toLocaleString('es-MX')}</span><span>{usd(fila.precio)}</span><span><strong>{usd(fila.importe)}</strong></span></div>)}</div>
+      </CollapsibleSection>
+      <CollapsibleSection title="Cuentas por pagar usadas en el cierre" count={vistaPrevia.cartera.documentos_por_pagar.length} summary={vistaPrevia.cartera.por_pagar_proveedor.map((fila) => `${fila.proveedor} ${usd(fila.saldo)}`).join(' · ')}>
+        <div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Proveedor / referencia</span><span>Fecha</span><span>Total</span><span>Pagado</span><span>Saldo incluido</span></div>{vistaPrevia.cartera.documentos_por_pagar.map((documento) => <div className="invoice-row" key={documento.id}><span><strong>{documento.proveedor}</strong><small>{documento.referencia || `Compra #${documento.id}`}</small></span><span>{documento.fecha}</span><span>{usd(documento.total)}</span><span>{usd(documento.pagado)}</span><span><strong>{usd(documento.saldo)}</strong></span></div>)}</div>
+      </CollapsibleSection>
       <CollapsibleSection title="Facturas por generar" count={vistaPrevia.facturas.length}><div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Factura</span><span>Empresa / ubicación</span><span>Vencimiento</span><span>Línea</span><span>Total</span></div>{vistaPrevia.facturas.map((f) => <div className="invoice-row" key={f.numero}><span className="invoice-number">{f.numero}<small>{f.productos} productos · {f.unidades.toLocaleString('es-MX')} unidades</small></span><span data-label="Ubicación"><strong>{f.ubicacion}</strong><small>{f.empresa}</small></span><span data-label="Vence">{f.vence_at}</span><span data-label="Línea"><span className="chip">{f.linea}</span></span><span data-label="Total"><strong>{usd(f.total)}</strong></span></div>)}</div></CollapsibleSection>
       <div className="close-preview-actions"><button className="btn btn-secondary" disabled={busy} onClick={() => setVistaPrevia(null)}>Seguir revisando</button><button className="btn btn-primary" disabled={busy} onClick={() => void cerrar()}>{busy ? 'Cerrando…' : `Confirmar cierre · ${usd(vistaPrevia.ventas.total)}`}</button></div>
     </Modal>}

@@ -51,7 +51,7 @@ async function datos(negocioId: bigint, semanaId: bigint) {
       },
       include: {
         proveedor: true,
-        pagos: { where: { pagado_at: { lte: semana.termina_at } }, select: { monto: true } },
+        pagos: { select: { monto: true } },
       },
       orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
     }),
@@ -592,7 +592,10 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
       ? `BILLING ${semanasCobro[0]} Y ANTERIORES` : `BILLING ${semanasCobro[i]}`;
   }
   const cuentasPorCobrar = saldos.reduce((a, x) => a + x, 0);
-  formula(ws, 'BW9', 'SUM(BW3:BW8)', inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrar);
+  const cierreCongelado = d.semana.estado === 'cerrada';
+  const cuentasPorCobrarCierre = cierreCongelado ? num0(d.semana.cuentas_por_cobrar) : cuentasPorCobrar;
+  if (cierreCongelado) ws.getCell('BW9').value = r2(inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrarCierre);
+  else formula(ws, 'BW9', 'SUM(BW3:BW8)', inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrarCierre);
 
   const porProveedor = [...d.comprasPendientes.reduce((mapa, c) => {
     const saldo = Math.max(0, num0(c.total) - c.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
@@ -612,12 +615,18 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     ws.getCell(row, 79).value = 0; // CA
     formula(ws, ws.getCell(row, 75).address, `-SUM(BZ${row}:CB${row})`, -p.total);
   });
-  const cuentasPorPagar = porProveedor.reduce((a, p) => a + p.total, 0);
+  const cuentasPorPagar = cierreCongelado
+    ? num0(d.semana.cuentas_por_pagar)
+    : porProveedor.reduce((a, p) => a + p.total, 0);
   ws.getCell('BY17').value = 'CLOSING WEEK';
-  formula(ws, 'BW17', 'SUM(BW12:BW16)', -cuentasPorPagar);
-  const balance = inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrar - cuentasPorPagar;
+  if (cierreCongelado) ws.getCell('BW17').value = -cuentasPorPagar;
+  else formula(ws, 'BW17', 'SUM(BW12:BW16)', -cuentasPorPagar);
+  const balance = cierreCongelado
+    ? num0(d.semana.balance_neto)
+    : inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrarCierre - cuentasPorPagar;
   ws.getCell('BY18').value = 'TOTAL';
-  formula(ws, 'BW18', 'BW9+BW17', balance);
+  if (cierreCongelado) ws.getCell('BW18').value = balance;
+  else formula(ws, 'BW18', 'BW9+BW17', balance);
 }
 
 function limpiarBloqueFactura(ws: ExcelJS.Worksheet, base: number, hasta = 37) {

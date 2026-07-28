@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, numeroFactura, saldoParaCierreSemanal } from './service.js';
+import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal } from './service.js';
 
 describe('folios de cierre semanal', () => {
   it('no colisiona sucursales cuyos códigos comparten los primeros cinco caracteres', () => {
@@ -64,5 +64,16 @@ describe('corte semanal de faltantes', () => {
 
   it('no altera existencias positivas ni inventa ajustes de apertura', () => {
     expect(saldoParaCierreSemanal(8)).toEqual({ disponible: 8, faltante: 0, ajuste_apertura: 0 });
+  });
+});
+
+describe('cuentas por pagar al cierre', () => {
+  it('descuenta todos los pagos registrados sin depender de su fecha', () => {
+    expect(saldoCuentaPorPagar(10_000, [2_500, 1_000])).toBe(6_500);
+    expect(saldoCuentaPorPagar(10_000, [10_000])).toBe(0);
+  });
+
+  it('nunca presenta un saldo negativo por sobrepago', () => {
+    expect(saldoCuentaPorPagar(500, [600])).toBe(0);
   });
 });

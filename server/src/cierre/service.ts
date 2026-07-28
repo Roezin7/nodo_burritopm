@@ -30,6 +30,11 @@ export function saldoParaCierreSemanal(cantidad: number) {
   return { disponible: r3(Math.max(0, saldo)), faltante, ajuste_apertura: faltante };
 }
 
+/** El cierre usa el saldo vigente al momento de ejecutarse; la fecha del pago es informativa. */
+export function saldoCuentaPorPagar(total: number, pagos: number[]) {
+  return Math.max(0, r2(total - pagos.reduce((suma, monto) => suma + monto, 0)));
+}
+
 export interface DocumentoCarteraCliente {
   id: string;
   ubicacion_id: string;
@@ -206,6 +211,82 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
+/**
+ * El crédito de producción de Lisle es semanal y permanece vigente hasta que el
+ * usuario lo cambie. Al abrir una semana nueva copiamos el último valor conocido;
+ * cada semana conserva su propio ajuste para que los cierres anteriores no cambien.
+ */
+async function asegurarCreditoLisleSemanal(
+  negocioId: bigint,
+  usuarioId: bigint,
+  semana: SemanaCierre,
+) {
+  const creditoActual = await prisma.ajustes_facturacion.findFirst({
+    where: {
+      negocio_id: negocioId,
+      semana_id: semana.id,
+      tipo: 'credito',
+      ubicacion: { codigo: 'LISLE' },
+    },
+    select: { id: true },
+  });
+  if (creditoActual) return;
+
+  const anterior = await prisma.ajustes_facturacion.findFirst({
+    where: {
+      negocio_id: negocioId,
+      tipo: 'credito',
+      semana: { inicia_at: { lt: semana.inicia_at } },
+      ubicacion: { codigo: 'LISLE' },
+    },
+    include: { ubicacion: { select: { codigo: true } } },
+    orderBy: [{ semana: { inicia_at: 'desc' } }, { id: 'desc' }],
+  });
+  if (!anterior) return;
+
+  await transaccionSerializable(async (tx) => {
+    const existente = await tx.ajustes_facturacion.findFirst({
+      where: {
+        negocio_id: negocioId,
+        semana_id: semana.id,
+        tipo: 'credito',
+        ubicacion: { codigo: 'LISLE' },
+      },
+      select: { id: true },
+    });
+    if (existente) return;
+    const ajuste = await tx.ajustes_facturacion.create({
+      data: {
+        negocio_id: negocioId,
+        semana_id: semana.id,
+        empresa_cliente_id: anterior.empresa_cliente_id,
+        ubicacion_id: anterior.ubicacion_id,
+        linea_operacion: anterior.linea_operacion,
+        tipo: anterior.tipo,
+        descripcion: anterior.descripcion,
+        monto: anterior.monto,
+        creado_por: usuarioId,
+        idempotency_key: `credito-lisle-arrastre:${semana.id}`,
+      },
+    });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId,
+        usuario_id: usuarioId,
+        accion: 'arrastrar_credito_lisle',
+        entidad: 'ajuste_facturacion',
+        entidad_id: ajuste.id,
+        datos: {
+          semana: semana.semana,
+          anio: semana.anio,
+          monto: num0(anterior.monto),
+          ajuste_origen_id: Number(anterior.id),
+        },
+      },
+    });
+  }, { reintentarUnico: true });
+}
+
 async function valuacionInventario(
   negocioId: bigint,
   db: Db = prisma,
@@ -281,19 +362,14 @@ async function calcularBalance(
       fecha: { lte: terminaAt },
       estado: { not: 'cancelada' },
     },
-    select: { total: true, pagos: { where: { pagado_at: { lte: terminaAt } }, select: { monto: true } } },
+    select: { total: true, pagos: { select: { monto: true } } },
   });
-  const pagar = r2(compras.reduce((a, c) => a + Math.max(0,
-    num0(c.total) - c.pagos.reduce((total, pago) => total + num0(pago.monto), 0),
+  const pagar = r2(compras.reduce((a, c) => a + saldoCuentaPorPagar(
+    num0(c.total), c.pagos.map((pago) => num0(pago.monto)),
   ), 0));
   const balance = r2(inv.valor_carne + inv.valor_congelado + inv.valor_desechables + cobrar - pagar);
   await db.semanas_operativas.update({ where: { id: semanaId }, data: { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance } });
   return { ...inv, cuentas_por_cobrar: cobrar, cuentas_por_pagar: pagar, balance_neto: balance };
-}
-
-async function actualizarUltimoBalance(negocioId: bigint) {
-  const semana = await prisma.semanas_operativas.findFirst({ where: { negocio_id: negocioId, estado: 'cerrada' }, orderBy: [{ anio: 'desc' }, { semana: 'desc' }] });
-  if (semana) await calcularBalance(negocioId, semana.id, semana.termina_at);
 }
 
 type SemanaCierre = Awaited<ReturnType<typeof asegurarSemana>>;
@@ -369,6 +445,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
+  await asegurarCreditoLisleSemanal(negocioId, usuarioId, semana);
   const { grupos, ajustes } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
   const facturas = [...grupos.values()].flatMap((g) => {
     const lineas = [...g.items.values()].filter((item) => item.cantidad > 0);
@@ -385,6 +462,13 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       productos: lineas.length,
       unidades: r3(lineas.reduce((suma, item) => suma + item.cantidad, 0)),
       total,
+      lineas: lineas.map((item) => ({
+        descripcion: item.descripcion,
+        cantidad: item.cantidad,
+        precio: item.precio,
+        importe: r2(item.cantidad * item.precio),
+        ajuste: Boolean(item.ajusteId),
+      })),
     }];
   }).sort((a, b) => a.ubicacion.localeCompare(b.ubicacion, 'es') || a.linea.localeCompare(b.linea));
 
@@ -408,7 +492,10 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     }),
     prisma.compras.findMany({
       where: { negocio_id: negocioId, estado: { not: 'cancelada' }, fecha: { lte: semana.termina_at } },
-      select: { total: true, pagos: { where: { pagado_at: { lte: semana.termina_at } }, select: { monto: true } } },
+      include: {
+        proveedor: { select: { nombre: true } },
+        pagos: { select: { monto: true } },
+      },
     }),
   ]);
   const documentosAnteriores: DocumentoCarteraCliente[] = facturasAnteriores.map((factura) => ({
@@ -420,32 +507,77 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   const ventaCarne = r2(facturas.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
   const ventaDesechables = r2(facturas.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
   const ventaTotal = r2(ventaCarne + ventaDesechables);
+  const ajustesVista = ajustes.map((ajuste) => ({
+    id: Number(ajuste.id),
+    tipo: ajuste.tipo,
+    descripcion: ajuste.descripcion,
+    ubicacion: ajuste.ubicacion.nombre,
+    linea: ajuste.linea_operacion,
+    monto: r2(num0(ajuste.monto) * (ajuste.tipo === 'credito' ? -1 : 1)),
+  }));
+  const totalAjustes = r2(ajustesVista.reduce((total, ajuste) => total + ajuste.monto, 0));
+  const ventaBruta = r2(ventaTotal - totalAjustes);
   const documentosProyectados: DocumentoCarteraCliente[] = facturas.map((factura, indice) => ({
     id: `previa:${indice}`, ubicacion_id: factura.ubicacion_id, semana_id: semana.id.toString(),
     emitida_at: semana.termina_at, total: factura.total, pagado: 0,
   }));
   const porCobrar = r2([...distribuirCreditosCliente([...documentosAnteriores, ...documentosProyectados]).saldos.values()]
     .reduce((total, saldo) => total + saldo, 0));
-  const porPagar = r2(comprasPendientes.reduce((total, compra) => total + Math.max(0,
-    num0(compra.total) - compra.pagos.reduce((pagado, pago) => pagado + num0(pago.monto), 0),
+  const porPagar = r2(comprasPendientes.reduce((total, compra) => total + saldoCuentaPorPagar(
+    num0(compra.total), compra.pagos.map((pago) => num0(pago.monto)),
   ), 0));
+  const cuentasPorPagar = comprasPendientes.flatMap((compra) => {
+    const pagado = r2(compra.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
+    const saldo = saldoCuentaPorPagar(num0(compra.total), [pagado]);
+    return saldo > 0 ? [{
+      id: Number(compra.id),
+      proveedor: compra.proveedor.nombre,
+      referencia: compra.referencia,
+      fecha: iso(compra.fecha),
+      total: num0(compra.total),
+      pagado,
+      saldo,
+    }] : [];
+  });
+  const porProveedor = [...cuentasPorPagar.reduce((mapa, compra) => {
+    mapa.set(compra.proveedor, r2((mapa.get(compra.proveedor) ?? 0) + compra.saldo));
+    return mapa;
+  }, new Map<string, number>())].map(([proveedor, saldo]) => ({ proveedor, saldo }));
   const inventarioTotal = r2(inventario.valor_carne + inventario.valor_congelado + inventario.valor_desechables);
 
   return {
     semana: { anio: semana.anio, numero: semana.semana, inicia_at: iso(semana.inicia_at), termina_at: iso(semana.termina_at) },
     generado_at: new Date().toISOString(),
-    ventas: { carne: ventaCarne, desechables: ventaDesechables, total: ventaTotal },
+    ventas: {
+      carne: ventaCarne,
+      desechables: ventaDesechables,
+      bruta: ventaBruta,
+      ajustes: totalAjustes,
+      total: ventaTotal,
+      por_ubicacion: facturas.map((factura) => ({
+        ubicacion: factura.ubicacion,
+        empresa: factura.empresa,
+        linea: factura.linea,
+        unidades: factura.unidades,
+        total: factura.total,
+      })),
+      detalle: facturas.flatMap((factura) => factura.lineas.map((linea) => ({
+        ubicacion: factura.ubicacion,
+        empresa: factura.empresa,
+        linea: factura.linea,
+        ...linea,
+      }))),
+    },
     inventario: { ...inventario, total: inventarioTotal },
-    cartera: { por_cobrar_actual: porCobrarActual, por_cobrar_al_cierre: porCobrar, por_pagar: porPagar },
+    cartera: {
+      por_cobrar_actual: porCobrarActual,
+      por_cobrar_al_cierre: porCobrar,
+      por_pagar: porPagar,
+      por_pagar_proveedor: porProveedor,
+      documentos_por_pagar: cuentasPorPagar,
+    },
     balance_estimado: r2(inventarioTotal + porCobrar - porPagar),
-    ajustes: ajustes.map((ajuste) => ({
-      id: Number(ajuste.id),
-      tipo: ajuste.tipo,
-      descripcion: ajuste.descripcion,
-      ubicacion: ajuste.ubicacion.nombre,
-      linea: ajuste.linea_operacion,
-      monto: r2(num0(ajuste.monto) * (ajuste.tipo === 'credito' ? -1 : 1)),
-    })),
+    ajustes: ajustesVista,
     facturas,
     cajas_perdidas: alertaInventario.cajas_perdidas,
     productos_con_faltante: alertaInventario.saldos.length,
@@ -460,6 +592,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
+  await asegurarCreditoLisleSemanal(negocioId, usuarioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
   const cierre = await transaccionSerializable(async (tx) => {
@@ -892,7 +1025,6 @@ export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuario
     await tx.facturas.update({ where: { id: f.id }, data: { estado: 'pagada' } });
     return monto;
   });
-  await actualizarUltimoBalance(negocioId);
   return { ok: true, monto: saldo };
 }
 
@@ -927,7 +1059,6 @@ export async function pagarCompra(negocioId: bigint, compraId: bigint, usuarioId
     });
     return { monto, saldo: saldoNuevo, liquidada: saldoNuevo <= 0 };
   });
-  await actualizarUltimoBalance(negocioId);
   return { ok: true, ...resultado };
 }
 
@@ -955,7 +1086,6 @@ export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[],
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'facturas', datos: { ids: facturaIds.map(Number), fecha_pago: fechaPago, total } } });
     return { facturas: facturas.length, total };
   });
-  await actualizarUltimoBalance(negocioId);
   return { ok: true, ...resultado };
 }
 
@@ -982,7 +1112,6 @@ export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], u
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'pagar_masivo', entidad: 'compras', datos: { ids: compraIds.map(Number), fecha_pago: fechaPago, total } } });
     return { compras: compras.length, total };
   });
-  await actualizarUltimoBalance(negocioId);
   return { ok: true, ...resultado };
 }
 
@@ -995,7 +1124,6 @@ export async function revertirPagoFactura(negocioId: bigint, facturaId: bigint, 
     await tx.facturas.update({ where: { id: factura.id }, data: { estado: 'emitida' } });
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'revertir_pago', entidad: 'factura', entidad_id: factura.id, datos: { monto } } });
   });
-  await actualizarUltimoBalance(negocioId);
   return { ok: true, monto };
 }
 
@@ -1011,7 +1139,6 @@ export async function revertirPagoCompra(negocioId: bigint, compraId: bigint, us
     await tx.compras.update({ where: { id: compra.id }, data: { estado: 'pendiente', pagado_at: null } });
     await tx.auditoria_operativa.create({ data: { negocio_id: negocioId, usuario_id: usuarioId, accion: 'revertir_pago', entidad: 'compra', entidad_id: compra.id, datos: { monto } } });
   });
-  await actualizarUltimoBalance(negocioId);
   return { ok: true, monto };
 }
 
