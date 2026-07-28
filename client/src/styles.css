@@ -3972,6 +3972,14 @@ form > .form-actions .btn,
 .close-preview-balance { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.8rem 0; padding: 0.85rem 1rem; border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--brand) 7%, var(--surface)); }
 .close-preview-balance span { color: var(--ink-2); font-weight: 700; }
 .close-preview-balance strong { color: var(--brand); font-size: 1.35rem; }
+.close-preview-support { margin-top: 0.9rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.close-preview-support > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1rem; cursor: pointer; list-style: none; }
+.close-preview-support > summary::-webkit-details-marker { display: none; }
+.close-preview-support > summary > span { display: flex; flex-direction: column; gap: 0.15rem; }
+.close-preview-support > summary small { color: var(--ink-3); font-weight: 400; }
+.close-preview-support > summary > svg { flex: 0 0 auto; transition: transform 0.18s ease; }
+.close-preview-support[open] > summary > svg { transform: rotate(90deg); }
+.close-preview-support-body { padding: 0 0.75rem 0.75rem; }
 .close-preview-invoices .invoice-row { grid-template-columns: minmax(165px, 1.2fr) minmax(175px, 1.3fr) 95px 90px 100px; min-width: 720px; }
 .close-preview-actions { position: sticky; bottom: -1.2rem; display: flex; justify-content: flex-end; gap: 0.65rem; margin: 1rem -1.2rem -1.2rem; padding: 0.85rem 1.2rem; border-top: 1px solid var(--border); background: var(--surface); }
 .week-list { display: flex; flex-direction: column; gap: 1rem; }
