@@ -240,7 +240,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
         <div><span>En tránsito / hold</span><strong>{totales.transito.toLocaleString('es-MX')}</strong></div>
       </div>
 
-      <CollapsibleSection title={editando ? 'Captura física' : 'Productos'} count={filas.length} className="inventory-product-list">
+      <CollapsibleSection title={editando ? 'Captura física' : 'Productos'} count={filas.length} defaultOpen className="inventory-product-list">
         <div className="workspace-card-head collapsible-inner-toolbar">
           {editando ? <div className="inventory-quick-actions"><button className="btn btn-secondary btn-sm" onClick={restaurarTeorico}>Restaurar teórico</button><button className={`btn btn-sm ${soloDiferencias ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSoloDiferencias((actual) => !actual)}>Solo diferencias</button><span>{tocados.size} revisados</span></div> : <div />}
           <input className="compact-search" type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar" />
