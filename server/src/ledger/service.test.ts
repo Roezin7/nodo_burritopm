@@ -65,6 +65,30 @@ describe('ledger: aplicarMovimiento', () => {
     expect(Number(ex.costo_promedio)).toBe(6);
   });
 
+  it('conserva un costo separado mientras el inventario permanece en hold', async () => {
+    await prisma.$transaction(async (tx) => {
+      await aplicarMovimiento(tx, {
+        negocioId, productId, tipo: 'transferencia', cantidad: 4, usuarioId,
+        origenId: ubicacionId, documentoTipo: 'test', idempotencyKey: 'vitest:hold:1',
+        deltas: [{ ubicacionId, productId, transito: 4, costoTransitoUnitario: 9 }],
+      });
+    });
+    let ex = await prisma.existencias.findUniqueOrThrow({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } } });
+    expect(Number(ex.costo_promedio)).toBe(6);
+    expect(Number(ex.costo_transito_promedio)).toBe(9);
+
+    await prisma.$transaction(async (tx) => {
+      await aplicarMovimiento(tx, {
+        negocioId, productId, tipo: 'recepcion_parcial', cantidad: 4, usuarioId,
+        destinoId: ubicacionId, documentoTipo: 'test', idempotencyKey: 'vitest:hold:2',
+        deltas: [{ ubicacionId, productId, transito: -4 }],
+      });
+    });
+    ex = await prisma.existencias.findUniqueOrThrow({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } } });
+    expect(Number(ex.cantidad_transito)).toBe(0);
+    expect(ex.costo_transito_promedio).toBeNull();
+  });
+
   it('rechaza una salida que dejaría el disponible negativo sin autorización', async () => {
     await expect(
       prisma.$transaction(async (tx) => {

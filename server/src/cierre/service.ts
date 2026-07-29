@@ -312,7 +312,8 @@ async function valuacionInventario(
   for (const e of existencias) {
     const cantidad = cantidadesAisladas.get(`${e.ubicacion_id}:${e.product_id}`)
       ?? num0(e.cantidad_disponible);
-    const valor = (Math.max(0, cantidad) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio);
+    const valor = Math.max(0, cantidad) * num0(e.costo_promedio)
+      + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio));
     if (e.products.linea_operacion === 'desechables') desechables += valor;
     else if (e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima') terminada += valor;
   }
@@ -688,9 +689,11 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
           return {
           semana_id: semana.id, negocio_id: negocioId, ubicacion_id: e.ubicacion_id, product_id: e.product_id,
           cantidad_disponible: disponible, cantidad_faltante: saldo.faltante, cantidad_reservada: reservada,
-          cantidad_transito: transito, costo_promedio: e.costo_promedio,
+          cantidad_transito: transito,
+          costo_promedio: e.costo_promedio,
+          costo_transito_promedio: e.costo_transito_promedio,
           peso_total_lb: lote?.peso ?? null,
-          costo_total: lote?.costo ?? r2((disponible + transito) * num0(e.costo_promedio)),
+          costo_total: lote?.costo ?? r2(disponible * num0(e.costo_promedio)),
         }; }),
       });
     }

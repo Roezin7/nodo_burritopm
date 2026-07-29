@@ -13,6 +13,7 @@ export interface DeltaExistencia {
   reservada?: number;
   transito?: number;
   costoUnitario?: number | null; // si entra disponible, recalcula costo promedio ponderado
+  costoTransitoUnitario?: number | null; // costo propio de una entrada a hold/tránsito
 }
 
 export interface MovimientoParams {
@@ -44,10 +45,12 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia, 
     where: { ubicacion_id_product_id: { ubicacion_id: d.ubicacionId, product_id: d.productId } },
   });
   const dispAnt = num0(actual?.cantidad_disponible);
+  const transitoAnt = num0(actual?.cantidad_transito);
   const dDisp = d.disponible ?? 0;
+  const dTransito = d.transito ?? 0;
   const dispNue = r3(dispAnt + dDisp);
   const reservadaNueva = r3(num0(actual?.cantidad_reservada) + (d.reservada ?? 0));
-  const transitoNuevo = r3(num0(actual?.cantidad_transito) + (d.transito ?? 0));
+  const transitoNuevo = r3(transitoAnt + dTransito);
   if (![dispNue, reservadaNueva, transitoNuevo].every(Number.isFinite)) {
     throw new HttpError(400, 'El movimiento contiene una cantidad de inventario no válida');
   }
@@ -66,6 +69,17 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia, 
     const base = Math.max(0, dispAnt);
     costo = base + dDisp > 0 ? r4((base * (costo ?? d.costoUnitario) + dDisp * d.costoUnitario) / (base + dDisp)) : d.costoUnitario;
   }
+  let costoTransito = num(actual?.costo_transito_promedio);
+  if (dTransito > 0) {
+    const costoEntrada = d.costoTransitoUnitario ?? d.costoUnitario ?? costo;
+    if (costoEntrada != null) {
+      costoTransito = transitoAnt + dTransito > 0
+        ? r4((transitoAnt * (costoTransito ?? costoEntrada) + dTransito * costoEntrada) / (transitoAnt + dTransito))
+        : costoEntrada;
+    }
+  } else if (transitoNuevo <= 0.0001) {
+    costoTransito = null;
+  }
 
   await tx.existencias.upsert({
     where: { ubicacion_id_product_id: { ubicacion_id: d.ubicacionId, product_id: d.productId } },
@@ -77,12 +91,14 @@ async function ajustarExistencia(tx: Tx, negocioId: bigint, d: DeltaExistencia, 
       cantidad_reservada: reservadaNueva,
       cantidad_transito: transitoNuevo,
       costo_promedio: costo ?? null,
+      costo_transito_promedio: costoTransito,
     },
     update: {
       cantidad_disponible: dispNue,
       cantidad_reservada: reservadaNueva,
       cantidad_transito: transitoNuevo,
       costo_promedio: costo ?? actual?.costo_promedio ?? null,
+      costo_transito_promedio: costoTransito,
     },
   });
 }

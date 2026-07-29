@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { prisma } from '../db.js';
-import { num0 } from '../lib/num.js';
+import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 
 export type TipoExcel = 'weekly-order' | 'disposables' | 'production' | 'billing' | 'lbt' | 'aurora';
@@ -216,9 +216,11 @@ function valoresInventario(d: Datos) {
   if (d.semana.estado === 'cerrada' || guardado.carne + guardado.congelado + guardado.desechables > 0) return guardado;
   const inventarioCentral = d.existencias.filter((e) => e.ubicaciones.tipo === 'bodega');
   const terminado = inventarioCentral.filter((e) => e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima')
-    .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
+    .reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio)
+      + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio)), 0);
   const desechables = inventarioCentral.filter((e) => e.products.linea_operacion === 'desechables')
-    .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
+    .reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio)
+      + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio)), 0);
   const fresca = d.lotesVivos.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   const congelado = d.lotesVivos.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   return { carne: r2(terminado + fresca), congelado: r2(congelado), desechables: r2(desechables) };
@@ -326,6 +328,7 @@ function llenarDesechables(wb: ExcelJS.Workbook, d: Datos) {
     if (!row) continue;
     const ex = d.existencias.find((e) => e.ubicacion_id === bodega?.id && e.product_id === p.id);
     const costo = num0(ex?.costo_promedio) || Number(p.ultimo_costo ?? p.costo_promedio ?? 0);
+    const costoHold = num(ex?.costo_transito_promedio) ?? costo;
     const precio = Number(p.precio_venta_fijo ?? 0);
     ws.getCell(row, 5).value = costo;
     ws.getCell(row, 7).value = precio;
@@ -353,9 +356,9 @@ function llenarDesechables(wb: ExcelJS.Workbook, d: Datos) {
     formula(ws, ws.getCell(row, 117).address, `E${row}*DK${row}`, final * costo); // DM cost
     formula(ws, ws.getCell(row, 121).address, `G${row}*DK${row}`, final * precio); // DQ selling value
     ws.getCell(row, 123).value = hold || null; // DS hold
-    ws.getCell(row, 125).value = hold > 0 ? costo : 0; // DU reserve cost
-    formula(ws, ws.getCell(row, 127).address, `DU${row}*1.2`, hold > 0 ? costo * 1.2 : 0); // DW reserve selling price
-    formula(ws, ws.getCell(row, 129).address, `DU${row}*DS${row}`, hold * costo); // DY hold value
+    ws.getCell(row, 125).value = hold > 0 ? costoHold : 0; // DU reserve cost
+    formula(ws, ws.getCell(row, 127).address, `DU${row}*1.2`, hold > 0 ? costoHold * 1.2 : 0); // DW reserve selling price
+    formula(ws, ws.getCell(row, 129).address, `DU${row}*DS${row}`, hold * costoHold); // DY hold value
   }
   for (const col of Object.values(COLUMNAS_DESECHABLES)) {
     const total = Array.from({ length: 52 }, (_, i) => Number(ws.getCell(i + 2, col).value ?? 0)).reduce((a, x) => a + x, 0);

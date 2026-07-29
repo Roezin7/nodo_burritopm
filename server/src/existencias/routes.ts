@@ -304,6 +304,7 @@ existenciasRouter.get(
       const disp = Math.max(0, saldoReal);
       const transito = Math.max(0, num0(e?.cantidad_transito));
       const costo = num(e?.costo_promedio) ?? (usarSnapshot ? null : num(producto.ultimo_costo) ?? num(producto.costo_promedio));
+      const costoTransito = num(e?.costo_transito_promedio) ?? costo;
       return {
         product_id: Number(producto.id),
         nombre: producto.nombre,
@@ -320,7 +321,8 @@ existenciasRouter.get(
           ? Math.max(0, num0(e.cantidad_faltante))
           : Math.max(0, -saldoReal),
         costo_promedio: costo,
-        valor: costo != null ? Math.round((disp + transito) * costo * 100) / 100 : 0,
+        costo_transito_promedio: costoTransito,
+        valor: Math.round((disp * (costo ?? 0) + transito * (costoTransito ?? 0)) * 100) / 100,
       };
     });
     res.json({

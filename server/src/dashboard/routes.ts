@@ -266,12 +266,16 @@ dashboardRouter.get(
     let desechables = 0;
     for (const e of existencias) {
       if (e.products.tipo_operativo === 'materia_prima') continue; // los lotes conservan el costo exacto y el estado fresco/congelado
-      const valor = (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * (num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0);
+      const costoDisponible = num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0;
+      const costoTransito = num(e.costo_transito_promedio) ?? costoDisponible;
+      const valor = Math.max(0, num0(e.cantidad_disponible)) * costoDisponible
+        + Math.max(0, num0(e.cantidad_transito)) * costoTransito;
       if (e.products.linea_operacion === 'carne') carneTerminada += valor;
       if (e.products.linea_operacion === 'desechables') desechables += valor;
     }
     const materiaTotalSnapshot = snapshot.filter((e) => e.producto.tipo_operativo === 'materia_prima')
-      .reduce((a, e) => a + (Math.max(0, num0(e.cantidad_disponible)) + Math.max(0, num0(e.cantidad_transito))) * num0(e.costo_promedio), 0);
+      .reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio)
+        + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio)), 0);
     const materiaCongelada = snapshot.length ? num0(semana?.valor_congelado) : lotes.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
     const materiaFresca = snapshot.length ? Math.max(0, materiaTotalSnapshot - materiaCongelada) : lotes.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
     if (snapshot.length && semana) {

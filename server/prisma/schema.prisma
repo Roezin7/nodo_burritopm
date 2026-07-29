@@ -574,6 +574,9 @@ model existencias {
   cantidad_reservada  Decimal  @default(0) @db.Decimal(12, 3)
   cantidad_transito   Decimal  @default(0) @db.Decimal(12, 3)
   costo_promedio      Decimal? @db.Decimal(12, 4)
+  // El advance/hold conserva su propio costo hasta recibirse. No debe mezclarse
+  // con el promedio del inventario disponible antes de estar físicamente en bodega.
+  costo_transito_promedio Decimal? @db.Decimal(12, 4)
   actualizado_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   ubicaciones ubicaciones @relation(fields: [ubicacion_id], references: [id], onDelete: Cascade)
@@ -1017,6 +1020,7 @@ model inventario_semanal {
   cantidad_reservada  Decimal  @db.Decimal(12, 3)
   cantidad_transito   Decimal  @db.Decimal(12, 3)
   costo_promedio      Decimal? @db.Decimal(12, 4)
+  costo_transito_promedio Decimal? @db.Decimal(12, 4)
   // La materia prima se compra en cajas de peso variable. Estos totales permiten
   // reproducir exactamente Production aun después de que avance el inventario vivo.
   peso_total_lb       Decimal? @db.Decimal(14, 3)

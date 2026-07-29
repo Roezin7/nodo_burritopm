@@ -30,6 +30,7 @@ interface Existencia {
   transito: number;
   faltante?: number;
   costo_promedio: number | null;
+  costo_transito_promedio?: number | null;
   valor: number;
 }
 
@@ -252,7 +253,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
             <span data-label={editando ? 'Teórico' : 'Disponible'}><strong>{i.disponible.toLocaleString('es-MX')}</strong> <small>{i.unidad}</small></span>
             <span data-label={editando ? 'Físico' : 'Reserva'}>{editando ? <div className="input-suffix input-suffix--compact"><input data-inventory-entry type="number" min="0" step={i.unidad.toLowerCase().includes('pieza') ? '1' : '0.5'} value={cantidades[i.product_id] ?? ''} onPaste={(e) => pegarInventario(e, indice)} onKeyDown={navegarInventario} onFocus={(e) => e.currentTarget.select()} onChange={(e) => cambiarCantidad(i.product_id, e.target.value)} /><span>{i.unidad}</span></div> : i.reservada.toLocaleString('es-MX')}</span>
             <span data-label={editando ? 'Diferencia' : 'Tránsito'} className={editando && diferencia < 0 ? 'txt-danger' : editando && diferencia > 0 ? 'txt-ok' : ''}>{editando ? `${diferencia > 0 ? '+' : ''}${diferencia.toLocaleString('es-MX')}` : i.transito.toLocaleString('es-MX')}</span>
-            <span data-label="Costo">{i.costo_promedio == null ? '—' : usd(i.costo_promedio)}</span>
+            <span data-label="Costo">{i.costo_promedio == null ? '—' : usd(i.costo_promedio)}{i.transito > 0 && i.costo_transito_promedio != null && <small>Hold {usd(i.costo_transito_promedio)}</small>}</span>
             <span data-label="Valor"><strong>{usd(editando ? fisico * (i.costo_promedio ?? 0) : i.valor)}</strong></span>
           </div>; })}
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
