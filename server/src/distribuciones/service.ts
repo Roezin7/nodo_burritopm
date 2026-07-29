@@ -316,8 +316,8 @@ export async function renombrarDistribucion(negocioId: bigint, id: bigint, nombr
  * Elimina una distribución y TODO lo relacionado (líneas, rutas y paradas por cascada;
  * incidencias por borrado explícito), devolviendo el inventario a la bodega central para que
  * nunca quede descuadre. La reversa es FÍSICA (lo que de verdad se movió), no contable:
- *   - Línea ya recibida en sucursal → se devuelve a bodega lo que aún tenga la sucursal
- *     (min(recibido, disponible_actual)); lo que la sucursal ya consumió no se inventa.
+ *   - Línea ya recibida en sucursal → se revierte exactamente lo recibido. Si ya se
+ *     consumió, la sucursal queda con faltante visible; nunca se toman entradas posteriores.
  *   - Línea en tránsito (cargada, no recibida) → regresa de tránsito a disponible de bodega.
  *   - Línea sin cargar → no movió inventario, nada que revertir.
  * También borra los pedidos de sucursal (conteos) que alimentaron ESTA distribución, para que
@@ -355,15 +355,9 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
       const tieneFifo = (movimientoCarga?.consumos_lote.length ?? 0) > 0;
 
       if (recibida != null) {
-        // Ya está en la sucursal: devolvemos a bodega lo que físicamente siga allí.
-        const sucEx = await tx.existencias.findUnique({
-          where: { ubicacion_id_product_id: { ubicacion_id: l.ubicacion_destino_id, product_id: l.product_id } },
-        });
-        const enSuc = Math.max(0, num0(sucEx?.cantidad_disponible));
-        const devolver = redondear3(Math.min(recibida, enSuc));
-        if (tieneFifo && cargada != null && devolver + 0.0001 < cargada) {
-          throw new HttpError(409, 'Este despacho de desechables ya fue consumido o reportó faltantes. Corrige el inventario posterior antes de eliminarlo.');
-        }
+        // La reversa corresponde al documento, no al saldo que haya hoy. Restar
+        // exactamente lo recibido conserva todas las entradas de semanas posteriores.
+        const devolver = redondear3(recibida);
         if (devolver > 0) {
           await aplicarMovimiento(tx, {
             negocioId,
@@ -378,6 +372,7 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
             documentoId: id,
             comentario: 'Devolución a bodega por distribución eliminada',
             idempotencyKey: `del:${id}:${l.id}:${sello}`,
+            permitirDisponibleNegativo: true,
             deltas: [
               { ubicacionId: l.ubicacion_destino_id, productId: l.product_id, disponible: -devolver },
               { ubicacionId: bodega.id, productId: l.product_id, disponible: devolver, costoUnitario: costo },

@@ -232,11 +232,23 @@ export async function cerrarConteo(negocioId: bigint, conteoId: bigint, usuarioI
   const conteo = await prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
   if (!esEditable(conteo.estado)) throw new HttpError(409, 'El conteo ya está cerrado');
+  const esBodega = (await tipoUbicacion(negocioId, conteo.ubicacion_id)) === 'bodega';
+  if (esBodega) {
+    const { tz } = await negocioProg(negocioId);
+    const fechaConteo = conteo.fecha ? conteo.fecha.toISOString().slice(0, 10) : null;
+    const hoy = fechaISOEnTz(new Date(), tz);
+    if (fechaConteo !== hoy) {
+      throw new HttpError(
+        409,
+        'Un conteo diario antiguo no puede reconciliarse contra el inventario vivo. Captura la corrección desde la semana operativa correspondiente.',
+      );
+    }
+  }
   await prisma.conteos.update({
     where: { id: conteoId },
     data: { estado: 'cerrado', cerrado_por: usuarioId, cerrado_at: new Date() },
   });
-  if ((await tipoUbicacion(negocioId, conteo.ubicacion_id)) === 'bodega') {
+  if (esBodega) {
     // Un conteo cerrado de bodega es la verdad física: sincroniza sus existencias.
     await reconciliarConteo(negocioId, conteoId, usuarioId, conteo.ubicacion_id);
   }

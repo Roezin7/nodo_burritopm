@@ -9,6 +9,7 @@ import { prepararSalidaFifo, registrarSalidaFifo } from '../inventario/fifo.js';
 import { idempotencyKey } from '../lib/validation.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { randomUUID } from 'node:crypto';
+import { obtenerConciliacionSemanal, obtenerInventarioSemanalDesechables, rangoSemana } from '../operacion/conciliacion.js';
 
 export const existenciasRouter = Router();
 
@@ -283,6 +284,15 @@ existenciasRouter.get(
     }) : null;
     const snapshot = semana ? await prisma.inventario_semanal.findMany({ where: { semana_id: semana.id, ubicacion_id: ubicacionId } }) : [];
     const usarSnapshot = semana?.estado === 'cerrada';
+    const rango = semanaReferencia ? rangoSemana(semanaReferencia) : null;
+    const conciliacion = !usarSnapshot && ubicacion.codigo === 'CARN' && rango
+      ? await obtenerConciliacionSemanal(req.auth!.negocioId, rango.desde, rango.hasta, ubicacionId)
+      : null;
+    const conciliacionDesechables = !usarSnapshot && ubicacion.codigo === 'BOD' && rango
+      ? await obtenerInventarioSemanalDesechables(req.auth!.negocioId, rango.desde, rango.hasta, ubicacionId)
+      : null;
+    const conciliacionHistorica = conciliacion ?? conciliacionDesechables;
+    const teoricoPorProducto = new Map(conciliacionHistorica?.filas.map((f) => [String(f.product_id), f.teoricoFinal]) ?? []);
     const snapshotIds = snapshot.map((e) => e.product_id);
     const [productos, filas] = await Promise.all([
       prisma.products.findMany({
@@ -300,9 +310,11 @@ existenciasRouter.get(
     const porProducto = new Map(filas.map((e) => [e.product_id.toString(), e]));
     const items = productos.map((producto) => {
       const e = porProducto.get(producto.id.toString());
-      const saldoReal = num0(e?.cantidad_disponible);
+      const saldoReal = conciliacionHistorica
+        ? (teoricoPorProducto.get(producto.id.toString()) ?? 0)
+        : num0(e?.cantidad_disponible);
       const disp = Math.max(0, saldoReal);
-      const transito = Math.max(0, num0(e?.cantidad_transito));
+      const transito = conciliacionHistorica ? 0 : Math.max(0, num0(e?.cantidad_transito));
       const costo = num(e?.costo_promedio) ?? (usarSnapshot ? null : num(producto.ultimo_costo) ?? num(producto.costo_promedio));
       const costoTransito = num(e?.costo_transito_promedio) ?? costo;
       return {
@@ -313,7 +325,7 @@ existenciasRouter.get(
         tipo: producto.tipo_operativo,
         unidad: producto.unidad_distribucion.nombre,
         disponible: disp,
-        reservada: Math.max(0, num0(e?.cantidad_reservada)),
+        reservada: conciliacionHistorica ? 0 : Math.max(0, num0(e?.cantidad_reservada)),
         transito,
         // Una semana cerrada consulta su fotografía: el saldo ya está valuado en
         // cero, pero el faltante histórico debe seguir visible en esa semana.
@@ -329,7 +341,7 @@ existenciasRouter.get(
       items,
       valor_total: Math.round(items.reduce((a, i) => a + i.valor, 0) * 100) / 100,
       cajas_perdidas: Math.round(items.reduce((a, i) => a + i.faltante, 0) * 1000) / 1000,
-      fuente: usarSnapshot ? 'cierre_semanal' : 'actual',
+      fuente: usarSnapshot ? 'cierre_semanal' : conciliacionHistorica ? 'conciliacion_semanal' : 'actual',
       semana_estado: semana?.estado ?? null,
     });
   }),

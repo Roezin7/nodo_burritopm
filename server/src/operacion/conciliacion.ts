@@ -48,6 +48,11 @@ export function normalizarSaldoApertura(cantidad: number) {
   return r3(Math.max(0, cantidad));
 }
 
+/** Saldo de una semana aislada; las operaciones posteriores no forman parte de la ecuación. */
+export function calcularSaldoSemanal(inicial: number, entradas: number, salidas: number) {
+  return r3(inicial + entradas - salidas);
+}
+
 /** Ecuación operativa: inicio + entradas − salidas, separada en los cortes de miércoles y sábado. */
 export function calcularFilaConciliacion(f: FilaConciliacionCalculable) {
   const entradas1 = f.compras1 + f.produccionSalida1;
@@ -196,6 +201,126 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
       producciones: producciones.length + produccionesExtraordinarias.length,
       pedidos: pedidos.length,
     },
+  };
+}
+
+/**
+ * Reconstruye el disponible de desechables al final de una semana sin consultar el
+ * saldo vivo como apertura. La fotografía/conteo anterior es el ancla; por eso las
+ * compras y despachos de semanas posteriores no pueden contaminar el resultado.
+ */
+export async function obtenerInventarioSemanalDesechables(
+  negocioId: bigint,
+  desde: string,
+  hasta: string,
+  ubicacionId: bigint,
+) {
+  const ubicacion = await prisma.ubicaciones.findFirst({
+    where: { id: ubicacionId, negocio_id: negocioId, codigo: 'BOD', tipo: 'bodega', activo: true },
+    select: { id: true, nombre: true },
+  });
+  if (!ubicacion) throw new HttpError(400, 'No existe una Bodega Adison activa para conciliar');
+  const inicio = fecha(desde);
+  const finExclusivo = sumarDias(fecha(hasta), 1);
+  const productos = await prisma.products.findMany({
+    where: { negocio_id: negocioId, activo: true, linea_operacion: 'desechables', es_cargo_compra: false },
+    orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
+    select: { id: true, sku: true, nombre: true },
+  });
+  const ids = productos.map((p) => p.id);
+  const [conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos] = await Promise.all([
+    prisma.conteos.findFirst({
+      where: {
+        negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio },
+        notas: { startsWith: 'inventario_final_operativo' },
+      },
+      include: { lineas: { where: { product_id: { in: ids } } } },
+      orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+    }),
+    prisma.semanas_operativas.findFirst({
+      where: { negocio_id: negocioId, termina_at: { lt: inicio }, estado: 'cerrada' },
+      orderBy: { termina_at: 'desc' },
+      include: {
+        inventario_semanal: {
+          where: { ubicacion_id: ubicacion.id, product_id: { in: ids } },
+          select: { product_id: true, cantidad_disponible: true },
+        },
+      },
+    }),
+    prisma.compras.findMany({
+      where: {
+        negocio_id: negocioId, ubicacion_id: ubicacion.id,
+        fecha: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
+      },
+      include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cajas: true } } },
+    }),
+    prisma.distribuciones.findMany({
+      where: {
+        negocio_id: negocioId, linea_operacion: 'desechables',
+        fecha_entrega: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
+      },
+      include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cantidad_cargada: true } } },
+    }),
+    prisma.movimientos_inventario.findMany({
+      where: {
+        negocio_id: negocioId, product_id: { in: ids }, fecha: { gte: inicio, lt: finExclusivo },
+        documento_tipo: { in: ['ingreso', 'retiro'] },
+        OR: [{ ubicacion_origen_id: ubicacion.id }, { ubicacion_destino_id: ubicacion.id }],
+      },
+      select: { product_id: true, cantidad: true, documento_tipo: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
+    }),
+  ]);
+
+  const fechaConteo = conteoAnterior?.fecha ?? null;
+  const fechaSnapshot = semanaAnterior?.termina_at ?? null;
+  const usarConteo = Boolean(fechaConteo && (!fechaSnapshot || fechaConteo > fechaSnapshot));
+  const apertura = usarConteo
+    ? new Map(conteoAnterior!.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]))
+    : semanaAnterior
+      ? new Map(semanaAnterior.inventario_semanal.map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)]))
+      : null;
+  if (!apertura) {
+    throw new HttpError(
+      409,
+      'Falta un cierre o conteo final anterior de Bodega Adison para reconstruir esta semana sin mezclar inventario posterior.',
+    );
+  }
+
+  const entradas = new Map<string, number>();
+  const salidas = new Map<string, number>();
+  const sumar = (mapa: Map<string, number>, productId: bigint, cantidad: number) => {
+    const key = productId.toString();
+    mapa.set(key, r3((mapa.get(key) ?? 0) + cantidad));
+  };
+  for (const compra of compras) for (const linea of compra.lineas) sumar(entradas, linea.product_id, num0(linea.cajas));
+  for (const distribucion of distribuciones) for (const linea of distribucion.lineas) {
+    sumar(salidas, linea.product_id, num0(linea.cantidad_cargada));
+  }
+  for (const movimiento of movimientosDirectos) {
+    const cantidad = num0(movimiento.cantidad);
+    if (movimiento.ubicacion_destino_id === ubicacion.id) sumar(entradas, movimiento.product_id, cantidad);
+    if (movimiento.ubicacion_origen_id === ubicacion.id) sumar(salidas, movimiento.product_id, cantidad);
+  }
+
+  return {
+    ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
+    periodo: { desde, hasta },
+    origen_apertura: usarConteo ? 'conteo_anterior' : 'cierre_anterior',
+    filas: productos.map((producto) => {
+      const key = producto.id.toString();
+      const inicial = r3(apertura.get(key) ?? 0);
+      const comprasCantidad = r3(entradas.get(key) ?? 0);
+      const despachosCantidad = r3(salidas.get(key) ?? 0);
+      return {
+        product_id: Number(producto.id),
+        sku: producto.sku,
+        nombre: producto.nombre,
+        inicial,
+        entradas: comprasCantidad,
+        salidas: despachosCantidad,
+        teoricoFinal: calcularSaldoSemanal(inicial, comprasCantidad, despachosCantidad),
+      };
+    }),
   };
 }
 

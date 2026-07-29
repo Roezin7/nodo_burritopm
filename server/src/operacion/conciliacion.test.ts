@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { calcularFilaConciliacion, normalizarSaldoApertura, rangoSemana } from './conciliacion.js';
+import { calcularFilaConciliacion, calcularSaldoSemanal, normalizarSaldoApertura, rangoSemana } from './conciliacion.js';
 
 describe('conciliación semanal de inventario', () => {
+  it('aísla desechables a apertura + entradas − salidas del periodo', () => {
+    expect(calcularSaldoSemanal(100, 25, 40)).toBe(85);
+  });
+
   it('incluye el domingo dentro de la semana que cierra el sábado siguiente', () => {
     expect(rangoSemana('2026-07-19')).toEqual({
       desde: '2026-07-19',

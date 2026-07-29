@@ -5,7 +5,7 @@ import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { eliminarConteo } from '../conteos/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
-import { asegurarInventarioInicialSemanal, rangoSemana, repararPedidosHuerfanos } from './conciliacion.js';
+import { asegurarInventarioInicialSemanal, obtenerConciliacionSemanal, obtenerInventarioSemanalDesechables, rangoSemana, repararPedidosHuerfanos } from './conciliacion.js';
 import { confirmarCarga } from '../distribuciones/service.js';
 import {
   calcularConsumoFifo,
@@ -1646,7 +1646,19 @@ export async function guardarInventarioFinal(
     select: { product_id: true, cantidad_disponible: true },
   });
   const cantidadPrevia = new Map(existenciasPrevias.map((e) => [e.product_id.toString(), num0(e.cantidad_disponible)]));
-  const generaAjuste = input.lineas.some((l) => Math.abs(l.cantidad - (cantidadPrevia.get(String(l.product_id)) ?? 0)) > 0.0001);
+  // En Carnicería el conteo pertenece al corte de la semana seleccionada. Se compara
+  // contra su conciliación, no contra el saldo vivo que ya puede incluir otra semana.
+  const rangoCaptura = rangoSemana(input.fecha);
+  const conciliacion = ubicacion.codigo === 'CARN'
+    ? await obtenerConciliacionSemanal(negocioId, rangoCaptura.desde, rangoCaptura.hasta, ubicacionId)
+    : ubicacion.codigo === 'BOD'
+      ? await obtenerInventarioSemanalDesechables(negocioId, rangoCaptura.desde, rangoCaptura.hasta, ubicacionId)
+      : null;
+  const cantidadTeorica = new Map(conciliacion?.filas.map((f) => [String(f.product_id), f.teoricoFinal]) ?? []);
+  const baseDe = (productId: number) => conciliacion
+    ? (cantidadTeorica.get(String(productId)) ?? 0)
+    : (cantidadPrevia.get(String(productId)) ?? 0);
+  const generaAjuste = input.lineas.some((l) => Math.abs(l.cantidad - baseDe(l.product_id)) > 0.0001);
   if (generaAjuste && !input.motivo?.trim()) {
     throw new HttpError(400, 'Explica la diferencia de conteo antes de guardar el inventario físico final.');
   }
@@ -1675,6 +1687,7 @@ export async function guardarInventarioFinal(
     for (const l of input.lineas) {
       const productId = BigInt(l.product_id);
       const producto = productos.find((p) => p.id === productId)!;
+      const deltaConteo = r3(l.cantidad - baseDe(l.product_id));
       let costoLotes: number | null = null;
 
       const manejaLote = producto.tipo_operativo === 'materia_prima' || producto.linea_operacion === 'desechables';
@@ -1686,10 +1699,13 @@ export async function guardarInventarioFinal(
         const cajasLotes = r3(lotes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0));
         const costoDisponible = lotes.reduce((a, lote) => a + num0(lote.costo_disponible), 0);
         costoLotes = cajasLotes > 0 ? r4(costoDisponible / cajasLotes) : null;
-        if (l.cantidad > cajasLotes + 0.0001) {
-          throw new HttpError(409, `${producto.nombre}: el físico (${l.cantidad}) supera las ${cajasLotes} unidades respaldadas por compras FIFO. Registra la compra faltante antes de cerrar inventario.`);
+        if (deltaConteo > 0.0001) {
+          throw new HttpError(409, `${producto.nombre}: el conteo agrega ${deltaConteo} unidades sin una compra FIFO que las respalde. Registra la compra faltante antes de cerrar inventario.`);
         }
-        let faltanteFisico = r3(cajasLotes - l.cantidad);
+        if (Math.abs(Math.min(0, deltaConteo)) > cajasLotes + 0.0001) {
+          throw new HttpError(409, `${producto.nombre}: no quedan suficientes unidades FIFO para aplicar retroactivamente la diferencia de ${deltaConteo}.`);
+        }
+        let faltanteFisico = r3(Math.abs(Math.min(0, deltaConteo)));
         let costoRetirado = 0;
         for (const lote of lotes) {
           if (faltanteFisico <= 0.0001) break;
@@ -1710,11 +1726,14 @@ export async function guardarInventarioFinal(
           });
           faltanteFisico = r3(faltanteFisico - cajas);
         }
-        costoLotes = l.cantidad > 0 ? r4(Math.max(0, costoDisponible - costoRetirado) / l.cantidad) : null;
+        const cajasRestantes = r3(cajasLotes - Math.abs(Math.min(0, deltaConteo)));
+        costoLotes = cajasRestantes > 0 ? r4(Math.max(0, costoDisponible - costoRetirado) / cajasRestantes) : null;
       }
 
       const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } } });
-      const delta = r3(l.cantidad - num0(actual?.cantidad_disponible));
+      // Aplicar únicamente la diferencia detectada en esa semana conserva intactos
+      // todos los movimientos posteriores que ya forman parte del saldo vivo.
+      const delta = deltaConteo;
       if (Math.abs(delta) >= 0.0001) {
         const costo = costoLotes ?? num(actual?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
         await aplicarMovimiento(tx, {
