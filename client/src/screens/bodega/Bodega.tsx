@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { FaseChip } from '../../flujo';
 import { filasOrden, type FilaOrden, type LineaOperacion, type ProductoOrdenable } from '../../operationOrder';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
-import { useOperacionConfig } from '../../operacion-config';
 import { useAuth } from '../../auth';
 import Modal from '../../components/Modal';
 import { Icono } from '../../icons';
@@ -253,13 +251,11 @@ function nombreMatriz(nombre: string) {
 
 export default function Bodega({ integrado = false, semana = crearSemana() }: { integrado?: boolean; semana?: SemanaSeleccionada }) {
   const { usuario } = useAuth();
-  const { repartoHabilitado } = useOperacionConfig();
   const [lista, setLista] = useState<DistResumen[]>([]);
   const [op, setOp] = useState<Operacion | null>(null);
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [productos, setProductos] = useState<ProductoOrdenable[]>([]);
   const [programacion, setProgramacion] = useState<Catalogo['plantillas']>([]);
-  const [verificacionCarga, setVerificacionCarga] = useState(false);
   const [lineaMovil, setLineaMovil] = useState<LineaOperacion>('carne');
   const [mostrarCompletadas, setMostrarCompletadas] = useState(true);
   const [error, setError] = useState('');
@@ -286,9 +282,8 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   }, [semana.inicio, semana.fin, semana.actual, usuario?.rol]);
 
   useEffect(() => {
-    Promise.all([api<{ verificacion_carga: boolean }>('/negocio'), api<Catalogo>('/operacion/catalogo')])
-      .then(([negocio, catalogo]) => {
-        setVerificacionCarga(negocio.verificacion_carga);
+    api<Catalogo>('/operacion/catalogo')
+      .then((catalogo) => {
         setProductos(catalogo.productos);
         setProgramacion(catalogo.plantillas.filter((plantilla) => plantilla.activo !== false));
       })
@@ -314,11 +309,8 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
     op={op}
     rutas={rutas}
     productos={productos}
-    verificacionCarga={verificacionCarga}
-    repartoHabilitado={repartoHabilitado}
     integrado={integrado}
     onSalir={() => { setOp(null); setRutas([]); void cargar(); }}
-    onRecargar={() => void abrir(op.distribuciones?.map((distribucion) => distribucion.id) ?? op.id)}
   />;
 
   const dias = diasDeSemana(semana);
@@ -341,11 +333,11 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>
-      {!integrado && <header className="page-head"><div><span className="eyebrow">Operación diaria</span><h1>Despacho</h1><p className="page-sub">Prepara, revisa y confirma cada salida.</p></div>{repartoHabilitado && <Link className="btn btn-secondary" to={`/semana/reparto?semana=${semana.inicio}`}>Continuar a reparto</Link>}</header>}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Operación diaria</span><h2>Despacho</h2></div>{repartoHabilitado && <Link className="btn btn-secondary btn-sm" to={`/semana/reparto?semana=${semana.inicio}`}>Continuar a reparto</Link>}</header>}
+      {!integrado && <header className="page-head"><div><span className="eyebrow">Producción a restaurante</span><h1>Despacho</h1><p className="page-sub">Documentos para la entrega directa a cada restaurante.</p></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Producción a restaurante</span><h2>Despacho</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
-      <div className="dispatch-flow" aria-label="Flujo de despacho"><span className="is-active"><b>1</b> Elegir salida</span><span><b>2</b> Preparar documentos</span><span><b>3</b> Revisar carga</span><span><b>4</b> Confirmar salida</span></div>
+      <div className="dispatch-flow dispatch-flow--direct" aria-label="Flujo de despacho"><span className="is-active"><b>1</b> Pedido aprobado</span><span><b>2</b> Entrega al restaurante</span></div>
 
       <div className="history-access-bar"><strong>{mostrarCompletadas ? 'Todas las salidas de la semana' : 'Salidas por preparar'}</strong><HistoryToggle active={mostrarCompletadas} openLabel="Consultar completadas" closeLabel="Volver a pendientes" onToggle={() => setMostrarCompletadas((actual) => !actual)} /></div>
 
@@ -379,45 +371,20 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
 }
 
 function OperacionView({
-  op, rutas, productos, verificacionCarga, repartoHabilitado, integrado, onSalir, onRecargar,
+  op, rutas, productos, integrado, onSalir,
 }: {
   op: Operacion;
   rutas: RutaDetalle[];
   productos: ProductoOrdenable[];
-  verificacionCarga: boolean;
-  repartoHabilitado: boolean;
   integrado: boolean;
   onSalir: () => void;
-  onRecargar: () => void;
 }) {
   const [impresion, setImpresion] = useState<AlcanceImpresion | null>(null);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const distribuciones = op.distribuciones ?? [{ id: op.id, estado: op.estado }];
-  const puedeVerificar = distribuciones.some((distribucion) => distribucion.estado === 'aprobada');
-  const puedeCargar = distribuciones.some((distribucion) => distribucion.estado === 'verificada' || (distribucion.estado === 'aprobada' && !verificacionCarga));
-  const hayAcciones = repartoHabilitado && ((puedeVerificar && verificacionCarga) || puedeCargar);
   const totalFaltante = op.total_carga.filter((t) => t.faltante > 0).length;
-
-  async function ejecutar(endpoint: string) {
-    setBusy(true); setError('');
-    try {
-      const candidatas = distribuciones.filter((distribucion) => endpoint === 'verificada'
-        ? distribucion.estado === 'aprobada'
-        : distribucion.estado === 'verificada' || (distribucion.estado === 'aprobada' && !verificacionCarga));
-      for (const distribucion of candidatas) await api(`/distribuciones/${distribucion.id}/${endpoint}`, { method: 'POST' });
-      onRecargar();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudo actualizar el despacho.');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return <div className={integrado ? 'embedded-operation dispatch-workspace' : 'page dispatch-workspace'}>
     <header className="page-head dispatch-page-head"><div><button className="link-btn" onClick={onSalir}>← Salidas de la semana</button><span className="eyebrow">{op.linea}</span><h1>Preparar salida</h1><p className="page-sub">{fechaLegible(op.fecha_entrega)} · {rutas.length} ruta{rutas.length === 1 ? '' : 's'}</p></div><div className="page-actions"><button className="btn btn-primary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'completo' })}>Imprimir documentos</button><MoreActions label="Opciones de impresión"><button className="btn btn-ghost" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'carga' })}>Solo hoja general de carga</button></MoreActions></div></header>
-    {error && <p className="error-msg">{error}</p>}
-    <div className="dispatch-flow dispatch-flow--detail" aria-label="Progreso del despacho"><span><b>1</b> Salida elegida</span><span className="is-active"><b>2</b> Preparar documentos</span><span className={puedeVerificar || puedeCargar ? 'is-active' : ''}><b>3</b> Revisar carga</span><span className={hayAcciones ? 'is-active' : ''}><b>4</b> Confirmar salida</span></div>
+    <div className="dispatch-flow dispatch-flow--direct" aria-label="Flujo directo"><span className="is-active"><b>1</b> Pedido aprobado</span><span className="is-active"><b>2</b> Entrega al restaurante</span></div>
     {totalFaltante > 0 && <p className="aviso-falt">{totalFaltante} producto{totalFaltante === 1 ? '' : 's'} pendiente{totalFaltante === 1 ? '' : 's'} de conciliar. Las hojas mantienen las cantidades confirmadas.</p>}
 
     <section className="dispatch-summary card">
@@ -437,11 +404,6 @@ function OperacionView({
           <ol>{destinos.map((destino, indice) => <li key={destino.clave}><span>{indice + 1}</span><div><strong>{destino.nombre}</strong>{destino.entregaEn !== destino.nombre && <small>Se entrega en {destino.entregaEn}</small>}</div><b>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</b></li>)}</ol>
         </article>;
       })}
-    </div>}
-
-    {hayAcciones && <div className="action-bar dispatch-final-actions">
-      {repartoHabilitado && puedeVerificar && verificacionCarga && <button className="btn btn-secondary" disabled={busy} onClick={() => void ejecutar('verificada')}>Marcar carga revisada</button>}
-      {repartoHabilitado && puedeCargar && <button className="btn btn-primary" disabled={busy} onClick={() => void ejecutar('cargar')}>Confirmar salida a ruta →</button>}
     </div>}
 
     {impresion && <PaqueteDespacho op={op} rutas={rutas} productos={productos} alcance={impresion} onClose={() => setImpresion(null)} />}

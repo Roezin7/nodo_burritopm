@@ -3360,6 +3360,7 @@ textarea { resize: vertical; }
   background: var(--surface);
 }
 .dispatch-flow span.is-active { background: var(--brand-tint); color: var(--brand-strong); }
+.dispatch-flow--direct { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 @media (max-width: 620px) {
   .dispatch-flow { grid-template-columns: 1fr 1fr; }

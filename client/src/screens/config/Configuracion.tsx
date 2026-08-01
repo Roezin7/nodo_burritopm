@@ -8,7 +8,6 @@ import Productos from './Productos';
 import StockObjetivo from './StockObjetivo';
 import Proveedores from './Proveedores';
 import Spinner from '../../components/Spinner';
-import { useOperacionConfig } from '../../operacion-config';
 import { Link } from 'react-router-dom';
 
 // Configuración (admin). Se organiza por pestañas; cada bloque del proyecto agrega una.
@@ -27,7 +26,7 @@ const GRUPOS: { titulo: string; items: { clave: Tab; label: string; descripcion:
   ] },
   { titulo: 'Reglas', items: [
     { clave: 'stock', label: 'Productos por ubicación', descripcion: 'Disponibilidad y mínimos' },
-    { clave: 'operacion', label: 'Operación semanal', descripcion: 'Despacho, reparto y cierre' },
+    { clave: 'operacion', label: 'Operación semanal', descripcion: 'Entrega directa y cierre' },
   ] },
 ];
 const ITEMS = GRUPOS.flatMap((grupo) => grupo.items);
@@ -42,7 +41,7 @@ const DIAS = [
   { n: 0, label: 'Dom' },
 ];
 
-/** Ajustes de operación: verificación de carga y días de pedido/conteo. */
+/** Ajustes de la operación directa y días de conteo. */
 const AUTO_CIERRE_OPCIONES = [
   { h: 0, label: 'Nunca' },
   { h: 12, label: '12 h' },
@@ -51,17 +50,17 @@ const AUTO_CIERRE_OPCIONES = [
 ];
 
 function Operacion() {
-  const { repartoHabilitado, cargando: cargandoConfig, establecerRepartoHabilitado } = useOperacionConfig();
-  const [verif, setVerif] = useState<boolean | null>(null);
+  const [cargando, setCargando] = useState(true);
   const [dias, setDias] = useState<number[]>([]);
   const [autoCierre, setAutoCierre] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api<{ verificacion_carga: boolean; inventario_dias: number[]; auto_cierre_horas: number }>('/negocio')
-      .then((n) => { setVerif(n.verificacion_carga); setDias(n.inventario_dias ?? []); setAutoCierre(n.auto_cierre_horas ?? 0); })
-      .catch(() => setError('No se pudo cargar la configuración'));
+    api<{ inventario_dias: number[]; auto_cierre_horas: number }>('/negocio')
+      .then((n) => { setDias(n.inventario_dias ?? []); setAutoCierre(n.auto_cierre_horas ?? 0); })
+      .catch(() => setError('No se pudo cargar la configuración'))
+      .finally(() => setCargando(false));
   }, []);
 
   async function guardar(body: Record<string, unknown>): Promise<boolean> {
@@ -77,12 +76,6 @@ function Operacion() {
     }
   }
 
-  async function alternarVerif(valor: boolean) {
-    const anterior = verif ?? false;
-    setVerif(valor);
-    if (!await guardar({ verificacion_carga: valor })) setVerif(anterior);
-  }
-
   async function alternarDia(n: number) {
     const next = dias.includes(n) ? dias.filter((d) => d !== n) : [...dias, n];
     const anterior = dias;
@@ -96,33 +89,9 @@ function Operacion() {
     if (!await guardar({ auto_cierre_horas: h })) setAutoCierre(anterior);
   }
 
-  async function alternarReparto(valor: boolean) {
-    establecerRepartoHabilitado(valor);
-    if (!await guardar({ reparto_habilitado: valor })) establecerRepartoHabilitado(!valor);
-  }
-
-  if (verif === null || cargandoConfig) return <Spinner />;
+  if (cargando) return <Spinner />;
   return (
     <>
-      <div className="settings-card">
-        <div className="cfg-switch">
-          <div>
-            <strong>Seguimiento de reparto</strong>
-            <p>{repartoHabilitado ? 'Despacho → Reparto' : 'Despacho completa la entrega'}</p>
-          </div>
-          <button
-            type="button"
-            className={`switch ${repartoHabilitado ? 'switch--on' : ''}`}
-            disabled={busy}
-            aria-label="Activar seguimiento de reparto"
-            aria-pressed={repartoHabilitado}
-            onClick={() => void alternarReparto(!repartoHabilitado)}
-          >
-            <span className="switch-knob" />
-          </button>
-        </div>
-      </div>
-
       <div className="settings-card">
         <strong>Días de conteo físico</strong>
         <div className="dias-selector">
@@ -143,24 +112,6 @@ function Operacion() {
       </div>
 
       <div className="settings-card">
-        <div className="cfg-switch">
-          <div>
-            <strong>Verificación de carga</strong>
-            <p>Revisión antes de enviar el pedido</p>
-          </div>
-          <button
-            type="button"
-            className={`switch ${verif ? 'switch--on' : ''}`}
-            disabled={busy}
-            aria-pressed={verif}
-            onClick={() => void alternarVerif(!verif)}
-          >
-            <span className="switch-knob" />
-          </button>
-        </div>
-      </div>
-
-      {repartoHabilitado && <div className="settings-card">
         <strong>Auto-cierre de recepción</strong>
         <div className="dias-selector">
           {AUTO_CIERRE_OPCIONES.map((o) => (
@@ -177,7 +128,7 @@ function Operacion() {
           ))}
         </div>
         {autoCierre === 0 && <small>Las recepciones quedan pendientes hasta confirmarlas</small>}
-      </div>}
+      </div>
       {error && <p className="error-msg">{error}</p>}
     </>
   );

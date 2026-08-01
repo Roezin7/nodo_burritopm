@@ -88,7 +88,7 @@ const MODULOS: Modulo[] = [
   { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/semana/produccion', soloAdmin: true },
   { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
   { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
-  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir y cargar el vehículo', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Documentos de entrega directa', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'], requiereReparto: true },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['encargado_sucursal'], requiereReparto: true },
   { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cobros, pagos y facturas pendientes', ruta: '/facturacion', soloAdmin: true },

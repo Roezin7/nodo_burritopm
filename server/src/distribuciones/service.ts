@@ -666,7 +666,9 @@ export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuario
       data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
     }),
   ]);
-  const despachoDirecto = await completarDistribucionDirectaSiAplica(negocioId, id, usuarioId);
+  // La operación actual no tiene una cuadrilla intermedia de carga: al aprobar, producción
+  // registra la salida y el pedido queda directamente en tránsito hacia el restaurante.
+  const despachoDirecto = await completarSalidaDirecta(negocioId, id, usuarioId);
   return { ok: true, despacho_directo: despachoDirecto };
 }
 
@@ -707,14 +709,12 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   if (!['aprobada', 'verificada'].includes(dist.estado)) {
     throw new HttpError(409, 'Solo se carga una distribución aprobada o verificada');
   }
-  // Si la verificación está activa, no se carga sin haber verificado primero.
+  // `verificacion_carga` se conserva en el esquema únicamente para leer operaciones
+  // históricas. El flujo vigente es directo y no exige un segundo usuario.
   const negocio = await prisma.negocios.findUnique({
     where: { id: negocioId },
-    select: { verificacion_carga: true, reparto_habilitado: true },
+    select: { reparto_habilitado: true },
   });
-  if (negocio?.reparto_habilitado && negocio.verificacion_carga && dist.estado !== 'verificada') {
-    throw new HttpError(409, 'La verificación de carga está activa: verifica antes de cargar');
-  }
   const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
   const productos = await prisma.products.findMany({
@@ -845,14 +845,12 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   return { ok: true };
 }
 
-/** Sin seguimiento de reparto, aprobar equivale a despachar y entregar. */
-async function completarDistribucionDirectaSiAplica(
+/** Aprobar equivale a registrar la salida desde producción, sin usuario de carga. */
+async function completarSalidaDirecta(
   negocioId: bigint,
   id: bigint,
   usuarioId: bigint,
 ) {
-  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
-  if (negocio?.reparto_habilitado) return false;
   const distribucion = await prisma.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
   if (!distribucion || !['aprobada', 'verificada'].includes(distribucion.estado)) return false;
   await confirmarCarga(negocioId, id, usuarioId);

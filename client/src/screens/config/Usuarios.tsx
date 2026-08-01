@@ -16,10 +16,9 @@ interface UsuarioAdmin {
 
 const ROLES: { valor: Rol; label: string }[] = [
   { valor: 'admin', label: 'Admin' },
-  { valor: 'encargado_bodega', label: 'Bodega y reparto' },
   { valor: 'encargado_sucursal', label: 'Sucursal' },
 ];
-const ROL_LABEL = Object.fromEntries(ROLES.map((r) => [r.valor, r.label])) as Record<Rol, string>;
+const ROL_LABEL: Record<Rol, string> = { admin: 'Admin', encargado_bodega: 'Acceso anterior de bodega', encargado_sucursal: 'Sucursal' };
 
 interface FormState {
   id: number | null;
