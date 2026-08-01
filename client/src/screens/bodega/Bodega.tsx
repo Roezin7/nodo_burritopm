@@ -261,7 +261,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   const [programacion, setProgramacion] = useState<Catalogo['plantillas']>([]);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
   const [lineaMovil, setLineaMovil] = useState<LineaOperacion>('carne');
-  const [mostrarCompletadas, setMostrarCompletadas] = useState(!semana.actual);
+  const [mostrarCompletadas, setMostrarCompletadas] = useState(true);
   const [error, setError] = useState('');
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const solicitud = useRef(0);
@@ -281,7 +281,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
 
   useEffect(() => {
     setOp(null); setRutas([]); setLista([]); setError('');
-    setMostrarCompletadas(!semana.actual);
+    setMostrarCompletadas(true);
     void cargar();
   }, [semana.inicio, semana.fin, semana.actual, usuario?.rol]);
 
