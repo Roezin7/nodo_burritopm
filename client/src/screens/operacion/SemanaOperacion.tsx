@@ -28,6 +28,15 @@ const controlSemanal = [
   { clave: 'cierre', label: 'Cierre' },
 ] as const;
 
+const flujoAdmin = [
+  { clave: 'compras', label: 'Compras' },
+  { clave: 'produccion', label: 'Producción' },
+  { clave: 'ventas', label: 'Pedidos' },
+  { clave: 'despacho', label: 'Entrega' },
+  { clave: 'inventario', label: 'Inventario' },
+  { clave: 'cierre', label: 'Cierre' },
+] as const;
+
 const tareasPorRol = [
   { clave: 'ventas', label: 'Ventas', roles: ['encargado_sucursal'] },
   { clave: 'despacho', label: 'Despacho', roles: ['encargado_bodega'] },
@@ -52,7 +61,6 @@ export default function SemanaOperacion() {
   }
 
   const operacionDiariaVisible = operacionDiaria.filter((p) => p.clave !== 'reparto' || repartoHabilitado);
-  const operacionDiariaNavegacion = operacionDiariaVisible.filter((p) => p.clave !== 'reparto');
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
@@ -68,20 +76,9 @@ export default function SemanaOperacion() {
     return <div className="page weekly-operation weekly-operation--simple">
       <WeekPicker semana={semana} onChange={cambiarSemana} />
 
-      <div className="weekly-work-areas">
-        <section className="weekly-work-area">
-          <h2 className="weekly-work-area__label">Operación diaria</h2>
-          <nav className="capture-tabs weekly-area-tabs" aria-label="Operación diaria">
-            {operacionDiariaNavegacion.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
-          </nav>
-        </section>
-        <section className="weekly-work-area">
-          <h2 className="weekly-work-area__label">Control semanal</h2>
-          <nav className="capture-tabs weekly-area-tabs" aria-label="Control semanal">
-            {controlSemanal.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
-          </nav>
-        </section>
-      </div>
+      <nav className="operation-pipeline" aria-label="Flujo semanal">
+        {flujoAdmin.map((p, indice) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{indice + 1}</span><strong>{p.label}</strong></NavLink>)}
+      </nav>
 
       <div className="weekly-operation__content">
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}
