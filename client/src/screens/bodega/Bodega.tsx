@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
-import { FaseChip, FlujoStepper } from '../../flujo';
-import BodegaRutaTabs from '../../components/BodegaRutaTabs';
+import { FaseChip } from '../../flujo';
 import { filasOrden, type FilaOrden, type LineaOperacion, type ProductoOrdenable } from '../../operationOrder';
 import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { useOperacionConfig } from '../../operacion-config';
 import { useAuth } from '../../auth';
 import Modal from '../../components/Modal';
 import { Icono } from '../../icons';
+import MoreActions from '../../components/MoreActions';
+import HistoryToggle from '../../components/HistoryToggle';
 
 interface DistResumen {
   id: number;
@@ -259,6 +261,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   const [programacion, setProgramacion] = useState<Catalogo['plantillas']>([]);
   const [verificacionCarga, setVerificacionCarga] = useState(false);
   const [lineaMovil, setLineaMovil] = useState<LineaOperacion>('carne');
+  const [mostrarCompletadas, setMostrarCompletadas] = useState(false);
   const [error, setError] = useState('');
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const solicitud = useRef(0);
@@ -322,6 +325,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   const salidasPor = (fecha: string, linea: LineaOperacion) => {
     const salidas = lista
       .filter((distribucion) => distribucion.fecha_entrega === fecha && distribucion.linea === linea && distribucion.estado !== 'cancelada')
+      .filter((distribucion) => mostrarCompletadas || !ESTADOS_COMPLETADOS.includes(distribucion.estado))
       .sort((a, b) => a.id - b.id);
     if (!salidas.length) return [];
     return [{
@@ -336,11 +340,13 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>
-      {!integrado && <header className="page-head"><div><span className="eyebrow">Documentos de salida</span><h1>Despacho</h1><p className="page-sub">Hojas de carga y paquetes para cada ruta.</p></div></header>}
-      {!integrado && <FlujoStepper activo="bodega" />}
-      {!integrado && <BodegaRutaTabs activo="bodega" />}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Operación diaria</span><h2>Despacho</h2></div></header>}
+      {!integrado && <header className="page-head"><div><span className="eyebrow">Operación diaria</span><h1>Despacho</h1><p className="page-sub">Prepara, revisa y confirma cada salida.</p></div>{repartoHabilitado && <Link className="btn btn-secondary" to={`/semana/reparto?semana=${semana.inicio}`}>Continuar a reparto</Link>}</header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Operación diaria</span><h2>Despacho</h2></div>{repartoHabilitado && <Link className="btn btn-secondary btn-sm" to={`/semana/reparto?semana=${semana.inicio}`}>Continuar a reparto</Link>}</header>}
       {error && <p className="error-msg">{error}</p>}
+
+      <div className="dispatch-flow" aria-label="Flujo de despacho"><span className="is-active"><b>1</b> Elegir salida</span><span><b>2</b> Preparar documentos</span><span><b>3</b> Revisar carga</span><span><b>4</b> Confirmar salida</span></div>
+
+      <div className="history-access-bar"><strong>{mostrarCompletadas ? 'Todas las salidas de la semana' : 'Salidas por preparar'}</strong><HistoryToggle active={mostrarCompletadas} openLabel="Consultar completadas" closeLabel="Volver a pendientes" onToggle={() => setMostrarCompletadas((actual) => !actual)} /></div>
 
       {!cargandoDetalle && <div className="dispatch-mobile-line" role="group" aria-label="Línea de despacho">
         {(['carne', 'desechables'] as const).map((linea) => <button
@@ -360,7 +366,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
               const programada = estaProgramado(dia.diaSemana, linea);
               return <div className={`dispatch-day-cell dispatch-day-cell--${linea}`} key={linea}>
                 {salidas.length ? salidas.map((salida) => <button className="dispatch-day-card" key={salida.id} onClick={() => void abrir(salida.ids)}>
-                  <div><strong>{salida.total_lineas} partidas</strong><span>Documentos por ruta</span></div><div><FaseChip estado={salida.estado} /><b><Icono name="chevron" /></b></div>
+                  <div><strong>{salida.total_lineas} partidas</strong><span>Preparar salida</span></div><div><FaseChip estado={salida.estado} /><b><Icono name="chevron" /></b></div>
                 </button>) : <div className={`dispatch-day-empty ${programada ? 'is-scheduled' : ''}`}><strong>{programada ? 'Salida programada' : 'Sin salida'}</strong>{programada && <span>Se generará al completar los pedidos</span>}</div>}
               </div>;
             })}
@@ -408,8 +414,9 @@ function OperacionView({
   }
 
   return <div className={integrado ? 'embedded-operation dispatch-workspace' : 'page dispatch-workspace'}>
-    <header className="page-head dispatch-page-head"><div><button className="link-btn" onClick={onSalir}>← Despacho</button><span className="eyebrow">{op.linea}</span><h1>Documentos de salida</h1><p className="page-sub">{fechaLegible(op.fecha_entrega)} · {rutas.length} ruta{rutas.length === 1 ? '' : 's'}</p></div><div className="page-actions"><button className="btn btn-secondary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'carga' })}>Hoja general de carga</button><button className="btn btn-primary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'completo' })}>Imprimir paquete completo</button></div></header>
+    <header className="page-head dispatch-page-head"><div><button className="link-btn" onClick={onSalir}>← Salidas de la semana</button><span className="eyebrow">{op.linea}</span><h1>Preparar salida</h1><p className="page-sub">{fechaLegible(op.fecha_entrega)} · {rutas.length} ruta{rutas.length === 1 ? '' : 's'}</p></div><div className="page-actions"><button className="btn btn-primary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'completo' })}>Imprimir documentos</button><MoreActions label="Opciones de impresión"><button className="btn btn-ghost" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'carga' })}>Solo hoja general de carga</button></MoreActions></div></header>
     {error && <p className="error-msg">{error}</p>}
+    <div className="dispatch-flow dispatch-flow--detail" aria-label="Progreso del despacho"><span><b>1</b> Salida elegida</span><span className="is-active"><b>2</b> Preparar documentos</span><span className={puedeVerificar || puedeCargar ? 'is-active' : ''}><b>3</b> Revisar carga</span><span className={hayAcciones ? 'is-active' : ''}><b>4</b> Confirmar salida</span></div>
     {totalFaltante > 0 && <p className="aviso-falt">{totalFaltante} producto{totalFaltante === 1 ? '' : 's'} pendiente{totalFaltante === 1 ? '' : 's'} de conciliar. Las hojas mantienen las cantidades confirmadas.</p>}
 
     <section className="dispatch-summary card">

@@ -35,8 +35,10 @@ const ITEMS: Item[] = [
   { ruta: '/semana/cierre', label: 'Cierre', icono: 'checks', grupo: 'control_semanal', soloAdmin: true },
   { ruta: '/facturacion', label: 'Facturación', icono: 'wallet', grupo: 'administracion', soloAdmin: true },
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'administracion', soloAdmin: true },
-  { ruta: '/semana/recepcion', label: 'Auditoría', icono: 'checks', grupo: 'administracion', soloAdmin: true },
 ];
+
+const OPERACION_ADMIN: Item = { ruta: '/semana', label: 'Operación', icono: 'checks', grupo: 'general', soloAdmin: true };
+const CONFIGURACION_ADMIN: Item = { ruta: '/configuracion', label: 'Configuración', icono: 'settings', grupo: 'administracion', soloAdmin: true };
 
 const GRUPOS = [
   { clave: 'general', label: 'General' },
@@ -94,17 +96,17 @@ export default function Shell({ children }: { children: ReactNode }) {
     return true;
   });
 
+  // El administrador entra a una sola área Operación; sus pasos viven dentro de ella.
+  // Las rutas directas se conservan para marcadores y enlaces existentes.
+  const itemsNavegacion = usuario?.rol === 'admin'
+    ? [items.find((i) => i.ruta === '/')!, OPERACION_ADMIN, items.find((i) => i.ruta === '/facturacion')!, items.find((i) => i.ruta === '/incidencias')!, CONFIGURACION_ADMIN]
+    : items.filter((i) => !(usuario?.rol === 'encargado_bodega' && i.ruta === '/semana/reparto'));
+
   // "Más" siempre visible en móvil: además del overflow, ahí viven Tema y Cerrar sesión
   // (si no, roles con pocas secciones se quedaban sin forma de salir en el teléfono).
-  const operacionAdmin: Item = { ruta: '/semana', label: 'Operación', icono: 'checks', grupo: 'general', soloAdmin: true };
-  const itemsMoviles = usuario?.rol === 'admin'
-    ? [items.find((i) => i.ruta === '/')!, operacionAdmin, items.find((i) => i.ruta === '/facturacion')!]
-    : items;
+  const itemsMoviles = itemsNavegacion;
   const primarios = itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(0, MAX_PRIMARIOS) : itemsMoviles;
-  const rutasPrimarias = new Set(primarios.map((i) => i.ruta));
-  const extras = usuario?.rol === 'admin'
-    ? items.filter((i) => !rutasPrimarias.has(i.ruta))
-    : itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(MAX_PRIMARIOS) : [];
+  const extras = itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(MAX_PRIMARIOS) : [];
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
     : i.ruta === '/semana' ? pathname.startsWith('/semana') : pathname.startsWith(i.ruta);
@@ -130,7 +132,7 @@ export default function Shell({ children }: { children: ReactNode }) {
         </div>
         <nav className="nav-links" aria-label="Navegación principal">
           {GRUPOS.map((grupo) => {
-            const delGrupo = items.filter((i) => i.grupo === grupo.clave);
+            const delGrupo = itemsNavegacion.filter((i) => i.grupo === grupo.clave);
             if (!delGrupo.length) return null;
             return <div className="nav-group" key={grupo.clave}>
               <span className="nav-group-label">{grupo.label}</span>
@@ -172,7 +174,6 @@ export default function Shell({ children }: { children: ReactNode }) {
           </div>
           <div className="ctx-right">
             <SyncCenter />
-            {usuario?.rol === 'admin' && <NavLink className="icon-btn" to="/configuracion" aria-label="Configuración" title="Configuración"><Icono name="settings" size={18} /></NavLink>}
           </div>
         </header>
 

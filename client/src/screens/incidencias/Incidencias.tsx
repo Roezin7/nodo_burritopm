@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api';
 import CollapsibleSection from '../../components/CollapsibleSection';
 import { useDialog } from '../../dialog';
+import HistoryToggle from '../../components/HistoryToggle';
 
 interface Incidencia {
   id: number;
@@ -40,10 +41,7 @@ export default function Incidencias() {
       <header className="page-head">
         <div><h1>Incidencias</h1></div>
       </header>
-      <div className="tabs">
-        <button className={estado === 'abierta' ? 'tab tab--on' : 'tab'} onClick={() => setEstado('abierta')}>Abiertas</button>
-        <button className={estado === 'todas' ? 'tab tab--on' : 'tab'} onClick={() => setEstado('todas')}>Todas</button>
-      </div>
+      <div className="history-access-bar"><strong>{estado === 'abierta' ? 'Pendientes de resolver' : 'Consulta histórica'}</strong><HistoryToggle active={estado === 'todas'} closeLabel="Volver a abiertas" onToggle={() => setEstado(estado === 'todas' ? 'abierta' : 'todas')} /></div>
       {error && <p className="error-msg">{error}</p>}
       {lista.length === 0 ? (
         <div className="empty-state empty-state--card"><strong>{estado === 'abierta' ? 'Todo está en orden' : 'Sin incidencias registradas'}</strong><span>{estado === 'abierta' ? 'Las diferencias de entrega o inventario aparecerán aquí para darles seguimiento.' : 'No hay resultados en el historial.'}</span></div>

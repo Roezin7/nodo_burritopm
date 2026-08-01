@@ -10,6 +10,7 @@ import CollapsibleSection from '../../components/CollapsibleSection';
 import { useUnsavedChanges } from '../../use-unsaved';
 import { useDialog } from '../../dialog';
 import { Icono } from '../../icons';
+import MoreActions from '../../components/MoreActions';
 
 interface DistResumen {
   id: number;
@@ -401,7 +402,9 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
         </div>
         <div className="dist-acciones">
           <button className="btn btn-secondary" disabled={busy} onClick={() => void renombrar()}>Renombrar</button>
-          <button className="btn btn-danger" disabled={busy} onClick={() => void eliminar()}>Eliminar</button>
+          <MoreActions>
+            <button className="btn btn-danger-ghost" disabled={busy} onClick={() => void eliminar()}>Eliminar consolidado</button>
+          </MoreActions>
         </div>
       </header>
 

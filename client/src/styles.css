@@ -3300,6 +3300,72 @@ textarea { resize: vertical; }
 }
 .page-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
 
+/* Las operaciones excepcionales permanecen disponibles sin competir con la tarea principal. */
+.more-actions { position: relative; display: inline-block; }
+.more-actions > summary { list-style: none; cursor: pointer; }
+.more-actions > summary::-webkit-details-marker { display: none; }
+.more-actions[open] > summary { background: var(--surface-2); }
+.more-actions__menu {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  bottom: calc(100% + 0.45rem);
+  display: grid;
+  min-width: 210px;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--surface);
+  box-shadow: var(--sh-lg);
+}
+.page-head .more-actions__menu,
+.dist-acciones .more-actions__menu { top: calc(100% + 0.45rem); bottom: auto; }
+.more-actions__menu .btn { width: 100%; justify-content: flex-start; }
+.order-view-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.history-access-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.history-access-bar > strong { color: var(--ink-2); font-size: 0.82rem; }
+.dispatch-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+}
+.dispatch-flow span {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 42px;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--r-input);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+.dispatch-flow span b {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+}
+.dispatch-flow span.is-active { background: var(--brand-tint); color: var(--brand-strong); }
+
+@media (max-width: 620px) {
+  .dispatch-flow { grid-template-columns: 1fr 1fr; }
+  .history-access-bar { align-items: flex-start; }
+}
+
 .operation-subnav {
   display: flex;
   gap: 0.25rem;

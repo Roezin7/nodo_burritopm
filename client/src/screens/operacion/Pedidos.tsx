@@ -9,6 +9,7 @@ import Distribucion from '../distribucion/Distribucion';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 import CapturaSemanalPedidos from './pedidos/CapturaSemanalPedidos';
 import HistorialPedidos from './pedidos/HistorialPedidos';
+import HistoryToggle from '../../components/HistoryToggle';
 import OrdenImprimible from './pedidos/OrdenImprimible';
 import {
   entregasDeSemana, esPieza, fechaEntregaCorta, hoy, unidadCorta, usd,
@@ -267,7 +268,10 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Ventas' : 'Pedido del restaurante'}</span><h1>{admin ? 'Venta semanal' : 'Hacer pedido'}</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Operación diaria' : 'Pedido del restaurante'}</span><h2>{admin ? 'Ventas' : 'Hacer pedido'}</h2></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
-        {admin && <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'historial' ? 'tab tab--on' : 'tab'} onClick={() => setVista('historial')}>Historial</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Despachos</button></div>}
+        {admin && <div className="order-view-actions">
+          <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Despachos</button></div>
+          <HistoryToggle active={vista === 'historial'} closeLabel="Volver a captura" onToggle={() => setVista(vista === 'historial' ? 'captura' : 'historial')} />
+        </div>}
         {vista !== 'consolidados' && <div className="segmented order-line-switch">
         <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('carne')}>Carne</button>
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>

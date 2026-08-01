@@ -52,6 +52,7 @@ export default function SemanaOperacion() {
   }
 
   const operacionDiariaVisible = operacionDiaria.filter((p) => p.clave !== 'reparto' || repartoHabilitado);
+  const operacionDiariaNavegacion = operacionDiariaVisible.filter((p) => p.clave !== 'reparto');
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
@@ -71,7 +72,7 @@ export default function SemanaOperacion() {
         <section className="weekly-work-area">
           <h2 className="weekly-work-area__label">Operación diaria</h2>
           <nav className="capture-tabs weekly-area-tabs" aria-label="Operación diaria">
-            {operacionDiariaVisible.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
+            {operacionDiariaNavegacion.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
           </nav>
         </section>
         <section className="weekly-work-area">
@@ -102,13 +103,14 @@ export default function SemanaOperacion() {
   const inicio = permitidos[0]?.clave ?? 'ventas';
   if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={rutaSemana(`/semana/${inicio}`)} replace />;
   const actual = alias as Tarea;
+  const tareasNavegacion = usuario.rol === 'encargado_bodega' ? permitidos.filter((p) => p.clave !== 'reparto') : permitidos;
 
   const tituloRol = usuario.rol === 'encargado_sucursal' ? 'Pedido y recepción' : 'Trabajo de bodega';
   return <div className="page weekly-operation weekly-operation--simple weekly-operation--field">
     {permitidos.length > 1 && <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Trabajo del día</span><h1>{tituloRol}</h1></div></header>}
     <WeekPicker semana={semana} onChange={cambiarSemana} />
-    {permitidos.length > 1 && <nav className="capture-tabs capture-tabs--role capture-tabs--plain" aria-label="Trabajo disponible">
-      {permitidos.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
+    {tareasNavegacion.length > 1 && <nav className="capture-tabs capture-tabs--role capture-tabs--plain" aria-label="Trabajo disponible">
+      {tareasNavegacion.map((p) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><strong>{p.label}</strong></NavLink>)}
     </nav>}
     <div className="weekly-operation__content">
       {actual === 'ventas' && <Pedidos integrado semana={semana} />}

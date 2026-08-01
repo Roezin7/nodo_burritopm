@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError, nuevaClaveIdempotencia } from '../api';
 import Spinner from '../components/Spinner';
 import CollapsibleSection from '../components/CollapsibleSection';
+import HistoryToggle from '../components/HistoryToggle';
 import { crearSemana, etiquetaRango, semanasAlrededor } from '../semana';
 import { useToast } from '../toast';
 import { useDialog } from '../dialog';
@@ -252,7 +253,7 @@ export default function Facturacion() {
     </CollapsibleSection>
 
     <section className="workspace-card billing-toolbar">
-      <div className="segmented" aria-label="Estado de facturas"><button className={vista === 'pendientes' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setVista('pendientes')}>Actuales</button><button className={vista === 'historial' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setVista('historial')}>Historial</button></div>
+      <HistoryToggle active={vista === 'historial'} onToggle={() => setVista(vista === 'historial' ? 'pendientes' : 'historial')} />
       <div className="segmented" aria-label="Tipo de factura"><button className={tipo === 'todas' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('todas')}>Todas</button><button className={tipo === 'cobrar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('cobrar')}>Por cobrar</button><button className={tipo === 'pagar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('pagar')}>Por pagar</button></div>
       <input type="search" aria-label="Buscar factura" placeholder="Buscar folio, empresa o proveedor" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
     </section>

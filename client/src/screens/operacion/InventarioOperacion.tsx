@@ -6,6 +6,7 @@ import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { crearSemana, fechaDentroDeSemana, type SemanaSeleccionada } from '../../semana';
 import CollapsibleSection from '../../components/CollapsibleSection';
+import HistoryToggle from '../../components/HistoryToggle';
 import { useUnsavedChanges } from '../../use-unsaved';
 import { useDialog } from '../../dialog';
 
@@ -70,6 +71,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const [observacion, setObservacion] = useState('');
   const [busy, setBusy] = useState(false);
   const [historial, setHistorial] = useState<InventarioGuardado[]>([]);
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
   const [soloDiferencias, setSoloDiferencias] = useState(false);
   const [tocados, setTocados] = useState<Set<number>>(() => new Set());
   useUnsavedChanges(editando);
@@ -259,7 +261,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
           {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
         </div>
       </CollapsibleSection>
-      {admin && <CollapsibleSection title={`Conteos físicos de semana ${semana.numero}`} count={historialSemana.length} defaultOpen={false} className="inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin conteo físico · no bloquea el cierre</strong></div>}</CollapsibleSection>}
+      {admin && <><div className="history-access-bar"><strong>Conteos físicos · semana {semana.numero}</strong><HistoryToggle active={mostrarHistorial} openLabel={`Consultar anteriores (${historialSemana.length})`} onToggle={() => setMostrarHistorial((actual) => !actual)} /></div>{mostrarHistorial && <section className="workspace-card inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin conteo físico · no bloquea el cierre</strong></div>}</section>}</>}
       {editando && <div className="inventory-capture-actions"><label className="field"><span>{almacenActual?.codigo === 'CARN' ? 'Doble check del sábado' : `Fecha dentro de semana ${semana.numero}`}</span><input type="date" min={semana.inicio} max={semana.fin} value={fecha} disabled={almacenActual?.codigo === 'CARN'} onChange={(e) => setFecha(e.target.value)} /></label><label className="field field--wide"><span>Observación del ajuste</span><input value={observacion} maxLength={500} placeholder="Ej. diferencia de conteo reportada por producción" onChange={(e) => setObservacion(e.target.value)} /></label><button className="btn btn-secondary" disabled={busy} onClick={() => setEditando(false)}>Cancelar</button><button className="btn btn-primary" disabled={busy} onClick={() => void guardarCierre()}>{busy ? 'Guardando…' : 'Guardar conteo físico'}</button></div>}
       {admin && !integrado && <p className="operation-footnote"><Link to="/conteos">Ver historial y ajustes</Link></p>}
     </>}

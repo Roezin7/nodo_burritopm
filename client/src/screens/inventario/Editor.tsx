@@ -6,6 +6,7 @@ import EstadoChip from './EstadoChip';
 import { fechaLarga, type InventarioDetalle, type LineaInventario } from './types';
 import { useDialog } from '../../dialog';
 import { Icono } from '../../icons';
+import MoreActions from '../../components/MoreActions';
 
 export default function Editor({ detalle, onSalir, onRecargar }: { detalle: InventarioDetalle; onSalir: () => void; onRecargar: () => void }) {
   const { usuario } = useAuth();
@@ -210,14 +211,18 @@ export default function Editor({ detalle, onSalir, onRecargar }: { detalle: Inve
             )}
           </div>
           {esAdmin && (
-            <button className="btn btn-danger-ghost btn-sm" onClick={() => void eliminar()} disabled={guardando}>Eliminar {esPedido ? 'pedido' : 'inventario'}</button>
+            <MoreActions>
+              <button className="btn btn-danger-ghost" onClick={() => void eliminar()} disabled={guardando}>Eliminar {esPedido ? 'pedido' : 'inventario'}</button>
+            </MoreActions>
           )}
         </div>
       ) : (
         esAdmin && (
           <div className="action-bar action-bar-row">
             <button className="btn btn-ghost" onClick={() => void reabrir()} disabled={guardando}>Reabrir {esPedido ? 'pedido' : 'inventario'}</button>
-            <button className="btn btn-danger-ghost" onClick={() => void eliminar()} disabled={guardando}>Eliminar {esPedido ? 'pedido' : 'inventario'}</button>
+            <MoreActions>
+              <button className="btn btn-danger-ghost" onClick={() => void eliminar()} disabled={guardando}>Eliminar {esPedido ? 'pedido' : 'inventario'}</button>
+            </MoreActions>
           </div>
         )
       )}
