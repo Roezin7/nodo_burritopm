@@ -137,7 +137,7 @@ export default function Home() {
 
   if (esAdmin) return (
     <div className="page admin-home">
-      <header className="page-head operation-page-head"><div><span className="eyebrow">Resumen</span><h1>{saludo()}, {usuario.nombre}</h1></div></header>
+      <header className="page-head operation-page-head"><div><span className="eyebrow">Hoy</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Primero atiende lo pendiente. La semana conserva el contexto completo de la operación.</p></div><Link className="btn btn-secondary" to="/semana/ventas">Abrir semana</Link></header>
       <ActivarAvisos />
       <TareaHoy repartoHabilitado={repartoHabilitado} />
       <PanelAdmin />

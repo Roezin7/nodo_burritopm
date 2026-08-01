@@ -28,15 +28,6 @@ const controlSemanal = [
   { clave: 'cierre', label: 'Cierre' },
 ] as const;
 
-const flujoAdmin = [
-  { clave: 'compras', label: 'Compras' },
-  { clave: 'produccion', label: 'Producción' },
-  { clave: 'ventas', label: 'Pedidos' },
-  { clave: 'despacho', label: 'Entrega' },
-  { clave: 'inventario', label: 'Inventario' },
-  { clave: 'cierre', label: 'Cierre' },
-] as const;
-
 const tareasPorRol = [
   { clave: 'ventas', label: 'Ventas', roles: ['encargado_sucursal'] },
   { clave: 'despacho', label: 'Despacho', roles: ['encargado_bodega'] },
@@ -47,6 +38,43 @@ const tareasPorRol = [
 
 type AreaAdmin = (typeof operacionDiaria)[number]['clave'] | (typeof controlSemanal)[number]['clave'];
 type Tarea = (typeof tareasPorRol)[number]['clave'];
+
+function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; semana: ReturnType<typeof useSemanaGlobal>['semana']; rutaSemana: (ruta: string) => string }) {
+  const fechaChicago = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+  const diaChicago = new Date(`${fechaChicago}T12:00:00`).getDay();
+  const esSabadoActual = semana.actual && diaChicago === 6;
+  const esOperacion = operacionDiaria.some((item) => item.clave === actual);
+
+  return <section className="weekly-cadence" aria-labelledby="weekly-cadence-title">
+    <div className="weekly-cadence__message">
+      <span className="eyebrow">Cadencia de la semana</span>
+      <h1 id="weekly-cadence-title">{!semana.actual ? 'Consulta histórica' : esSabadoActual ? 'Sábado de regularización' : 'Operación diaria'}</h1>
+      <p>{!semana.actual
+        ? 'Estás consultando una semana anterior. Sus registros y resultados se conservan sin cambios.'
+        : esSabadoActual
+          ? 'Continúan las ventas y entregas; hoy también se registran compras y producción para conciliar y cerrar.'
+          : 'Captura ventas y prepara entregas. El inventario puede ser negativo provisionalmente hasta la regularización del sábado.'}</p>
+    </div>
+    <div className="weekly-cadence__groups">
+      <div className={esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
+        <div className="cadence-group__head"><span>Durante la semana</span><strong>Operación diaria</strong></div>
+        <nav aria-label="Operación diaria">
+          <NavLink to={rutaSemana('/semana/ventas')} className={actual === 'ventas' ? 'is-active' : ''}>Ventas</NavLink>
+          <NavLink to={rutaSemana('/semana/despacho')} className={actual === 'despacho' ? 'is-active' : ''}>Entregas</NavLink>
+        </nav>
+      </div>
+      <div className={!esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
+        <div className="cadence-group__head"><span>Principalmente el sábado</span><strong>Regularización</strong></div>
+        <nav aria-label="Regularización del sábado">
+          <NavLink to={rutaSemana('/semana/compras')} className={actual === 'compras' ? 'is-active' : ''}>Compras</NavLink>
+          <NavLink to={rutaSemana('/semana/produccion')} className={actual === 'produccion' ? 'is-active' : ''}>Producción</NavLink>
+          <NavLink to={rutaSemana('/semana/inventario')} className={actual === 'inventario' ? 'is-active' : ''}>Conciliación</NavLink>
+          <NavLink to={rutaSemana('/semana/cierre')} className={actual === 'cierre' ? 'is-active' : ''}>Cierre</NavLink>
+        </nav>
+      </div>
+    </div>
+  </section>;
+}
 
 export default function SemanaOperacion() {
   const { usuario } = useAuth();
@@ -70,15 +98,12 @@ export default function SemanaOperacion() {
       <WeekPicker semana={semana} onChange={cambiarSemana} />
       <div className="weekly-operation__content"><Recepcion integrado semana={semana} /></div>
     </div>;
-    const actual = (paso ?? 'compras') as AreaAdmin;
+    const actual = (paso ?? 'ventas') as AreaAdmin;
     const todos = [...operacionDiariaVisible, ...controlSemanal];
-    if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/compras')} replace />;
+    if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/ventas')} replace />;
     return <div className="page weekly-operation weekly-operation--simple">
       <WeekPicker semana={semana} onChange={cambiarSemana} />
-
-      <nav className="operation-pipeline" aria-label="Flujo semanal">
-        {flujoAdmin.map((p, indice) => <NavLink key={p.clave} to={rutaSemana(`/semana/${p.clave}`)} className={p.clave === actual ? 'is-active' : ''}><span>{indice + 1}</span><strong>{p.label}</strong></NavLink>)}
-      </nav>
+      <CadenciaSemanal actual={actual} semana={semana} rutaSemana={rutaSemana} />
 
       <div className="weekly-operation__content">
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}

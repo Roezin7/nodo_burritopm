@@ -37,7 +37,7 @@ const ITEMS: Item[] = [
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'administracion', soloAdmin: true },
 ];
 
-const OPERACION_ADMIN: Item = { ruta: '/semana', label: 'Operación', icono: 'checks', grupo: 'general', soloAdmin: true };
+const OPERACION_ADMIN: Item = { ruta: '/semana', label: 'Semana', icono: 'checks', grupo: 'general', soloAdmin: true };
 const CONFIGURACION_ADMIN: Item = { ruta: '/configuracion', label: 'Configuración', icono: 'settings', grupo: 'administracion', soloAdmin: true };
 
 const GRUPOS = [

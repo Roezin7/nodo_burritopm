@@ -3366,6 +3366,31 @@ textarea { resize: vertical; }
 .operation-pipeline a span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); font-size: 0.68rem; font-weight: 800; }
 .operation-pipeline a.is-active { background: var(--brand-tint); color: var(--brand-strong); }
 .operation-pipeline a.is-active span { background: var(--brand); color: white; }
+
+/* La semana comunica los dos ritmos reales de trabajo sin convertirlos en pasos lineales. */
+.weekly-cadence { margin: 0.8rem 0 1.15rem; padding: 1rem; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); }
+.weekly-cadence__message { display: grid; grid-template-columns: minmax(220px, 0.75fr) minmax(360px, 1.25fr); align-items: end; gap: 0.15rem 2rem; padding: 0 0.25rem 0.9rem; }
+.weekly-cadence__message .eyebrow { grid-column: 1 / -1; }
+.weekly-cadence__message h1 { margin: 0; font-size: clamp(1.35rem, 2vw, 1.8rem); letter-spacing: -0.03em; }
+.weekly-cadence__message p { margin: 0; color: var(--ink-2); line-height: 1.45; }
+.weekly-cadence__groups { display: grid; grid-template-columns: 1fr 1.45fr; gap: 0.6rem; }
+.cadence-group { min-width: 0; padding: 0.7rem; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-2); }
+.cadence-group--active { border-color: color-mix(in srgb, var(--brand) 48%, var(--border)); }
+.cadence-group__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0 0.25rem 0.55rem; }
+.cadence-group__head span { color: var(--ink-3); font-size: 0.7rem; }
+.cadence-group__head strong { font-size: 0.78rem; }
+.cadence-group nav { display: flex; gap: 0.3rem; overflow-x: auto; }
+.cadence-group a { flex: 1; min-width: max-content; padding: 0.6rem 0.7rem; border-radius: 9px; color: var(--ink-2); text-align: center; text-decoration: none; font-size: 0.8rem; font-weight: 750; }
+.cadence-group a:hover { background: var(--surface); color: var(--ink); }
+.cadence-group a.is-active { background: var(--brand-tint); color: var(--brand-strong); }
+
+@media (max-width: 760px) {
+  .weekly-cadence { padding: 0.75rem; }
+  .weekly-cadence__message { grid-template-columns: 1fr; gap: 0.35rem; }
+  .weekly-cadence__message .eyebrow { grid-column: auto; }
+  .weekly-cadence__groups { grid-template-columns: 1fr; }
+  .cadence-group__head { align-items: center; }
+}
 .dispatch-back { position: sticky; z-index: 15; top: 0.5rem; width: fit-content; margin-bottom: 0.75rem; padding: 0.55rem 0.8rem; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--ink); box-shadow: var(--sh-sm); backdrop-filter: blur(10px); font-weight: 750; }
 .dispatch-back:hover { border-color: var(--brand); color: var(--brand); }
 
