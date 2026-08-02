@@ -53,6 +53,11 @@ export function calcularSaldoSemanal(inicial: number, entradas: number, salidas:
   return r3(inicial + entradas - salidas);
 }
 
+/** Una fotografía sin renglones no es inventario en cero: es ausencia de fotografía. */
+export function aperturaConDatos<T>(mapa: Map<string, T> | null | undefined) {
+  return mapa != null && mapa.size > 0;
+}
+
 /** Ecuación operativa: inicio + entradas − salidas, separada en los cortes de miércoles y sábado. */
 export function calcularFilaConciliacion(f: FilaConciliacionCalculable) {
   const entradas1 = f.compras1 + f.produccionSalida1;
@@ -228,7 +233,15 @@ export async function obtenerInventarioSemanalDesechables(
     select: { id: true, sku: true, nombre: true },
   });
   const ids = productos.map((p) => p.id);
-  const [conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos] = await Promise.all([
+  const [conteoInicial, conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos] = await Promise.all([
+    prisma.conteos.findFirst({
+      where: {
+        negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio,
+        notas: { startsWith: 'inventario_inicial_operativo' },
+      },
+      include: { lineas: { where: { product_id: { in: ids } } } },
+      orderBy: { id: 'desc' },
+    }),
     prisma.conteos.findFirst({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio },
@@ -238,7 +251,12 @@ export async function obtenerInventarioSemanalDesechables(
       orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     }),
     prisma.semanas_operativas.findFirst({
-      where: { negocio_id: negocioId, termina_at: { lt: inicio }, estado: 'cerrada' },
+      where: {
+        negocio_id: negocioId, termina_at: { lt: inicio }, estado: 'cerrada',
+        // Las semanas 30/31 pueden existir solo para cartera. Sin renglones de
+        // inventario no representan una apertura en cero y deben ignorarse.
+        inventario_semanal: { some: { ubicacion_id: ubicacion.id } },
+      },
       orderBy: { termina_at: 'desc' },
       include: {
         inventario_semanal: {
@@ -271,15 +289,15 @@ export async function obtenerInventarioSemanalDesechables(
     }),
   ]);
 
-  const fechaConteo = conteoAnterior?.fecha ?? null;
-  const fechaSnapshot = semanaAnterior?.termina_at ?? null;
-  const usarConteo = Boolean(fechaConteo && (!fechaSnapshot || fechaConteo > fechaSnapshot));
-  const apertura = usarConteo
-    ? new Map(conteoAnterior!.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]))
-    : semanaAnterior
-      ? new Map(semanaAnterior.inventario_semanal.map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)]))
-      : null;
-  if (!apertura) {
+  const aperturaInicial = new Map(conteoInicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
+  const aperturaConteo = new Map(conteoAnterior?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
+  const aperturaSnapshot = new Map(semanaAnterior?.inventario_semanal.map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)]) ?? []);
+  const fechaConteo = aperturaConDatos(aperturaConteo) ? conteoAnterior!.fecha : null;
+  const fechaSnapshot = aperturaConDatos(aperturaSnapshot) ? semanaAnterior!.termina_at : null;
+  const usarInicial = aperturaConDatos(aperturaInicial);
+  const usarConteo = !usarInicial && Boolean(fechaConteo && (!fechaSnapshot || fechaConteo > fechaSnapshot));
+  const apertura = usarInicial ? aperturaInicial : usarConteo ? aperturaConteo : aperturaConDatos(aperturaSnapshot) ? aperturaSnapshot : null;
+  if (!aperturaConDatos(apertura)) {
     throw new HttpError(
       409,
       'Falta un cierre o conteo final anterior de Bodega Adison para reconstruir esta semana sin mezclar inventario posterior.',
@@ -305,10 +323,10 @@ export async function obtenerInventarioSemanalDesechables(
   return {
     ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
     periodo: { desde, hasta },
-    origen_apertura: usarConteo ? 'conteo_anterior' : 'cierre_anterior',
+    origen_apertura: usarInicial ? 'inicio_fijado' : usarConteo ? 'conteo_anterior' : 'cierre_anterior',
     filas: productos.map((producto) => {
       const key = producto.id.toString();
-      const inicial = r3(apertura.get(key) ?? 0);
+      const inicial = r3(apertura!.get(key) ?? 0);
       const comprasCantidad = r3(entradas.get(key) ?? 0);
       const despachosCantidad = r3(salidas.get(key) ?? 0);
       return {

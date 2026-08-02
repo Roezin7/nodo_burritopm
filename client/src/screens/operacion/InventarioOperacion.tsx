@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useAuth } from '../../auth';
@@ -74,6 +74,8 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
   const [soloDiferencias, setSoloDiferencias] = useState(false);
   const [tocados, setTocados] = useState<Set<number>>(() => new Set());
+  const cargaActual = useRef(0);
+  const cacheAlmacen = useRef(new Map<string, { stock: Stock; historial: InventarioGuardado[] }>());
   useUnsavedChanges(editando);
 
   useEffect(() => {
@@ -88,13 +90,22 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
 
   useEffect(() => {
     if (!almacenId) return;
-    setStock(null); setError('');
+    const clave = `${almacenId}:${semana.inicio}`;
+    const guardado = cacheAlmacen.current.get(clave);
+    const solicitud = ++cargaActual.current;
+    setStock(guardado?.stock ?? null);
+    if (guardado) setHistorial(guardado.historial);
+    setError('');
     Promise.all([
       api<Stock>(`/existencias?ubicacion=${almacenId}&semana=${semana.inicio}`),
       admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
     ])
-      .then(([existencias, inventarios]) => { setStock(existencias); setHistorial(inventarios); })
-      .catch((e) => setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'));
+      .then(([existencias, inventarios]) => {
+        cacheAlmacen.current.set(clave, { stock: existencias, historial: inventarios });
+        if (solicitud !== cargaActual.current) return;
+        setStock(existencias); setHistorial(inventarios);
+      })
+      .catch((e) => { if (solicitud === cargaActual.current) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'); });
   }, [almacenId, admin, semana.inicio]);
   useEffect(() => { setFecha(fechaDentroDeSemana(semana)); setEditando(false); setTocados(new Set()); }, [semana.inicio, semana.fin]);
 
@@ -104,6 +115,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       api<Stock>(`/existencias?ubicacion=${almacenId}&semana=${semana.inicio}`),
       admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
     ]);
+    cacheAlmacen.current.set(`${almacenId}:${semana.inicio}`, { stock: existencias, historial: inventarios });
     setStock(existencias); setHistorial(inventarios);
   }
 

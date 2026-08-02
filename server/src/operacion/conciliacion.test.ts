@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { calcularFilaConciliacion, calcularSaldoSemanal, normalizarSaldoApertura, rangoSemana } from './conciliacion.js';
+import { aperturaConDatos, calcularFilaConciliacion, calcularSaldoSemanal, normalizarSaldoApertura, rangoSemana } from './conciliacion.js';
 
 describe('conciliación semanal de inventario', () => {
   it('aísla desechables a apertura + entradas − salidas del periodo', () => {
     expect(calcularSaldoSemanal(100, 25, 40)).toBe(85);
+  });
+
+  it('no interpreta una fotografía financiera sin renglones como inventario en cero', () => {
+    expect(aperturaConDatos(new Map())).toBe(false);
+    expect(aperturaConDatos(new Map([['producto', 0]]))).toBe(true);
   });
 
   it('incluye el domingo dentro de la semana que cierra el sábado siguiente', () => {

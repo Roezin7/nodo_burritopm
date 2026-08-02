@@ -398,7 +398,11 @@ existenciasRouter.get(
         ? (teoricoPorProducto.get(producto.id.toString()) ?? 0)
         : num0(e?.cantidad_disponible);
       const disp = Math.max(0, saldoReal);
-      const transito = conciliacionHistorica ? 0 : Math.max(0, num0(e?.cantidad_transito));
+      // En una semana abierta la conciliación aísla el disponible, pero reserva y hold
+      // siguen siendo componentes vivos de esa misma bodega. Solo una fotografía cerrada
+      // debe congelarlos con los valores del snapshot.
+      const componentesVivos = !usarSnapshot && semana?.estado === 'abierta';
+      const transito = conciliacionHistorica && !componentesVivos ? 0 : Math.max(0, num0(e?.cantidad_transito));
       const costo = num(e?.costo_promedio) ?? (usarSnapshot ? null : num(producto.ultimo_costo) ?? num(producto.costo_promedio));
       const costoTransito = num(e?.costo_transito_promedio) ?? costo;
       return {
@@ -409,7 +413,7 @@ existenciasRouter.get(
         tipo: producto.tipo_operativo,
         unidad: producto.unidad_distribucion.nombre,
         disponible: disp,
-        reservada: conciliacionHistorica ? 0 : Math.max(0, num0(e?.cantidad_reservada)),
+        reservada: conciliacionHistorica && !componentesVivos ? 0 : Math.max(0, num0(e?.cantidad_reservada)),
         transito,
         // Una semana cerrada consulta su fotografía: el saldo ya está valuado en
         // cero, pero el faltante histórico debe seguir visible en esa semana.
