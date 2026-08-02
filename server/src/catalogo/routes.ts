@@ -107,7 +107,7 @@ catalogoRouter.get(
       where: { negocio_id: req.auth!.negocioId },
       orderBy: [{ activo: 'desc' }, { nombre: 'asc' }],
     });
-    res.json(proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre, activo: p.activo })));
+    res.json(proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre, activo: p.activo, dias_credito: p.dias_credito })));
   }),
 );
 
@@ -116,18 +116,18 @@ catalogoRouter.post(
   requireAuth,
   soloAdmin,
   asyncHandler(async (req, res) => {
-    const { nombre } = z.object({ nombre: z.string().trim().min(1).max(120) }).parse(req.body);
+    const { nombre, dias_credito } = z.object({ nombre: z.string().trim().min(1).max(120), dias_credito: z.coerce.number().int().min(0).max(180).default(14) }).parse(req.body);
     const existente = await prisma.proveedores.findFirst({
       where: { negocio_id: req.auth!.negocioId, nombre: { equals: nombre, mode: 'insensitive' } },
     });
     if (existente?.activo) throw new HttpError(409, 'Ya existe un proveedor con ese nombre');
     if (existente) {
-      await prisma.proveedores.update({ where: { id: existente.id }, data: { activo: true } });
+      await prisma.proveedores.update({ where: { id: existente.id }, data: { activo: true, dias_credito } });
       res.status(201).json({ id: Number(existente.id), restaurado: true });
       return;
     }
     const proveedor = await prisma.proveedores.create({
-      data: { negocio_id: req.auth!.negocioId, nombre },
+      data: { negocio_id: req.auth!.negocioId, nombre, dias_credito },
     });
     res.status(201).json({ id: Number(proveedor.id) });
   }),
@@ -139,8 +139,8 @@ catalogoRouter.patch(
   soloAdmin,
   asyncHandler(async (req, res) => {
     const proveedorId = BigInt(idParam.parse(req.params.id));
-    const b = z.object({ nombre: z.string().trim().min(1).max(120).optional(), activo: z.boolean().optional() })
-      .refine((v) => v.nombre !== undefined || v.activo !== undefined, { message: 'No hay cambios para guardar' })
+    const b = z.object({ nombre: z.string().trim().min(1).max(120).optional(), activo: z.boolean().optional(), dias_credito: z.coerce.number().int().min(0).max(180).optional() })
+      .refine((v) => v.nombre !== undefined || v.activo !== undefined || v.dias_credito !== undefined, { message: 'No hay cambios para guardar' })
       .parse(req.body);
     const proveedor = await prisma.proveedores.findFirst({ where: { id: proveedorId, negocio_id: req.auth!.negocioId } });
     if (!proveedor) throw new HttpError(404, 'Proveedor no encontrado');
@@ -150,7 +150,7 @@ catalogoRouter.patch(
       });
       if (duplicado) throw new HttpError(409, 'Ya existe un proveedor con ese nombre');
     }
-    await prisma.proveedores.update({ where: { id: proveedorId }, data: { nombre: b.nombre, activo: b.activo } });
+    await prisma.proveedores.update({ where: { id: proveedorId }, data: { nombre: b.nombre, activo: b.activo, dias_credito: b.dias_credito } });
     res.json({ ok: true });
   }),
 );

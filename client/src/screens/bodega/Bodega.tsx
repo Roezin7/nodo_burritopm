@@ -162,6 +162,12 @@ function diaDocumento(valor: string | null) {
   return new Date(`${valor}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
 }
 
+function esDiaConCargaConsolidada(valor: string | null) {
+  if (!valor) return false;
+  const dia = new Date(`${valor}T12:00:00`).getDay();
+  return dia === 1 || dia === 4;
+}
+
 function diasDeSemana(semana: SemanaSeleccionada) {
   const dias: { fecha: string; dia: string; numero: string; diaSemana: number }[] = [];
   const cursor = new Date(`${semana.inicio}T12:00:00`);
@@ -501,7 +507,10 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
   const rutasSeleccionadas = alcance.tipo === 'ruta' ? rutas.filter((ruta) => ruta.ruta_id === alcance.rutaId) : rutas;
   const destinosTotales = rutas.flatMap(destinosDeRuta);
   const unicaTapatios = rutas.length === 1 && esRutaTapatios(rutas[0]);
-  const mostrarCarga = alcance.tipo === 'carga' || (alcance.tipo === 'completo' && !unicaTapatios);
+  // Lunes y jueves el paquete siempre abre con el total por producto para los tres
+  // restaurantes. Reutiliza el consolidado operativo; no recalcula cantidades.
+  const mostrarCarga = alcance.tipo === 'carga'
+    || (alcance.tipo === 'completo' && (esDiaConCargaConsolidada(op.fecha_entrega) || !unicaTapatios));
   const mostrarRutas = alcance.tipo !== 'carga';
 
   return <Modal className="invoice-print dispatch-print" ariaLabelledBy="dispatch-preview-title" onClose={onClose}>

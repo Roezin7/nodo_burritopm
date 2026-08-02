@@ -14,7 +14,7 @@ export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
   ubicaciones: { id: number; nombre: string; tipo: string; empresa: { nombre: string } | null }[];
   productos: { id: number; nombre: string; sku: string; linea: string; tipo: string; unidad: string; costo: number | null; precio: number | null; peso_caja_lb: number | null; produccion_dias: number[]; produccion_extraordinaria: boolean; es_cargo_compra: boolean }[];
-  proveedores: { id: number; nombre: string }[];
+  proveedores: { id: number; nombre: string; dias_credito: number }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: string; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
   recetas_produccion: { materia_prima_id: number; producto_salida_id: number; sin_costo: boolean; orden: number }[];
 }
@@ -729,6 +729,23 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   const [vistaPrevia, setVistaPrevia] = useState<VistaPreviaCierre | null>(null);
   useEffect(() => { setFactura(null); setVistaPrevia(null); }, [semana.inicio, semana.fin]);
   async function revisarCierre() { setBusy(true); setError(''); try { setVistaPrevia(await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } })); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la vista previa del cierre.'); } finally { setBusy(false); } }
+  async function pagarProveedor(proveedor: string, documentos: VistaPreviaCierre['cartera']['documentos_por_pagar']) {
+    const total = documentos.reduce((suma, documento) => suma + documento.saldo, 0);
+    if (!await dialog.confirm({
+      title: `Pagar a ${proveedor}`,
+      description: `Se registrará un pago por ${usd(total)} que liquidará ${documentos.length} documento${documentos.length === 1 ? '' : 's'} de este proveedor con fecha de hoy.`,
+      confirmLabel: 'Confirmar pago',
+    })) return;
+    setBusy(true); setError('');
+    try {
+      if (documentos.length === 1) await api(`/cierre/compras/${documentos[0]!.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy(), monto: documentos[0]!.saldo } });
+      else await api('/cierre/compras/pagar-lote', { method: 'POST', body: { ids: documentos.map((documento) => documento.id), fecha_pago: hoy() } });
+      setVistaPrevia(await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } }));
+      await onDone();
+      toast.ok(`Pago a ${proveedor} registrado.`);
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); }
+    finally { setBusy(false); }
+  }
   async function cerrar() { setBusy(true); setError(''); try { const r = await api<{ cajas_perdidas: number; productos_con_faltante: number }>('/cierre/cerrar', { method: 'POST', body: { fecha_cierre: semana.fin } }); setVistaPrevia(null); await onDone(); toast.ok(r.cajas_perdidas > 0 ? `Semana cerrada · ${r.cajas_perdidas.toLocaleString('es-MX')} cajas perdidas registradas en Incidencias.` : 'Semana cerrada correctamente.'); } catch (e) { setVistaPrevia(null); setError(e instanceof ApiError ? e.message : 'No se pudo cerrar la semana.'); } finally { setBusy(false); } }
   const nombresExcel: Record<string, string> = { 'weekly-order': '1. Weekly Order 2026 3Q.xlsx', disposables: '2. Disposables 2026 3Q.xlsx', production: '3. Production 2026 3Q.xlsx', billing: '4. Billing 2026 3Q.xlsx', lbt: '5. LBT 2026 3Q.xlsx', aurora: '6. Taqueria Aurora 2026 3Q.xlsx' };
   async function descargar(id: number, tipo: string) { const res = await fetch(`/api/cierre/${id}/excel/${tipo}`, { headers: { Authorization: `Bearer ${getToken()}` } }); if (!res.ok) { setError('No se pudo generar el Excel.'); return; } const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = nombresExcel[tipo] ?? `${tipo}.xlsx`; a.click(); URL.revokeObjectURL(url); }
@@ -774,8 +791,12 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
       <CollapsibleSection title="Productos y precios usados por Billing" count={vistaPrevia.ventas.detalle.length}>
         <div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Ubicación / producto</span><span>Línea</span><span>Cantidad</span><span>Precio</span><span>Importe</span></div>{vistaPrevia.ventas.detalle.map((fila, indice) => <div className="invoice-row" key={`${fila.ubicacion}:${fila.linea}:${fila.descripcion}:${indice}`}><span><strong>{fila.ubicacion}</strong><small>{fila.descripcion}{fila.ajuste ? ' · ajuste explícito' : ''}</small></span><span><span className="chip">{fila.linea}</span></span><span>{fila.cantidad.toLocaleString('es-MX')}</span><span>{usd(fila.precio)}</span><span><strong>{usd(fila.importe)}</strong></span></div>)}</div>
       </CollapsibleSection>
-      <CollapsibleSection title="Cuentas por pagar usadas en el cierre" count={vistaPrevia.cartera.documentos_por_pagar.length} summary={vistaPrevia.cartera.por_pagar_proveedor.map((fila) => `${fila.proveedor} ${usd(fila.saldo)}`).join(' · ')}>
-        <div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Proveedor / referencia</span><span>Fecha</span><span>Total</span><span>Pagado</span><span>Saldo incluido</span></div>{vistaPrevia.cartera.documentos_por_pagar.map((documento) => <div className="invoice-row" key={documento.id}><span><strong>{documento.proveedor}</strong><small>{documento.referencia || `Compra #${documento.id}`}</small></span><span>{documento.fecha}</span><span>{usd(documento.total)}</span><span>{usd(documento.pagado)}</span><span><strong>{usd(documento.saldo)}</strong></span></div>)}</div>
+      <CollapsibleSection title="Cuentas por pagar antes del cierre" count={vistaPrevia.cartera.documentos_por_pagar.length} summary={`${vistaPrevia.cartera.por_pagar_proveedor.length} proveedores · ${usd(vistaPrevia.cartera.por_pagar)}`}>
+        <p className="muted">Puedes liquidar un proveedor aquí y el balance se recalculará. No es obligatorio dejar las cuentas en cero para cerrar.</p>
+        <div className="close-payables">{vistaPrevia.cartera.por_pagar_proveedor.map((grupo) => {
+          const documentos = vistaPrevia.cartera.documentos_por_pagar.filter((documento) => documento.proveedor === grupo.proveedor);
+          return <details className="billing-group" open key={grupo.proveedor}><summary><span><strong>{grupo.proveedor}</strong><small>{documentos.length} documento{documentos.length === 1 ? '' : 's'}</small></span><span className="payable-group-total"><strong>{usd(grupo.saldo)}</strong><button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={(evento) => { evento.preventDefault(); void pagarProveedor(grupo.proveedor, documentos); }}>Pagar proveedor</button></span></summary><div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Referencia</span><span>Fecha</span><span>Total</span><span>Pagado</span><span>Saldo</span></div>{documentos.map((documento) => <div className="invoice-row" key={documento.id}><span><strong>{documento.referencia || `Compra #${documento.id}`}</strong></span><span>{documento.fecha}</span><span>{usd(documento.total)}</span><span>{usd(documento.pagado)}</span><span><strong>{usd(documento.saldo)}</strong></span></div>)}</div></details>;
+        })}</div>
       </CollapsibleSection>
       <CollapsibleSection title="Facturas por generar" count={vistaPrevia.facturas.length}><div className="invoice-list close-preview-invoices"><div className="invoice-row invoice-row--head"><span>Factura</span><span>Empresa / ubicación</span><span>Vencimiento</span><span>Línea</span><span>Total</span></div>{vistaPrevia.facturas.map((f) => <div className="invoice-row" key={f.numero}><span className="invoice-number">{f.numero}<small>{f.productos} productos · {f.unidades.toLocaleString('es-MX')} unidades</small></span><span data-label="Ubicación"><strong>{f.ubicacion}</strong><small>{f.empresa}</small></span><span data-label="Vence">{f.vence_at}</span><span data-label="Línea"><span className="chip">{f.linea}</span></span><span data-label="Total"><strong>{usd(f.total)}</strong></span></div>)}</div></CollapsibleSection>
         </div>

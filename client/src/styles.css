@@ -3283,6 +3283,20 @@ a.flujo-paso { text-decoration: none; }
 /* Los controles de fecha vuelven a tener la misma altura que el resto. */
 input[type='date'], input[type='time'] { min-height: var(--control-h); padding: 0.7rem var(--control-pad-x); }
 textarea { resize: vertical; }
+
+.billing-groups { display: grid; gap: 0.7rem; }
+.billing-group { border: 1px solid var(--border); border-radius: 14px; overflow: clip; background: var(--surface-2); }
+.billing-group > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1rem; cursor: pointer; list-style: none; }
+.billing-group > summary::-webkit-details-marker { display: none; }
+.billing-group > summary span { display: grid; gap: 0.1rem; }
+.billing-group > summary small { color: var(--ink-3); font-weight: 500; }
+.billing-group > .billing-list { border-top: 1px solid var(--border); background: var(--surface); }
+.close-payables { display: grid; gap: 0.65rem; margin-top: 0.75rem; }
+.payable-group-total { display: flex !important; grid-auto-flow: column; align-items: center; gap: 0.75rem !important; }
+.billing-exceptions > div { display: grid; gap: 0.35rem; margin-top: 0.65rem; }
+.billing-exceptions button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0.65rem 0; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--ink); text-align: left; }
+.billing-exceptions button span { display: grid; gap: 0.1rem; }
+.billing-exceptions button small { color: var(--ink-3); }
 .field > span { color: var(--ink-2); font-size: 0.76rem; font-weight: 700; letter-spacing: 0.015em; }
 .field > span em { color: var(--ink-3); font-style: normal; font-weight: 500; }
 

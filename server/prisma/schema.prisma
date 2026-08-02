@@ -773,6 +773,7 @@ model proveedores {
   negocio_id BigInt
   nombre     String
   activo     Boolean  @default(true)
+  dias_credito Int    @default(14)
   creado_at  DateTime @default(now()) @db.Timestamptz(6)
 
   negocios negocios  @relation(fields: [negocio_id], references: [id])

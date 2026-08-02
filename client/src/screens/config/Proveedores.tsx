@@ -7,11 +7,13 @@ interface Proveedor {
   id: number;
   nombre: string;
   activo: boolean;
+  dias_credito: number;
 }
 
 export default function Proveedores() {
   const [lista, setLista] = useState<Proveedor[]>([]);
   const [nombre, setNombre] = useState('');
+  const [diasCredito, setDiasCredito] = useState(14);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -36,8 +38,9 @@ export default function Proveedores() {
     if (!nombre.trim() || busy) return;
     setBusy(true); setError('');
     try {
-      await api(editandoId == null ? '/catalogo/proveedores' : `/catalogo/proveedores/${editandoId}`, { method: editandoId == null ? 'POST' : 'PATCH', body: { nombre: nombre.trim() } });
+      await api(editandoId == null ? '/catalogo/proveedores' : `/catalogo/proveedores/${editandoId}`, { method: editandoId == null ? 'POST' : 'PATCH', body: { nombre: nombre.trim(), dias_credito: diasCredito } });
       setNombre('');
+      setDiasCredito(14);
       setEditandoId(null);
       await cargar();
     } catch (err) {
@@ -47,7 +50,7 @@ export default function Proveedores() {
     }
   }
 
-  function editar(proveedor: Proveedor) { setEditandoId(proveedor.id); setNombre(proveedor.nombre); setError(''); }
+  function editar(proveedor: Proveedor) { setEditandoId(proveedor.id); setNombre(proveedor.nombre); setDiasCredito(proveedor.dias_credito); setError(''); }
 
   async function alternar(proveedor: Proveedor) {
     if (busy) return;
@@ -70,9 +73,16 @@ export default function Proveedores() {
           Nombre
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Preferred Meat" maxLength={120} />
         </label>
+        <label>
+          Condición de pago
+          <select value={diasCredito} onChange={(e) => setDiasCredito(Number(e.target.value))}>
+            <option value={0}>Pago inmediato</option><option value={7}>7 días</option><option value={14}>14 días</option><option value={21}>21 días</option><option value={30}>30 días</option><option value={45}>45 días</option><option value={60}>60 días</option>
+          </select>
+          <small>Se aplicará a las compras nuevas de este proveedor.</small>
+        </label>
         {error && <p className="error-msg">{error}</p>}
         <div className="form-actions">
-          {editandoId != null && <button className="btn btn-ghost" type="button" disabled={busy} onClick={() => { setEditandoId(null); setNombre(''); }}>Cancelar</button>}
+          {editandoId != null && <button className="btn btn-ghost" type="button" disabled={busy} onClick={() => { setEditandoId(null); setNombre(''); setDiasCredito(14); }}>Cancelar</button>}
           <button className="btn btn-primary" type="submit" disabled={busy || !nombre.trim()}>{busy ? 'Guardando…' : editandoId == null ? 'Agregar' : 'Guardar cambios'}</button>
         </div>
       </form>
@@ -82,7 +92,7 @@ export default function Proveedores() {
           {lista.map((proveedor) => (
             <div key={proveedor.id} className={`card ${proveedor.activo ? '' : 'card--off'}`}>
               <div className="ubic-row">
-                <div><strong>{proveedor.nombre}</strong> {!proveedor.activo && <span className="chip chip--warn">Inactivo</span>}</div>
+                <div><strong>{proveedor.nombre}</strong> <small className="muted">· {proveedor.dias_credito === 0 ? 'pago inmediato' : `${proveedor.dias_credito} días`}</small> {!proveedor.activo && <span className="chip chip--warn">Inactivo</span>}</div>
                 <div className="form-actions">
                   <button className="btn btn-secondary" disabled={busy} onClick={() => editar(proveedor)}>Editar</button>
                   <button className="btn btn-ghost" disabled={busy} onClick={() => void alternar(proveedor)}>{proveedor.activo ? 'Quitar' : 'Restaurar'}</button>

@@ -9,9 +9,6 @@ import { useDialog } from '../dialog';
 import Modal from '../components/Modal';
 import { Icono } from '../icons';
 
-/** Cuántas filas se muestran siempre; el resto queda colapsado para no saturar la pantalla. */
-const LIMITE_VISIBLE = 6;
-
 interface FacturaEmitida {
   id: number;
   numero: string;
@@ -62,6 +59,7 @@ interface Cartera {
   };
   emitidas: FacturaEmitida[];
   recibidas: FacturaRecibida[];
+  excepciones: { tipo: string; titulo: string; detalle: string; compra_id: number; proveedor: string }[];
   creditos: {
     id: number;
     anio: number;
@@ -84,12 +82,20 @@ const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 const fechaCorta = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }).replace('.', '');
 const texto = (valor: string | null | undefined) => (valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
+function agruparPor<T>(filas: T[], clave: (fila: T) => string) {
+  return [...filas.reduce((grupos, fila) => {
+    const nombre = clave(fila);
+    grupos.set(nombre, [...(grupos.get(nombre) ?? []), fila]);
+    return grupos;
+  }, new Map<string, T[]>())];
+}
+
 export default function Facturacion() {
   const toast = useToast();
   const dialog = useDialog();
   const [datos, setDatos] = useState<Cartera | null>(null);
   const [vista, setVista] = useState<'pendientes' | 'historial'>('pendientes');
-  const [tipo, setTipo] = useState<'todas' | 'cobrar' | 'pagar'>('todas');
+  const [tipo, setTipo] = useState<'cobrar' | 'pagar'>('pagar');
   const [busqueda, setBusqueda] = useState('');
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [movimiento, setMovimiento] = useState<Movimiento | null>(null);
@@ -124,6 +130,10 @@ export default function Facturacion() {
     const coincideTexto = !consulta || texto(`${factura.referencia ?? ''} ${factura.proveedor} ${factura.ubicacion}`).includes(consulta);
     return coincideEstado && coincideTexto;
   }), [datos, vista, consulta]);
+  const recibidasPorProveedor = useMemo(() => agruparPor(recibidas, (factura) => factura.proveedor)
+    .sort(([a], [b]) => a.localeCompare(b, 'es')), [recibidas]);
+  const emitidasPorEmpresa = useMemo(() => agruparPor(emitidas, (factura) => factura.empresa)
+    .sort(([a], [b]) => a.localeCompare(b, 'es')), [emitidas]);
 
   async function registrarMovimiento() {
     if (!movimiento) return;
@@ -212,7 +222,7 @@ export default function Facturacion() {
     return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
       <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
       <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.en_ciclo ? 'Sale del ciclo' : 'Salió del ciclo'}</small>{fechaCorta(factura.sale_ciclo_at)}</span></div>
-      <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? vencida ? 'chip--danger' : 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? vencida ? 'En ciclo · vencida' : 'En ciclo' : 'Cobro automático'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'saldo del ciclo' : 'total histórico'}</small></div>
+      <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? vencida ? 'chip--danger' : 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? vencida ? 'En ventana · vencida' : 'En ventana' : 'Fuera de ventana'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'incluido en el balance' : 'total histórico'}</small></div>
     </article>;
   }
 
@@ -231,19 +241,24 @@ export default function Facturacion() {
   if (!datos) return <div className="page billing-page"><header className="page-head"><div><span className="eyebrow">Control</span><h1>Facturación</h1></div></header><Spinner label="Cargando cartera…" />{error && <p className="error-msg">{error}</p>}</div>;
 
   return <div className="page billing-page">
-    <header className="page-head billing-page-head"><div><span className="eyebrow">Control</span><h1>Facturación</h1><p className="page-sub">Cobros a restaurantes y pagos a proveedores.</p></div></header>
+    <header className="page-head billing-page-head"><div><span className="eyebrow">Finanzas</span><h1>{tipo === 'pagar' ? 'Cuentas por pagar' : 'Facturación a restaurantes'}</h1><p className="page-sub">{tipo === 'pagar' ? 'Documentos y pagos agrupados por proveedor.' : 'Facturas generadas por el cierre y ventana operativa de tres semanas.'}</p></div></header>
     {error && <p className="notice notice--error">{error}</p>}
+
+    {tipo === 'pagar' && datos.excepciones.length > 0 && <details className="billing-help billing-exceptions" open>
+      <summary>{datos.excepciones.length} excepción{datos.excepciones.length === 1 ? '' : 'es'} por revisar</summary>
+      <div>{datos.excepciones.map((excepcion, indice) => <button type="button" key={`${excepcion.tipo}:${excepcion.compra_id}:${indice}`} onClick={() => { const factura = datos.recibidas.find((item) => item.id === excepcion.compra_id); if (factura) setDetalle({ tipo: 'pagar', factura }); }}><span><strong>{excepcion.titulo}</strong><small>{excepcion.detalle}</small></span><Icono name="chevron" size={16} /></button>)}</div>
+    </details>}
 
     <section className="billing-kpis" aria-label="Resumen de cartera">
       <div><span>Por cobrar · ciclo 3 semanas</span><strong>{usd(datos.resumen.por_cobrar)}</strong><small>Semana actual + las 2 anteriores</small></div>
-      <div className={datos.resumen.vencido_cobrar > 0 ? 'is-overdue' : ''}><span>Con fecha vencida</span><strong>{usd(datos.resumen.vencido_cobrar)}</strong><small>Informativo · saldrá automáticamente del ciclo</small></div>
+      <div className={datos.resumen.vencido_cobrar > 0 ? 'is-overdue' : ''}><span>Con fecha vencida</span><strong>{usd(datos.resumen.vencido_cobrar)}</strong><small>Informativo dentro de la ventana</small></div>
       <div><span>Total por pagar</span><strong>{usd(datos.resumen.por_pagar)}</strong><small>Incluye {usd(datos.resumen.vencido_pagar)} ya vencidos</small></div>
       <div className={datos.resumen.vencido_pagar > 0 ? 'is-overdue' : ''}><span>De ese total, vencido</span><strong>{usd(datos.resumen.vencido_pagar)}</strong><small>No se suma otra vez · proveedores</small></div>
     </section>
 
     <details className="billing-help">
       <summary>Cómo funciona la cartera</summary>
-      <p>Las facturas emitidas permanecen en el ciclo durante su semana y las dos siguientes; después pasan solas al historial. El administrador sólo confirma pagos a proveedores. Los créditos de producción reducen exclusivamente el saldo de Lisle.</p>
+      <p>Las facturas emitidas forman parte del balance durante su semana y las dos siguientes. Después quedan fuera de esa ventana; esto no registra un cobro ni un movimiento bancario. Los pagos a proveedores sí se confirman manualmente y los créditos de producción reducen exclusivamente la cuenta de Lisle.</p>
     </details>
 
     <CollapsibleSection className="lisle-credit-panel" title="Créditos de Lisle" count={datos.creditos.filter((credito) => credito.estado === 'abierto').length} summary={datos.resumen.credito_lisle_disponible > 0 ? `${usd(datos.resumen.credito_lisle_disponible)} disponible` : 'Saldo a favor por producción'}>
@@ -254,7 +269,7 @@ export default function Facturacion() {
 
     <section className="workspace-card billing-toolbar">
       <HistoryToggle active={vista === 'historial'} onToggle={() => setVista(vista === 'historial' ? 'pendientes' : 'historial')} />
-      <div className="segmented" aria-label="Tipo de factura"><button className={tipo === 'todas' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('todas')}>Todas</button><button className={tipo === 'cobrar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('cobrar')}>Por cobrar</button><button className={tipo === 'pagar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('pagar')}>Por pagar</button></div>
+      <div className="segmented" aria-label="Libro financiero"><button className={tipo === 'pagar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('pagar')}>Cuentas por pagar</button><button className={tipo === 'cobrar' ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setTipo('cobrar')}>Facturación a restaurantes</button></div>
       <input type="search" aria-label="Buscar factura" placeholder="Buscar folio, empresa o proveedor" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
     </section>
     {vista === 'pendientes' && seleccionPagar.size > 0 && <section className="billing-bulkbar">
@@ -262,27 +277,21 @@ export default function Facturacion() {
       <div><button className="btn btn-primary btn-sm" disabled={busy} onClick={prepararLote}>Registrar {seleccionPagar.size} pagos</button><button className="btn btn-ghost btn-sm" onClick={() => setSeleccionPagar(new Set())}>Limpiar selección</button></div>
     </section>}
 
-    <div className={`billing-ledgers ${tipo !== 'todas' ? 'billing-ledgers--single' : ''}`}>
-      {tipo !== 'pagar' && <section className="workspace-card billing-ledger">
+    <div className="billing-ledgers billing-ledgers--single">
+      {tipo === 'cobrar' && <section className="workspace-card billing-ledger">
         <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Entran durante tres semanas y después pasan solas al historial.</p></div><div className="billing-select-head"><span>{emitidas.length}</span></div></div>
-        <div className="billing-list">
-          {emitidas.slice(0, LIMITE_VISIBLE).map(filaEmitida)}
+        <div className="billing-groups">
+          {emitidasPorEmpresa.map(([empresa, facturas]) => <details className="billing-group" open key={empresa}><summary><span><strong>{empresa}</strong><small>{facturas.length} factura{facturas.length === 1 ? '' : 's'}</small></span><strong>{usd(facturas.reduce((total, factura) => total + (factura.en_ciclo ? factura.saldo : factura.total), 0))}</strong></summary><div className="billing-list">{facturas.map(filaEmitida)}</div></details>)}
           {emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
         </div>
-        {emitidas.length > LIMITE_VISIBLE && <CollapsibleSection className="billing-rest" title="Ver el resto" count={emitidas.length - LIMITE_VISIBLE}>
-          <div className="billing-list">{emitidas.slice(LIMITE_VISIBLE).map(filaEmitida)}</div>
-        </CollapsibleSection>}
       </section>}
 
-      {tipo !== 'cobrar' && <section className="workspace-card billing-ledger">
+      {tipo === 'pagar' && <section className="workspace-card billing-ledger">
         <div className="workspace-card-head"><div><span className="eyebrow">Egresos</span><h2>Facturas recibidas</h2><p>Compras pendientes de pagar.</p></div><div className="billing-select-head"><span>{recibidas.length}</span>{vista === 'pendientes' && recibidas.length > 0 && <button className="link-btn" onClick={() => setSeleccionPagar(seleccionPagar.size === recibidas.length ? new Set() : new Set(recibidas.map((factura) => factura.id)))}>{seleccionPagar.size === recibidas.length ? 'Quitar todas' : 'Seleccionar todas'}</button>}</div></div>
-        <div className="billing-list">
-          {recibidas.slice(0, LIMITE_VISIBLE).map(filaRecibida)}
+        <div className="billing-groups">
+          {recibidasPorProveedor.map(([proveedor, facturas]) => <details className="billing-group" open key={proveedor}><summary><span><strong>{proveedor}</strong><small>{facturas.length} documento{facturas.length === 1 ? '' : 's'}</small></span><strong>{usd(facturas.reduce((total, factura) => total + (factura.estado === 'pendiente' ? factura.saldo : factura.total), 0))}</strong></summary><div className="billing-list">{facturas.map(filaRecibida)}</div></details>)}
           {recibidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
         </div>
-        {recibidas.length > LIMITE_VISIBLE && <CollapsibleSection className="billing-rest" title="Ver el resto" count={recibidas.length - LIMITE_VISIBLE}>
-          <div className="billing-list">{recibidas.slice(LIMITE_VISIBLE).map(filaRecibida)}</div>
-        </CollapsibleSection>}
       </section>}
     </div>
 

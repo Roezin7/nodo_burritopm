@@ -921,6 +921,21 @@ export async function listarCartera(negocioId: bigint) {
   const pendientesEmitidas = emitidas.filter((f) => f.en_ciclo && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
   const hoy = hoyChicago();
+  const referencias = new Map<string, number>();
+  for (const factura of pendientesRecibidas) if (factura.referencia?.trim()) {
+    const clave = `${factura.proveedor}:${factura.referencia.trim().toLowerCase()}`;
+    referencias.set(clave, (referencias.get(clave) ?? 0) + 1);
+  }
+  const excepciones = pendientesRecibidas.flatMap((factura) => {
+    const alertas: { tipo: string; titulo: string; detalle: string; compra_id: number; proveedor: string }[] = [];
+    const referencia = factura.referencia?.trim();
+    const totalLineas = r2(factura.lineas.reduce((total, linea) => total + linea.importe, 0));
+    if (!referencia) alertas.push({ tipo: 'sin_referencia', titulo: 'Documento sin referencia', detalle: `${factura.proveedor} · ${factura.total.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
+    else if ((referencias.get(`${factura.proveedor}:${referencia.toLowerCase()}`) ?? 0) > 1) alertas.push({ tipo: 'referencia_duplicada', titulo: 'Referencia repetida', detalle: `${factura.proveedor} · ${referencia}`, compra_id: factura.id, proveedor: factura.proveedor });
+    if (Math.abs(totalLineas - factura.total) > 0.01) alertas.push({ tipo: 'total_diferente', titulo: 'Total distinto a los renglones', detalle: `${factura.proveedor} · factura ${factura.total.toFixed(2)} · renglones ${totalLineas.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
+    if (factura.pagado > 0 && factura.vence_at < hoy) alertas.push({ tipo: 'abono_vencido', titulo: 'Saldo parcial vencido', detalle: `${factura.proveedor} · saldo ${factura.saldo.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
+    return alertas;
+  });
 
   return {
     resumen: {
@@ -934,6 +949,7 @@ export async function listarCartera(negocioId: bigint) {
     },
     emitidas,
     recibidas,
+    excepciones,
     creditos: ajustes.map((ajuste) => ({
       id: Number(ajuste.id),
       anio: ajuste.semana.anio,

@@ -225,7 +225,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       produccion_extraordinaria: skusProduccionExtraordinaria.has(p.sku),
       es_cargo_compra: esAdmin ? p.es_cargo_compra : undefined,
     })),
-    proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre })) : [],
+    proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre, dias_credito: p.dias_credito })) : [],
     plantillas: esAdmin ? plantillas.map((p) => ({
       id: Number(p.id), nombre: p.nombre, codigo: p.codigo, linea: p.linea_operacion,
       dia_semana: p.dia_semana, conductor: p.conductor,
@@ -1270,7 +1270,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     }
 
     const c = await tx.compras.create({
-      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, vence_at: sumarDias(f, 14), referencia: input.referencia, total, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
+      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, vence_at: sumarDias(f, proveedor.dias_credito), referencia: input.referencia, total, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
     });
     for (const [i, l] of input.lineas.entries()) {
       const pid = BigInt(l.product_id);
@@ -1415,7 +1415,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
     await tx.compra_lineas.deleteMany({ where: { compra_id: compraId } });
     await tx.compras.update({
       where: { id: compraId },
-      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, vence_at: sumarDias(nuevaFecha, 14), referencia: input.referencia, total },
+      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, vence_at: sumarDias(nuevaFecha, proveedor.dias_credito), referencia: input.referencia, total },
     });
 
     for (const [indice, linea] of input.lineas.entries()) {
@@ -1486,7 +1486,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
         datos: { anterior: { fecha: iso(anterior.fecha), total: num0(anterior.total) }, nuevo: { fecha: input.fecha, total } },
       },
     });
-    return { id: Number(compraId), total, vence_at: iso(sumarDias(nuevaFecha, 14)) };
+    return { id: Number(compraId), total, vence_at: iso(sumarDias(nuevaFecha, proveedor.dias_credito)) };
   });
 }
 
