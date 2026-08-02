@@ -131,7 +131,7 @@ dashboardRouter.get(
     const semana = await prisma.semanas_operativas.findUnique({
       where: { negocio_id_anio_semana: { negocio_id: negocioId, anio: periodo.anio, semana: periodo.semana } },
     });
-    const [empresas, facturasSemana, pedidos, existenciasVivas, snapshot, lotes, facturasPendientes, comprasPendientes, producciones, produccionesExtraordinarias, comprasSemana, distribuciones, parametros, ajustesSemana, ultimoCreditoLisle] = await Promise.all([
+    const [empresas, facturasSemana, pedidos, existenciasVivas, snapshot, lotes, facturasPendientes, comprasPendientes, producciones, produccionesExtraordinarias, comprasSemana, distribuciones, parametros, ajustesSemana] = await Promise.all([
       prisma.empresas_clientes.findMany({ where: { negocio_id: negocioId, activo: true }, orderBy: { codigo: 'asc' } }),
       semana ? prisma.facturas.findMany({
         where: { semana_id: semana.id, estado: { not: 'anulada' } },
@@ -191,16 +191,6 @@ dashboardRouter.get(
         where: { negocio_id: negocioId, semana_id: semana.id, estado: { in: ['abierto', 'aplicado'] } },
         select: { ubicacion_id: true, empresa_cliente_id: true, linea_operacion: true, tipo: true, monto: true },
       }) : Promise.resolve([]),
-      prisma.ajustes_facturacion.findFirst({
-        where: {
-          negocio_id: negocioId,
-          tipo: 'credito',
-          ubicacion: { codigo: 'LISLE' },
-          semana: { inicia_at: { lt: periodo.domingo } },
-        },
-        select: { ubicacion_id: true, empresa_cliente_id: true, linea_operacion: true, tipo: true, monto: true },
-        orderBy: [{ semana: { inicia_at: 'desc' } }, { id: 'desc' }],
-      }),
     ]);
     const conciliacion = snapshot.length ? null : await validarConciliacionParaCierre(
       negocioId,
@@ -252,8 +242,10 @@ dashboardRouter.get(
           if (l.producto.tipo_operativo === 'proteina') markupProteina += cantidad * MARKUP_PROTEINA;
         }
       }
-      const ajustesProyectados = ajustesSemana.length ? ajustesSemana : (ultimoCreditoLisle ? [ultimoCreditoLisle] : []);
-      for (const ajuste of ajustesProyectados) {
+      // Un crédito aplicado pertenece únicamente a la semana que lo contiene. Usar el
+      // último crédito histórico como fallback hacía que Lisle se descontara otra vez en
+      // cada semana nueva sin ventas y mostrara una venta proyectada negativa.
+      for (const ajuste of ajustesSemana) {
         const monto = num0(ajuste.monto) * (ajuste.tipo === 'credito' ? -1 : 1);
         if (ajuste.linea_operacion === 'carne') ventaCarne += monto; else ventaDesechables += monto;
         ventaPorUbicacion.set(ajuste.ubicacion_id.toString(), r2((ventaPorUbicacion.get(ajuste.ubicacion_id.toString()) ?? 0) + monto));
