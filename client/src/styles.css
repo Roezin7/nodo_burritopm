@@ -3016,6 +3016,14 @@ a.flujo-paso { text-decoration: none; }
 .stock-card2-caret { color: var(--ink-3); transition: transform 0.16s; }
 .stock-card2-caret.is-open { transform: rotate(180deg); }
 .stock-card2 .stock-card-body { padding: 0 0.9rem 0.8rem; }
+.hold-stock { margin: 0 0.9rem 0.85rem; padding: 0.75rem; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: var(--r-input); background: color-mix(in srgb, var(--warning-bg) 65%, var(--surface)); }
+.hold-stock-head { display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; }
+.hold-stock-head span { color: var(--ink-3); font-size: 0.82rem; }
+.hold-stock > .muted { margin: 0.2rem 0 0.55rem; }
+.hold-stock-row { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.55rem 0; border-top: 1px solid var(--border); }
+.hold-stock-row > span { display: flex; flex-direction: column; min-width: 0; }
+.hold-stock-row small { color: var(--ink-3); }
+@media (max-width: 520px) { .hold-stock-row { align-items: stretch; flex-direction: column; } .hold-stock-row .btn { width: 100%; } }
 
 .suc-row { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
 .suc-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

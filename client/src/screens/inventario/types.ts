@@ -50,7 +50,10 @@ export interface ProdCat {
   es_cargo_compra: boolean;
 }
 
-export interface ExistItem { product_id: number; nombre: string; unidad: string; disponible: number; costo_promedio: number | null; valor: number }
+export interface ExistItem {
+  product_id: number; nombre: string; unidad: string; disponible: number; transito: number;
+  costo_promedio: number | null; costo_transito_promedio: number | null; valor: number;
+}
 export interface ExistResp { items: ExistItem[]; valor_total: number }
 
 export interface ValuacionResp { ubicaciones: { id: number; nombre: string; tipo: string; skus: number; valor: number }[]; valor_total: number }

@@ -203,6 +203,90 @@ existenciasRouter.post(
   }),
 );
 
+/**
+ * POST /existencias/liberar-hold { product_id, cantidad }
+ * Convierte una reserva comprada por adelantado en inventario físicamente disponible
+ * en su misma bodega. Conserva el costo propio del hold y crea el lote FIFO.
+ */
+existenciasRouter.post(
+  '/liberar-hold',
+  requireAuth,
+  bodegaCrew,
+  asyncHandler(async (req, res) => {
+    const b = z.object({
+      product_id: z.coerce.number().int().positive(),
+      cantidad: z.coerce.number().positive(),
+      idempotency_key: idempotencyKey.optional(),
+    }).parse(req.body);
+    const negocioId = req.auth!.negocioId;
+    const producto = await prisma.products.findFirst({
+      where: { id: BigInt(b.product_id), negocio_id: negocioId, linea_operacion: 'desechables', es_cargo_compra: false },
+    });
+    if (!producto) throw new HttpError(404, 'Producto de desechables no encontrado');
+    const bodega = await bodegaDeProducto(negocioId, 'desechables');
+    if (req.auth!.rol !== 'admin' && !(await usuarioPuedeUbicacion(req, bodega.id))) throw new HttpError(403, 'No tienes acceso a esta bodega');
+    const key = b.idempotency_key ?? `liberar-hold:${negocioId}:${randomUUID()}`;
+
+    await transaccionSerializable(async (tx) => {
+      const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: key } });
+      if (movimiento) {
+        const coincide = movimiento.negocio_id === negocioId && movimiento.product_id === producto.id
+          && num0(movimiento.cantidad) === b.cantidad && movimiento.documento_tipo === 'liberar_hold';
+        if (!coincide) throw new HttpError(409, 'Esta llave ya fue usada para otro movimiento.');
+        return;
+      }
+      const existencia = await tx.existencias.findUnique({
+        where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: producto.id } },
+      });
+      const enHold = Math.max(0, num0(existencia?.cantidad_transito));
+      if (b.cantidad > enHold + 0.0001) throw new HttpError(409, `Solo hay ${enHold} en hold.`);
+      const costo = num(existencia?.costo_transito_promedio) ?? num(existencia?.costo_promedio)
+        ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+      if (costo == null) throw new HttpError(409, 'El hold no tiene costo; corrígelo antes de recibirlo.');
+
+      const aplicado = await aplicarMovimiento(tx, {
+        negocioId,
+        productId: producto.id,
+        tipo: 'transferencia',
+        cantidad: b.cantidad,
+        usuarioId: req.auth!.usuarioId,
+        origenId: bodega.id,
+        destinoId: bodega.id,
+        costoUnitario: costo,
+        documentoTipo: 'liberar_hold',
+        comentario: 'Reserva anticipada recibida físicamente en Bodega Adison',
+        idempotencyKey: key,
+        deltas: [{
+          ubicacionId: bodega.id,
+          productId: producto.id,
+          disponible: b.cantidad,
+          transito: -b.cantidad,
+          costoUnitario: costo,
+        }],
+      });
+      if (aplicado) {
+        await tx.lotes_materia_prima.create({
+          data: {
+            negocio_id: negocioId,
+            ubicacion_id: bodega.id,
+            product_id: producto.id,
+            fecha: new Date(),
+            congelado: false,
+            cajas_iniciales: b.cantidad,
+            cajas_disponibles: b.cantidad,
+            peso_inicial_lb: 0,
+            peso_disponible_lb: 0,
+            costo_inicial: Math.round(b.cantidad * costo * 100) / 100,
+            costo_disponible: Math.round(b.cantidad * costo * 100) / 100,
+          },
+        });
+      }
+    }, { reintentarUnico: true });
+
+    res.status(201).json({ ok: true });
+  }),
+);
+
 /** GET /existencias/movimientos?tipo=ingreso|retiro — últimos movimientos directos de bodega. */
 existenciasRouter.get(
   '/movimientos',
