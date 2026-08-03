@@ -146,6 +146,7 @@ const CODIGO_ENCABEZADO: Record<string, string> = {
   FRANKFORT: 'FRANK', PLAINFIELD: 'PLAIN', 'TAQUERIA AURORA': 'AUROR', 'TAQ AURORA': 'AUROR',
   'TAQUERIA BURLINGTON': 'BURLI', 'TAQ AURORA 2': 'BURLI', 'TAPATIOS GLEN ELLYN': 'TGE',
   'TAPATIOS STREAMWOOD': 'TST', 'TAPATIOS LOMBARD': 'TLO', 'TAPATIOS NAPERVILLE': 'TNA',
+  'TAPATIOS BOLINGBROOK': 'TBO', 'LBT BOLINGBROOK': 'TBO',
 };
 
 const FILA_CARNE: Record<string, number> = {
@@ -285,12 +286,12 @@ function llenarWeeklyOrder(wb: ExcelJS.Workbook, d: Datos) {
 const COLUMNAS_DESECHABLES: Record<string, number> = {
   LOMBA: 9, NAPER: 11, CAROL: 13, LISLE: 15, GLEND: 17, WESTC: 19, BATAV: 21, ALGON: 23,
   NAPER2: 25, ROLLI: 27, SCHAU: 29, CRYST: 31, LAKEZ: 33, PLAIN: 35, FRANK: 37,
-  TGE: 41, TST: 43, TLO: 45, TNA: 47,
+  TGE: 41, TST: 43, TLO: 45, TNA: 47, TBO: 49,
 };
 
 const COLUMNAS_DESTINO_DESECHABLES: Record<number, number> = {
   9: 49, 11: 52, 13: 55, 15: 58, 17: 61, 19: 64, 21: 67, 23: 70, 25: 73, 27: 76,
-  29: 79, 31: 82, 33: 85, 35: 88, 37: 91, 41: 97, 43: 100, 45: 103, 47: 106,
+  29: 79, 31: 82, 33: 85, 35: 88, 37: 91, 41: 97, 43: 100, 45: 103, 47: 106, 49: 109,
 };
 
 function llenarShipping(ws: ExcelJS.Worksheet, d: Datos, filas: Map<string, number>) {
@@ -485,7 +486,7 @@ const FILA_BILLING: Record<string, number> = {
 const COLUMNA_BILLING: Record<string, number> = {
   LOMBA: 5, NAPER: 8, CAROL: 11, LISLE: 14, GLEND: 17, WESTC: 20, BATAV: 23, ALGON: 26,
   NAPER2: 29, ROLLI: 32, SCHAU: 35, CRYST: 38, LAKEZ: 41, FRANK: 44, PLAIN: 47,
-  AUROR: 56, BURLI: 59, TGE: 62, TST: 65, TLO: 68, TNA: 71,
+  AUROR: 56, BURLI: 59, TGE: 62, TST: 65, TLO: 68, TNA: 71, TBO: 74,
 };
 
 function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {

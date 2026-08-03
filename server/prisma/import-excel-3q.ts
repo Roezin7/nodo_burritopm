@@ -30,6 +30,7 @@ const ubicacionPorEncabezado: Record<string, string> = {
   'ROLLING MEADOWS': 'ROLLI', SCHAUMBURG: 'SCHAU', 'CRYSTAL LAKE': 'CRYST', 'LAKE ZURICH': 'LAKEZ',
   FRANKFORT: 'FRANK', PLAINFIELD: 'PLAIN', 'TAQUERIA AURORA': 'AUROR', 'TAQUERIA BURLINGTON': 'BURLI',
   'TAPATIOS GLEN ELLYN': 'TGE', 'TAPATIOS STREAMWOOD': 'TST', 'TAPATIOS LOMBARD': 'TLO', 'TAPATIOS NAPERVILLE': 'TNA',
+  'TAPATIOS BOLINGBROOK': 'TBO',
 };
 const productoCarne: Record<string, string> = {
   'STEAK TACO': 'MEAT-STEAK', CHICKEN: 'MEAT-CHICKEN', ALPASTOR: 'MEAT-PASTOR-BPM',
@@ -43,7 +44,7 @@ const productoCarne: Record<string, string> = {
 const bpmDesechables = ['LOMBA', 'NAPER', 'CAROL', 'LISLE', 'GLEND', 'WESTC', 'BATAV', 'ALGON', 'NAPER2', 'ROLLI', 'SCHAU', 'CRYST', 'LAKEZ', 'PLAIN', 'FRANK'];
 // Columnas AO, AQ, AS y AU del libro: Glen Ellyn, Streamwood, Lombard y Naperville.
 // La versión anterior intercambiaba Streamwood y Lombard al importar el histórico.
-const lbtDesechables = ['TGE', 'TST', 'TLO', 'TNA'];
+const lbtDesechables = ['TGE', 'TST', 'TLO', 'TNA', 'TBO'];
 const semanas = [
   { numero: 27, carne: 'Meat Order 27', desechables: 'Week (27)', lunes: '2026-06-29', miercoles: '2026-07-01', sabado: '2026-07-04', cerrada: true },
   { numero: 28, carne: 'Meat Order (28)', desechables: 'Week (28)', lunes: '2026-07-06', miercoles: '2026-07-08', sabado: '2026-07-11', cerrada: true },
@@ -242,7 +243,7 @@ const codigoFacturacion: Record<string, string> = {
   'WEST CHICAGO': 'WESTC', BATAVIA: 'BATAV', ALGONQUIN: 'ALGON', 'NAPERVILLE II': 'NAPER2', 'RO-ME': 'ROLLI',
   SCHAUMBURG: 'SCHAU', 'CRYSTAL LAKE': 'CRYST', 'LAKE ZURICH': 'LAKEZ', FRANKFORT: 'FRANK', PLAINFIELD: 'PLAIN',
   'TAQ. AURORA': 'AUROR', 'TAQ. AURORA #2': 'BURLI', 'LBT GLEN ELLYN': 'TGE', 'LBT STREAMWOOD': 'TST',
-  'LBT LOMBARD': 'TLO', 'LBT NAPERVILLE': 'TNA',
+  'LBT LOMBARD': 'TLO', 'LBT NAPERVILLE': 'TNA', 'LBT BOLINGBROOK': 'TBO',
 };
 
 async function importarSaldosPendientes(negocioId: bigint, adminId: bigint) {
