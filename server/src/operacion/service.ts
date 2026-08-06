@@ -768,8 +768,8 @@ export function calcularCoberturaBpm(
   });
 }
 
-/** BPM sí requiere cobertura completa por día. Las rutas externas y las fechas sin una
- * parada BPM no deben esperar a que se capturen miércoles/sábado del resto de la semana. */
+/** Regla histórica de cobertura completa. Se conserva para reportes y compatibilidad;
+ * la consolidación actual usa fechasConPedidosParciales para ambas líneas. */
 export function fechasDespachables(
   desde: string,
   hasta: string,
@@ -782,6 +782,22 @@ export function fechasDespachables(
     if (!bloqueadas.has(dia)) fechas.push(dia);
   }
   return fechas;
+}
+
+/** Cualquier línea puede salir de forma parcial: basta con que exista al menos un
+ * pedido con líneas dentro de la fecha. La cobertura sigue disponible como señal. */
+export function fechasConPedidosParciales(
+  desde: string,
+  hasta: string,
+  pedidos: { fecha: string }[],
+) {
+  const fechasConPedido = new Set(pedidos.map((pedido) => pedido.fecha));
+  const resultado: string[] = [];
+  for (let cursor = fecha(desde); cursor <= fecha(hasta); cursor = sumarDias(cursor, 1)) {
+    const dia = iso(cursor);
+    if (fechasConPedido.has(dia)) resultado.push(dia);
+  }
+  return resultado;
 }
 
 /** Cobertura esperada de BPM derivada de las rutas configuradas, no de días fijos. */
@@ -820,8 +836,9 @@ export async function coberturaPedidosBpm(negocioId: bigint, linea: LineaOperaci
 }
 
 /**
- * Consolida por fecha: BPM espera cobertura completa de ese día, mientras las rutas
- * externas avanzan de forma independiente. Es idempotente y no duplica distribuciones.
+ * Consolida por fecha usando únicamente fechas con pedidos que tienen líneas. Tanto
+ * carne como desechables pueden salir parcialmente; la cobertura no bloquea el despacho.
+ * Es idempotente y no duplica distribuciones.
  */
 async function consolidarPedidosSiCompletos(
   negocioId: bigint,
@@ -832,7 +849,22 @@ async function consolidarPedidosSiCompletos(
 ) {
   const cobertura = await coberturaPedidosBpm(negocioId, linea, desde, hasta);
   let preparaciones = { creadas: 0, existentes: 0, aprobadas: 0 };
-  const fechasListas = fechasDespachables(desde, hasta, cobertura);
+  const pedidosConLineas = await prisma.pedidos_operativos.findMany({
+    where: {
+      negocio_id: negocioId,
+      linea_operacion: linea,
+      fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) },
+      estado: { notIn: ['borrador', 'cancelado', 'cerrado'] },
+      lineas: { some: {} },
+    },
+    select: { fecha_entrega: true },
+    distinct: ['fecha_entrega'],
+  });
+  const fechasListas = fechasConPedidosParciales(
+    desde,
+    hasta,
+    pedidosConLineas.map((pedido) => ({ fecha: iso(pedido.fecha_entrega) })),
+  );
   const generadas = { creadas: [] as { id: number; linea: LineaOperacion; fecha: string; pedidos: number; rutas: number }[], existentes: 0 };
   for (const dia of fechasListas) {
     const resultado = await crearPreparacionesEnRango(negocioId, usuarioId, dia, dia, linea);

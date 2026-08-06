@@ -2,7 +2,7 @@ import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { coberturaPedidosBpm, preciosVentaSemana, sincronizarDespachosConfirmados } from '../operacion/service.js';
+import { preciosVentaSemana, sincronizarDespachosConfirmados } from '../operacion/service.js';
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { eliminarConteoEnTx } from '../conteos/service.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
@@ -377,7 +377,7 @@ type SemanaCierre = Awaited<ReturnType<typeof asegurarSemana>>;
 
 async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
   const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
-  const [pedidosSinPreparar, borradoresConVenta, distribucionesActivas, coberturaCarne, coberturaDesechables] = await Promise.all([
+  const [pedidosSinPreparar, borradoresConVenta, distribucionesActivas] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: {
         negocio_id: negocioId,
@@ -399,15 +399,9 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
         estado: { notIn: ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'] },
       },
     }) : Promise.resolve(0),
-    coberturaPedidosBpm(negocioId, 'carne', iso(semana.inicia_at), iso(semana.termina_at)),
-    coberturaPedidosBpm(negocioId, 'desechables', iso(semana.inicia_at), iso(semana.termina_at)),
   ]);
   if (borradoresConVenta) {
     throw new HttpError(409, `Hay ${borradoresConVenta} venta(s) con cantidades todavía en borrador. Confírmalas o elimínalas antes del cierre.`);
-  }
-  const coberturaPendiente = [...coberturaCarne, ...coberturaDesechables].flatMap((dia) => dia.pendientes.map((nombre) => `${dia.fecha}: ${nombre}`));
-  if (coberturaPendiente.length) {
-    throw new HttpError(409, `Faltan pedidos BPM para cerrar: ${coberturaPendiente.slice(0, 6).join(', ')}${coberturaPendiente.length > 6 ? ` y ${coberturaPendiente.length - 6} más` : ''}.`);
   }
   if (pedidosSinPreparar) {
     throw new HttpError(409, negocio?.reparto_habilitado

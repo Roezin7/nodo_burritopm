@@ -511,12 +511,13 @@ function PaqueteDespacho({ op, rutas, productos, alcance, onClose }: {
   // restaurantes. Reutiliza el consolidado operativo; no recalcula cantidades.
   const mostrarCarga = alcance.tipo === 'carga'
     || (alcance.tipo === 'completo' && (esDiaConCargaConsolidada(op.fecha_entrega) || !unicaTapatios));
+  const mostrarMatrizLbt = unicaTapatios && esDiaConCargaConsolidada(op.fecha_entrega);
   const mostrarRutas = alcance.tipo !== 'carga';
 
   return <Modal className="invoice-print dispatch-print" ariaLabelledBy="dispatch-preview-title" onClose={onClose}>
     <header className="dispatch-preview-toolbar no-print"><div><span className="eyebrow">Vista previa</span><h2 id="dispatch-preview-title">{alcance.tipo === 'carga' ? 'Hoja general de carga' : alcance.tipo === 'ruta' ? 'Paquete del chofer' : 'Paquete completo'}</h2></div><button className="icon-btn" aria-label="Cerrar" onClick={onClose}><Icono name="x" /></button></header>
 
-    {mostrarCarga && (unicaTapatios ? <section className="dispatch-print-page dispatch-print-page--tapatios">
+    {mostrarCarga && (unicaTapatios && !mostrarMatrizLbt ? <section className="dispatch-print-page dispatch-print-page--tapatios">
       <HojaRutaTapatios ruta={rutas[0]} destinos={destinosDeRuta(rutas[0])} filas={filas} fecha={op.fecha_entrega} />
     </section> : <section className={`dispatch-print-page dispatch-print-page--matrix dispatch-print-page--${op.linea}`}>
       <EncabezadoDocumento titulo="CARGA GENERAL" detalle={diaDocumento(op.fecha_entrega)} fecha={op.fecha_entrega} />

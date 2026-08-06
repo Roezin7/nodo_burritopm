@@ -231,7 +231,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         method: 'POST', body: { linea, desde, hasta },
       });
       const pendientes = r.cobertura_bpm.flatMap((c) => c.pendientes.map((nombre) => `${c.fecha}: ${nombre}`));
-      const detalle = pendientes.length ? ` · BPM pendiente: ${pendientes.slice(0, 3).join(', ')}${pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : ''}` : ' · BPM completo';
+      const detalle = pendientes.length ? ` · cobertura parcial: ${pendientes.slice(0, 3).join(', ')}${pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : ''}` : ' · cobertura completa';
       const preparaciones = r.preparaciones?.aprobadas ? ` · ${r.preparaciones.aprobadas} consolidados listos` : '';
       toast.ok(`${r.confirmados} ventas confirmadas${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}${preparaciones}`);
       setRefrescoHistorial((n) => n + 1);

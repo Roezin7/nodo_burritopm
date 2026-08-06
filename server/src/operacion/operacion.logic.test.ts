@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, fechasDespachables, loteCompraTrasCubrirNegativo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, fechasConPedidosParciales, fechasDespachables, loteCompraTrasCubrirNegativo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -46,6 +46,12 @@ describe('cobertura configurada de BPM', () => {
       { fecha: '2026-07-20', pendientes: [] },
       { fecha: '2026-07-22', pendientes: ['Lisle'] },
     ])).not.toContain('2026-07-22');
+  });
+
+  it('permite preparar desechables sólo para las fechas que sí tienen pedidos', () => {
+    expect(fechasConPedidosParciales('2026-08-02', '2026-08-08', [
+      { fecha: '2026-08-05' },
+    ])).toEqual(['2026-08-05']);
   });
 });
 
