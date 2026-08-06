@@ -1052,6 +1052,13 @@ export async function crearDistribucionOperativa(
     include: { paradas: { orderBy: { orden: 'asc' } } },
     orderBy: { nombre: 'asc' },
   });
+  // Si una plantilla antigua todavía comparte una parada, Tapatíos gana la
+  // asignación del sábado y cada parada física sólo aparece en una ruta.
+  const plantillasOrdenadas = [...plantillas].sort((a, b) => {
+    const aTapatios = dias === 6 && a.codigo.startsWith('TAP-');
+    const bTapatios = dias === 6 && b.codigo.startsWith('TAP-');
+    return Number(bTapatios) - Number(aTapatios) || a.nombre.localeCompare(b.nombre, 'es');
+  });
   const rep = await prisma.usuarios.findFirst({ where: { negocio_id: negocioId, rol: 'encargado_bodega', activo: true }, orderBy: { id: 'asc' } });
 
   const resultado = await prisma.$transaction(async (tx) => {
@@ -1072,8 +1079,8 @@ export async function crearDistribucionOperativa(
     const destinosFisicos = new Set(pedidos.map((p) => (p.ubicacion.entrega_en_ubicacion_id ?? p.ubicacion_id).toString()));
     const asignados = new Set<string>();
     let rutasCreadas = 0;
-    for (const plantilla of plantillas) {
-      const paradas = plantilla.paradas.filter((p) => destinosFisicos.has(p.ubicacion_id.toString()));
+    for (const plantilla of plantillasOrdenadas) {
+      const paradas = plantilla.paradas.filter((p) => destinosFisicos.has(p.ubicacion_id.toString()) && !asignados.has(p.ubicacion_id.toString()));
       const ruta = await tx.rutas.create({
         data: { negocio_id: negocioId, distribucion_id: d.id, plantilla_id: plantilla.id, fecha_entrega: entrega, nombre: plantilla.nombre, repartidor_id: rep?.id ?? null, creado_por: usuarioId },
       });

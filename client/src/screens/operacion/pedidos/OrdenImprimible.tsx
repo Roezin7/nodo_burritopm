@@ -21,9 +21,26 @@ const sumarFecha = (iso: string, dias: number) => {
 const diaCorto = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
 const fechaCorta = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' }).toUpperCase();
 
+/**
+ * El sábado LBT debe conservar su hoja propia aunque una plantilla antigua
+ * todavía tenga alguna parada Tapatíos embebida en una ruta BPM.
+ */
+function plantillaParaPedido(pedido: Pedido, plantillas: Catalogo['plantillas']) {
+  const numeroDia = new Date(`${pedido.fecha_entrega}T12:00:00`).getDay();
+  const destino = pedido.ubicacion.entrega_en?.id ?? pedido.ubicacion.id;
+  const candidatas = plantillas.filter((p) => p.dia_semana === numeroDia && p.paradas.some((parada) => parada.ubicacion_id === destino));
+  if (numeroDia === 6) {
+    const esLbt = pedido.empresa.codigo === 'LBT';
+    const preferida = candidatas.find((p) => esLbt ? p.codigo.startsWith('TAP-') : !p.codigo.startsWith('TAP-'));
+    if (preferida) return preferida;
+  }
+  return candidatas[0];
+}
+
 function construirHojasRuta(datos: { linea: Linea; inicio: string; fin: string; pedidos: Pedido[] }, catalogo: Catalogo): HojaRuta[] {
   const hojas = new Map<string, HojaRuta>();
   const plantillas = catalogo.plantillas.filter((p) => p.linea === datos.linea);
+  const empresaPorUbicacion = new Map(catalogo.ubicaciones.map((u) => [u.id, u.empresa?.codigo]));
   for (let dia = datos.inicio; dia <= datos.fin; dia = sumarFecha(dia, 1)) {
     const numeroDia = new Date(`${dia}T12:00:00`).getDay();
     for (const plantilla of plantillas.filter((p) => p.dia_semana === numeroDia)) {
@@ -37,15 +54,18 @@ function construirHojasRuta(datos: { linea: Linea; inicio: string; fin: string; 
         pedidos: [],
       };
       if (!hoja.fechas.includes(dia)) hoja.fechas.push(dia);
-      for (const parada of plantilla.paradas) if (!hoja.paradas.includes(parada.nombre)) hoja.paradas.push(parada.nombre);
+      const paradasDeLaHoja = plantilla.paradas.filter((parada) => {
+        if (numeroDia !== 6) return true;
+        const esLbt = empresaPorUbicacion.get(parada.ubicacion_id) === 'LBT';
+        return plantilla.codigo.startsWith('TAP-') ? esLbt : !esLbt;
+      });
+      for (const parada of paradasDeLaHoja) if (!hoja.paradas.includes(parada.nombre)) hoja.paradas.push(parada.nombre);
       hojas.set(clave, hoja);
     }
   }
 
   for (const pedido of datos.pedidos) {
-    const numeroDia = new Date(`${pedido.fecha_entrega}T12:00:00`).getDay();
-    const destino = pedido.ubicacion.entrega_en?.id ?? pedido.ubicacion.id;
-    const plantilla = plantillas.find((p) => p.dia_semana === numeroDia && p.paradas.some((parada) => parada.ubicacion_id === destino));
+    const plantilla = plantillaParaPedido(pedido, plantillas);
     const clave = plantilla ? familiaPlantilla(plantilla.codigo) : 'SIN-RUTA';
     if (!hojas.has(clave)) {
       hojas.set(clave, { clave, nombre: 'Sin ruta asignada', conductor: 'POR ASIGNAR', fechas: [], paradas: [], pedidos: [] });

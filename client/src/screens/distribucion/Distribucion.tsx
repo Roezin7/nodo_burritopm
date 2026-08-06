@@ -149,7 +149,7 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
         <div>
           <span className="eyebrow">Nueva preparación</span>
           <h2>Consolidar pedidos</h2>
-          <p>Solo entran pedidos confirmados. Al crearla se generan juntas las rutas de Pablo y MH que correspondan al día.</p>
+          <p>Solo entran pedidos confirmados. Al crearla se generan por separado las rutas configuradas para ese día.</p>
         </div>
         <div className="preparation-builder__controls">
           <div className="segmented order-line-switch">
