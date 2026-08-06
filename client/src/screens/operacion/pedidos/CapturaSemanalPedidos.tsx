@@ -139,11 +139,25 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   const fechasVisibles = [...new Set(visibles.flatMap((fila) => fila.entregas.map((entrega) => entrega.fecha)))].sort();
   const secciones = fechasVisibles.flatMap((fechaEntrega) => {
     const restaurantes = visibles.filter((fila) => fila.entregas.some((entrega) => entrega.fecha === fechaEntrega));
-    const esSabado = new Date(`${fechaEntrega}T12:00:00`).getDay() === 6;
-    if (!esSabado) return [{ key: fechaEntrega, fechaEntrega, titulo: fechaLarga(fechaEntrega), restaurantes }];
+    const grupos = [
+      {
+        key: 'BPM',
+        titulo: linea === 'desechables' ? 'Ruta Desechables BPM' : 'Ruta BPM + Taquería Aurora',
+        restaurantes: restaurantes.filter((fila) => fila.ubicacion.empresa?.codigo !== 'LBT'),
+      },
+      {
+        key: 'LBT',
+        titulo: 'Ruta Los Burritos Tapatíos',
+        restaurantes: restaurantes.filter((fila) => fila.ubicacion.empresa?.codigo === 'LBT'),
+      },
+    ];
     return [
-      { key: `${fechaEntrega}:BPM`, fechaEntrega, titulo: `${fechaLarga(fechaEntrega)} · Ruta BPM + Taquería Aurora`, restaurantes: restaurantes.filter((fila) => fila.ubicacion.empresa?.codigo !== 'LBT') },
-      { key: `${fechaEntrega}:LBT`, fechaEntrega, titulo: `${fechaLarga(fechaEntrega)} · Ruta Los Burritos Tapatíos`, restaurantes: restaurantes.filter((fila) => fila.ubicacion.empresa?.codigo === 'LBT') },
+      ...grupos.map((grupo) => ({
+        key: `${fechaEntrega}:${grupo.key}`,
+        fechaEntrega,
+        titulo: `${fechaLarga(fechaEntrega)} · ${grupo.titulo}`,
+        restaurantes: grupo.restaurantes,
+      })),
     ].filter((seccion) => seccion.restaurantes.length > 0);
   });
   const filasFormato = filasOrden(linea, catalogo.productos);
