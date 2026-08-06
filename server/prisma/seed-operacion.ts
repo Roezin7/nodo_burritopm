@@ -24,14 +24,14 @@ const desechables = [
   ['TAPATIOS SUIZO', 23.55, 28.26], ['FRIED ICE CREAM', 27.55, 33.06], ['CUPS 12 BLACK', 20.46, 24.55], ['RICE FLOUR', 20, 24],
 ] as const;
 
-const bpmActivas = ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON'];
+const bpmActivas = ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'];
 const ubicacionesBpm = [
   ['Lombard', 'LOMBA'], ['Lisle', 'LISLE'], ['Naperville II', 'NAPER2'], ['Naperville', 'NAPER'],
   ['Batavia', 'BATAV'], ['West Chicago', 'WESTC'], ['Carol Stream', 'CAROL'], ['Glendale Heights', 'GLEND'],
   ['Schaumburg', 'SCHAU'], ['Rolling Meadows', 'ROLLI'], ['Algonquin', 'ALGON'],
 ] as const;
 const nuevas = [
-  ['Crystal Lake', 'CRYST', false], ['Lake Zurich', 'LAKEZ', false], ['Frankfort', 'FRANK', false], ['Plainfield', 'PLAIN', false],
+  ['Crystal Lake', 'CRYST', true], ['Lake Zurich', 'LAKEZ', true], ['Frankfurt', 'FRANK', true], ['Plainfield', 'PLAIN', false],
   ['Taquería Aurora', 'AUROR', true], ['Burlington', 'BURLI', true],
   ['Tapatíos Glen Ellyn', 'TGE', true], ['Tapatíos Lombard', 'TLO', true], ['Tapatíos Streamwood', 'TST', true],
   ['Tapatíos Naperville', 'TNA', true], ['Tapatíos Bolingbrook', 'TBO', true],
@@ -65,13 +65,15 @@ const carne = [
 
 const rutas: { codigo: string; nombre: string; linea: LineaOperacion; dia: number; conductor: string; paradas: string[]; opcionales?: string[] }[] = [
   { codigo: 'CAR-SUR-MIE', nombre: 'Carne Sur · miércoles', linea: 'carne', dia: 3, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL'] },
-  { codigo: 'CAR-NOR-MIE', nombre: 'Carne Norte · miércoles', linea: 'carne', dia: 3, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON'] },
+  { codigo: 'CAR-NOR-MIE', nombre: 'Carne Norte · miércoles', linea: 'carne', dia: 3, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'] },
   { codigo: 'CAR-SUR-SAB', nombre: 'Carne Sur · sábado', linea: 'carne', dia: 6, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL'] },
-  { codigo: 'CAR-NOR-SAB', nombre: 'Carne Norte · sábado', linea: 'carne', dia: 6, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'TST'] },
-  { codigo: 'TAP-LUN', nombre: 'Tapatíos · lunes', linea: 'carne', dia: 1, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST'] },
-  { codigo: 'TAP-JUE', nombre: 'Tapatíos · jueves', linea: 'carne', dia: 4, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST'] },
-  { codigo: 'DES-NOR-MIE', nombre: 'Desechables Norte · miércoles', linea: 'desechables', dia: 3, conductor: 'MH', paradas: ['SCHAU', 'ROLLI'] },
-  { codigo: 'DES-SUR-MIE', nombre: 'Desechables Sur · miércoles', linea: 'desechables', dia: 3, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'ALGON', 'TGE', 'TST', 'TLO', 'TNA', 'TBO'] },
+  { codigo: 'CAR-NOR-SAB', nombre: 'Carne Norte · sábado', linea: 'carne', dia: 6, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'] },
+  { codigo: 'CAR-FRA-MIE', nombre: 'Carne Frankfurt · miércoles', linea: 'carne', dia: 3, conductor: 'POR ASIGNAR', paradas: ['FRANK'] },
+  { codigo: 'CAR-FRA-SAB', nombre: 'Carne Frankfurt · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['FRANK'] },
+  { codigo: 'TAP-LUN', nombre: 'Tapatíos · lunes', linea: 'carne', dia: 1, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO'] },
+  { codigo: 'TAP-JUE', nombre: 'Tapatíos · jueves', linea: 'carne', dia: 4, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO'] },
+  { codigo: 'TAP-SAB', nombre: 'Tapatíos · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO'] },
+  { codigo: 'DES-BPM-MIE', nombre: 'Desechables BPM · miércoles', linea: 'desechables', dia: 3, conductor: 'POR ASIGNAR', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'] },
 ];
 
 async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: bigint) {
@@ -130,7 +132,7 @@ async function main() {
   await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo: { in: bpmActivas }, empresa_cliente_id: null }, data: { empresa_cliente_id: empresas.BPM.id } });
   for (const [nombre, codigo, activo] of nuevas) {
     const empresa = codigo.startsWith('T') ? empresas.LBT.id : ['AUROR', 'BURLI'].includes(codigo) ? empresas.AUR.id : empresas.BPM.id;
-    await prisma.ubicaciones.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo } }, update: {}, create: { negocio_id: org.id, nombre, codigo, tipo: 'sucursal', activo, empresa_cliente_id: empresa } });
+    await prisma.ubicaciones.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo } }, update: { nombre, activo, empresa_cliente_id: empresa }, create: { negocio_id: org.id, nombre, codigo, tipo: 'sucursal', activo, empresa_cliente_id: empresa } });
   }
   const aurora = await prisma.ubicaciones.findFirstOrThrow({ where: { negocio_id: org.id, codigo: 'AUROR' } });
   await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo: 'BURLI', entrega_en_ubicacion_id: null }, data: { entrega_en_ubicacion_id: aurora.id } });
@@ -226,7 +228,7 @@ async function main() {
   if (repartoCreado) {
     for (const ubicacion_id of [adison.id, carniceria.id]) await prisma.usuario_ubicaciones.create({ data: { usuario_id: reparto.id, ubicacion_id } });
   }
-  console.log('✅ Operación 3Q preparada: empresas, ubicaciones, productos, proveedores y 8 rutas.');
+  console.log('✅ Operación 3Q preparada: empresas, ubicaciones, productos, proveedores y rutas logísticas.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

@@ -32,6 +32,8 @@ export const FILAS_CARNE: readonly FilaOrden[] = [
   { nombre: 'SUIZO CONT', skus: ['BPM-0049'] },
   { nombre: 'THERMAL PAPER', skus: ['BPM-0020'] },
   { nombre: 'COCO LOPEZ', skus: ['BPM-0029'] },
+  { nombre: 'XL NITRILE GLOVES', skus: ['BPM-0017'] },
+  { nombre: 'CUP HOLDER', skus: ['BPM-0008'] },
   { nombre: 'TAPATIOS TACO M', skus: ['MEAT-TAPATIOS-TACO'] },
 ] as const;
 
@@ -68,6 +70,8 @@ export function productosParaPedido<T extends ProductoOrdenable>(productos: T[],
   const filas = filasOrden(linea, productos);
   const resultado: T[] = [];
   for (const fila of filas) {
+    const esConsumibleExclusivoTapatios = fila.skus.includes('BPM-0017') || fila.skus.includes('BPM-0008');
+    if (esConsumibleExclusivoTapatios && empresaCodigo !== 'LBT') continue;
     const esPastor = fila.skus.includes('MEAT-PASTOR-BPM') || fila.skus.includes('MEAT-PASTOR-TAP');
     const skus = esPastor
       ? [empresaCodigo === 'LBT' ? 'MEAT-PASTOR-TAP' : 'MEAT-PASTOR-BPM']

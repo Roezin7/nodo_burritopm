@@ -27,7 +27,7 @@ const skusProduccionExtraordinaria = new Set<string>(SKUS_PRODUCCION_EXTRAORDINA
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
-const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029']);
+const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029', 'BPM-0017', 'BPM-0008']);
 
 /** Un cargo de compra forma parte de la factura, pero no representa mercancía. */
 export function esCargoContableCompra(producto: { es_cargo_compra: boolean }) {
@@ -293,7 +293,7 @@ async function prepararPedido(negocioId: bigint, input: GuardarPedidoInput, esAd
 
   const productIds = [...new Set(input.lineas.map((l) => BigInt(l.product_id)))];
   const productos = await prisma.products.findMany({
-    // La hoja de carne incluye seis consumibles de Tapatíos. La línea del pedido define
+    // La hoja de carne incluye consumibles de Tapatíos. La línea del pedido define
     // la ruta; la línea propia del producto conserva su bodega e invoice correctos.
     where: { id: { in: productIds }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true },
   });

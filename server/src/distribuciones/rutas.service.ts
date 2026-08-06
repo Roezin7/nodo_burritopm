@@ -12,7 +12,7 @@ interface RutaItemDto { linea_id: number; product_id: number; sku: string; nombr
 const ORDEN_CARNE = [
   'MEAT-STEAK', 'MEAT-CHICKEN', 'MEAT-PASTOR-BPM', 'MEAT-PASTOR-TAP', 'MEAT-ASADA', 'MEAT-FAJITAS',
   'MEAT-MILANESA', 'MEAT-TAMAL', 'MEAT-CHILE', 'MEAT-DORADO', 'MEAT-ADOBO', 'MEAT-CARNITAS', 'MEAT-CATERING',
-  'BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029', 'MEAT-TAPATIOS-TACO',
+  'BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029', 'BPM-0017', 'BPM-0008', 'MEAT-TAPATIOS-TACO',
 ];
 function ordenItem(sku: string, linea: LineaRuta) {
   if (linea === 'carne') {
