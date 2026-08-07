@@ -921,6 +921,10 @@ body {
     background: var(--surface-2);
   }
 
+  .order-line-context { width: 100%; }
+  .order-line-context .segmented { flex: 1; }
+  .order-line-context .segmented .tab { flex: 1; }
+
   .dispatch-mobile-line button {
     min-height: 44px;
     border: 0;

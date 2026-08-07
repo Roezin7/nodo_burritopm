@@ -80,7 +80,7 @@ const diasLargos = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viern
 const meta: Record<OperacionSeccion, { eyebrow: string; titulo: string; descripcion: string }> = {
   compras: { eyebrow: 'Control semanal', titulo: 'Compras', descripcion: 'Registra lo recibido esta semana.' },
   produccion: { eyebrow: 'Control semanal', titulo: 'Producción', descripcion: 'Captura la materia prima usada y las cajas producidas.' },
-  rutas: { eyebrow: 'Entregas', titulo: 'Rutas', descripcion: 'Orden de entrega por día.' },
+  rutas: { eyebrow: 'Reparto', titulo: 'Rutas', descripcion: 'Orden de reparto por día.' },
   cierre: { eyebrow: 'Control semanal', titulo: 'Cierre', descripcion: 'Genera facturas y libros semanales.' },
 };
 

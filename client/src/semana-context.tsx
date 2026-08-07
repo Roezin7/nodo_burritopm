@@ -47,7 +47,8 @@ export function SemanaProvider({ children }: { children: ReactNode }) {
     seleccionarSemana,
     rutaSemana: (ruta) => {
       const separador = ruta.includes('?') ? '&' : '?';
-      return `${ruta}${separador}semana=${semana.inicio}`;
+      const linea = params.get('linea');
+      return `${ruta}${separador}semana=${semana.inicio}${linea ? `&linea=${encodeURIComponent(linea)}` : ''}`;
     },
   };
 

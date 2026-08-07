@@ -11,6 +11,7 @@ import { useUnsavedChanges } from '../../use-unsaved';
 import { useDialog } from '../../dialog';
 import { Icono } from '../../icons';
 import MoreActions from '../../components/MoreActions';
+import { useLineaOperacion } from '../../linea-param';
 
 interface DistResumen {
   id: number;
@@ -23,7 +24,7 @@ interface DistResumen {
   total_lineas: number;
 }
 
-const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Pedido #${d.id}`;
+const tituloDist = (d: { id: number; nombre: string | null }) => d.nombre?.trim() || `Preparación #${d.id}`;
 
 const usd = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
 export default function Distribucion({ integrado = false, semana = crearSemana(), soloRevision = false }: { integrado?: boolean; semana?: SemanaSeleccionada; soloRevision?: boolean }) {
@@ -33,7 +34,7 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(true);
   const [creando, setCreando] = useState(false);
-  const [linea, setLinea] = useState<'carne' | 'desechables'>('carne');
+  const { linea, cambiarLinea } = useLineaOperacion('carne');
   const [fecha, setFecha] = useState(semana.inicio);
   const [calendario, setCalendario] = useState<{ linea: 'carne' | 'desechables'; dia_semana: number }[]>([]);
   const solicitud = useRef(0);
@@ -121,9 +122,9 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
       const aprobadas = await api<{ aprobadas: number }>('/distribuciones/aprobar-todas', {
         method: 'POST', body: { desde: semana.inicio, hasta: semana.fin },
       });
-      toast.ok(`${creadas.creadas.length} consolidados reconstruidos · ${aprobadas.aprobadas} aprobados.`);
+      toast.ok(`${creadas.creadas.length} preparaciones reconstruidas · ${aprobadas.aprobadas} aprobadas.`);
       await cargar();
-    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron reconstruir los consolidados.'); }
+    } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudieron reconstruir las preparaciones.'); }
     finally { setCreando(false); }
   }
 
@@ -136,13 +137,13 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
       {!soloRevision && !integrado && <header className="page-head">
         <div>
           <span className="eyebrow">Pedidos confirmados</span>
-          <h1>Preparación de entregas</h1>
-          <p className="page-sub">Revisa el consolidado de carne o desechables antes de enviarlo a despacho.</p>
+          <h1>Preparación de despachos</h1>
+          <p className="page-sub">Semana {semana.numero} · Línea: {linea === 'carne' ? 'Carne' : 'Desechables'} · Revisa el consolidado antes de preparar la carga.</p>
         </div>
       </header>}
 
       {!soloRevision && !integrado && <FlujoStepper activo="conteo" />}
-      {!soloRevision && integrado && <header className="embedded-head"><div><span className="eyebrow">Ventas</span><h2>Consolidados automáticos</h2></div></header>}
+      {!soloRevision && integrado && <header className="embedded-head"><div><span className="eyebrow">Preparación</span><h2>Preparaciones de la semana</h2><p className="page-sub">Semana {semana.numero} · Línea: {linea === 'carne' ? 'Carne' : 'Desechables'}</p></div></header>}
 
       {error && <p className="error-msg">{error}</p>}
       {!soloRevision && <section className="workspace-card preparation-builder">
@@ -152,28 +153,28 @@ export default function Distribucion({ integrado = false, semana = crearSemana()
           <p>Solo entran pedidos confirmados. Al crearla se generan por separado las rutas configuradas para ese día.</p>
         </div>
         <div className="preparation-builder__controls">
-          <div className="segmented order-line-switch">
-            <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('carne')}>Carne</button>
-            <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => setLinea('desechables')}>Desechables</button>
-          </div>
-          <label className="field"><span>Entrega de semana {semana.numero}</span><select value={fecha} disabled={!fechasEntrega.length} onChange={(e) => setFecha(e.target.value)}>{!fechasEntrega.length && <option value="">Sin ruta configurada</option>}{fechasEntrega.map((f) => <option value={f} key={f}>{new Date(`${f}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' })}</option>)}</select></label>
+          <div className="order-line-context"><span className="segmented-context-label">Línea</span><div className="segmented order-line-switch" role="group" aria-label="Línea de preparación">
+            <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLinea('carne')}>Carne</button>
+            <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLinea('desechables')}>Desechables</button>
+          </div></div>
+          <label className="field"><span>Despacho de semana {semana.numero}</span><select value={fecha} disabled={!fechasEntrega.length} onChange={(e) => setFecha(e.target.value)}>{!fechasEntrega.length && <option value="">Sin ruta configurada</option>}{fechasEntrega.map((f) => <option value={f} key={f}>{new Date(`${f}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' })}</option>)}</select></label>
           <button className="btn btn-primary" disabled={creando || !fecha} onClick={() => void crearPreparacion()}>{creando ? 'Consolidando…' : 'Crear esta preparación'}</button>
         </div>
         <div className="preparation-batch-actions"><span>Semana {semana.numero} · {semana.inicio} al {semana.fin}</span><button className="btn btn-secondary" disabled={creando} onClick={() => void crearTodas()}>Crear todas</button><button className="btn btn-secondary" disabled={creando} onClick={() => void aprobarTodas()}>Aprobar todas</button></div>
-        <Link className="preparation-orders-link" to={`/semana/ventas?semana=${semana.inicio}`}>Revisar o capturar ventas →</Link>
+        <Link className="preparation-orders-link" to={`/semana/ventas?semana=${semana.inicio}&linea=${linea}`}>Revisar o capturar pedidos →</Link>
       </section>}
 
       {soloRevision && <section className="workspace-card consolidated-sales-head">
-        <div><span className="eyebrow">Ventas confirmadas</span><h2>Consolidados y rutas</h2><p>Revisa o elimina un consolidado antes del despacho.</p></div>
-        <button className="btn btn-secondary" disabled={creando} onClick={() => void reconstruirFaltantes()}>{creando ? 'Reconstruyendo…' : 'Reconstruir faltantes'}</button>
+        <div><span className="eyebrow">Preparaciones</span><h2>Preparaciones y rutas</h2><p>Revisa o elimina una preparación antes de enviarla a bodega.</p></div>
+        <button className="btn btn-secondary" disabled={creando} onClick={() => void reconstruirFaltantes()}>{creando ? 'Reconstruyendo…' : 'Reconstruir preparaciones faltantes'}</button>
       </section>}
 
       {cargando ? (
         <Spinner />
       ) : lista.length === 0 ? (
-        <p className="muted">Aún no hay consolidados.</p>
+        <p className="muted">Aún no hay preparaciones.</p>
       ) : (
-        <CollapsibleSection title={`Consolidados de semana ${semana.numero}`} count={lista.length}><div className="lista-ubicaciones">
+        <CollapsibleSection title={`Preparaciones de semana ${semana.numero}`} count={lista.length}><div className="lista-ubicaciones">
           {lista.map((d) => (
             <button key={d.id} className="card card-click" onClick={() => setAbierta(d.id)}>
               <div className="ubic-row">
@@ -321,7 +322,7 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
       else if (vista === 'sucursal') setSuc(await api<VistaSucursal>(`/distribuciones/${id}/consolidado?vista=sucursal`));
       else if (!prod && !suc) setProd(await api<VistaProducto>(`/distribuciones/${id}/consolidado?vista=producto`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Error al cargar el consolidado');
+      setError(e instanceof ApiError ? e.message : 'Error al cargar la preparación');
     }
   }
   useEffect(() => { void cargar(); /* eslint-disable-next-line */ }, [vista, id]);
@@ -345,13 +346,13 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
 
   async function renombrar() {
     const actual = nombre ?? '';
-    const nuevo = await dialog.prompt({ title: 'Renombrar consolidado', description: 'Este nombre identifica el documento para bodega y administración.', label: 'Nombre del pedido', initialValue: actual, placeholder: 'Vacío para usar el folio', confirmLabel: 'Guardar nombre' });
+    const nuevo = await dialog.prompt({ title: 'Renombrar preparación', description: 'Este nombre identifica el documento para bodega y administración.', label: 'Nombre de la preparación', initialValue: actual, placeholder: 'Vacío para usar el folio', confirmLabel: 'Guardar nombre' });
     if (nuevo == null || nuevo.trim() === actual) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'PATCH', body: { nombre: nuevo.trim() } });
       await cargar();
-      toast.ok('Pedido renombrado.');
+      toast.ok('Preparación renombrada.');
     } catch (e) {
       setError(mensajeError(e, 'No se pudo renombrar.'));
     } finally {
@@ -360,11 +361,11 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
   }
 
   async function eliminar() {
-    if (!await dialog.confirm({ title: 'Eliminar consolidado', description: 'Se devolverá a bodega el inventario que conserven las sucursales, se eliminarán rutas e incidencias y las ventas volverán a confirmado. Esta acción no se puede deshacer.', confirmLabel: 'Eliminar consolidado', tone: 'danger' })) return;
+    if (!await dialog.confirm({ title: 'Eliminar preparación', description: 'Se devolverá a bodega el inventario que conserven las sucursales, se eliminarán rutas e incidencias y los pedidos volverán a confirmado. Esta acción no se puede deshacer.', confirmLabel: 'Eliminar preparación', tone: 'danger' })) return;
     setBusy(true); setError('');
     try {
       await api(`/distribuciones/${id}`, { method: 'DELETE' });
-      toast.ok('Pedido eliminado · inventario devuelto a bodega.');
+      toast.ok('Preparación eliminada · inventario devuelto a bodega.');
       onSalir();
     } catch (e) {
       setError(mensajeError(e, 'No se pudo eliminar.'));
@@ -377,7 +378,7 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
     try {
       if (Object.keys(edits).length) await guardarAjustes();
       await api(`/distribuciones/${id}/aprobar`, { method: 'POST' });
-      toast.ok('Pedido aprobado · listo para bodega.', {
+      toast.ok('Preparación aprobada · lista para bodega.', {
         label: 'Deshacer',
         onClick: async () => {
           try { await api(`/distribuciones/${id}/estado`, { method: 'PATCH', body: { estado: 'en_revision' } }); await cargar(); }
@@ -396,14 +397,14 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
     <div className={integrado ? 'embedded-operation conteo-page' : 'page conteo-page'}>
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← Consolidados</button>
-          <h1>{nombre?.trim() || `Pedido #${id}`} {estado && <EstadoDistChip estado={estado} />}</h1>
-          {nombre?.trim() && <p className="page-sub">Pedido #{id}</p>}
+          <button className="link-btn" onClick={onSalir}>← Preparaciones</button>
+          <h1>{nombre?.trim() || `Preparación #${id}`} {estado && <EstadoDistChip estado={estado} />}</h1>
+          {nombre?.trim() && <p className="page-sub">Preparación #{id}</p>}
         </div>
         <div className="dist-acciones">
           <button className="btn btn-secondary" disabled={busy} onClick={() => void renombrar()}>Renombrar</button>
           <MoreActions>
-            <button className="btn btn-danger-ghost" disabled={busy} onClick={() => void eliminar()}>Eliminar consolidado</button>
+            <button className="btn btn-danger-ghost" disabled={busy} onClick={() => void eliminar()}>Eliminar preparación</button>
           </MoreActions>
         </div>
       </header>
@@ -513,7 +514,7 @@ function Consolidado({ id, integrado = false, onSalir }: { id: number; integrado
               Guardar ajustes
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => void aprobar()} disabled={busy}>Aprobar distribución</button>
+          <button className="btn btn-primary" onClick={() => void aprobar()} disabled={busy}>Aprobar preparación</button>
         </div>
       )}
 

@@ -131,7 +131,7 @@ export default function Editor({ detalle, onSalir, onRecargar }: { detalle: Inve
     <div className="page conteo-page">
       <header className="page-head">
         <div>
-          <button className="link-btn" onClick={onSalir}>← {esPedido ? 'Pedidos' : 'Inventarios'}</button>
+          <button className="link-btn" onClick={onSalir}>← {esPedido ? 'Pedidos' : 'Inventario'}</button>
           <h1 className="inv-fecha-titulo">{esPedido ? 'Pedido' : 'Inventario'} {fechaLarga(detalle.fecha)} <EstadoChip estado={detalle.estado} /></h1>
           <p className="page-sub">{detalle.ubicacion.nombre}</p>
         </div>

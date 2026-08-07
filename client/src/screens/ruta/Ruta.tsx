@@ -110,7 +110,7 @@ function RutaRepartidor({ integrado, semana }: { integrado: boolean; semana: Sem
         <div><span className="eyebrow">Ruta activa</span><h1>Reparto</h1><p className="page-sub">Entrega parada por parada. Toca la parada activa para empezar.</p></div>
       </header>}
       {!integrado && <FlujoStepper activo="ruta" />}
-      {!integrado && <BodegaRutaTabs activo="reparto" />}
+      <BodegaRutaTabs activo="reparto" />
       {integrado && <header className="embedded-head"><div><span className="eyebrow">Operación diaria</span><h2>Reparto</h2></div></header>}
       {error && <p className="error-msg">{error}</p>}
 
@@ -381,7 +381,7 @@ function MonitorRutas({ integrado, semana }: { integrado: boolean; semana: Seman
         </div>
       </header>}
       {!integrado && <FlujoStepper activo="ruta" />}
-      {!integrado && <BodegaRutaTabs activo="reparto" />}
+      <BodegaRutaTabs activo="reparto" />
       {integrado && <header className="embedded-head"><div><span className="eyebrow">Operación diaria</span><h2>Reparto</h2></div></header>}
 
       <div className="tabs">

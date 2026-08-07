@@ -44,7 +44,7 @@ function TareaHoy({ repartoHabilitado }: { repartoHabilitado: boolean }) {
           const alerta = d.alertas[0];
           if (alerta) return { titulo: alerta.titulo, sub: alerta.detalle, ruta: alerta.ruta };
           if (d.operacion.distribuciones_abiertas > 0) return {
-            titulo: 'Distribuciones en proceso',
+            titulo: 'Preparaciones en proceso',
             sub: repartoHabilitado ? 'Revisa despacho y reparto' : 'Revisa los despachos de la semana',
             ruta: '/semana/despacho',
           };
@@ -83,12 +83,12 @@ interface Modulo {
 }
 
 const MODULOS: Modulo[] = [
-  { clave: 'pedidos', titulo: 'Ventas', icono: 'clipboard', desc: 'Carne y desechables por restaurante y semana', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y semana', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Materia prima, lotes y cuentas por pagar', ruta: '/semana/compras', soloAdmin: true },
   { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/semana/produccion', soloAdmin: true },
-  { clave: 'inventario', titulo: 'Inventarios', icono: 'boxes', desc: 'Bodega Addison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'inventario', titulo: 'Inventario', icono: 'boxes', desc: 'Bodega Adison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
   { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Norte, Sur y Tapatíos por día', ruta: '/rutas', soloAdmin: true },
-  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Documentos de entrega directa', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'bodega', titulo: 'Despacho', icono: 'truck', desc: 'Surtir, cargar e imprimir rutas', ruta: '/semana/despacho', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', titulo: 'Reparto', icono: 'map', desc: 'Entregar parada por parada', ruta: '/semana/reparto', roles: ['encargado_bodega'], requiereReparto: true },
   { clave: 'recepcion', titulo: 'Recepción', icono: 'inbox', desc: 'Recibir lo que llega del camión', ruta: '/semana/recepcion', roles: ['encargado_sucursal'], requiereReparto: true },
   { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cobros, pagos y facturas pendientes', ruta: '/facturacion', soloAdmin: true },
@@ -137,7 +137,7 @@ export default function Home() {
 
   if (esAdmin) return (
     <div className="page admin-home">
-      <header className="page-head operation-page-head"><div><span className="eyebrow">Hoy</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Primero atiende lo pendiente. La semana conserva el contexto completo de la operación.</p></div><Link className="btn btn-secondary" to="/semana/ventas">Abrir semana</Link></header>
+      <header className="page-head operation-page-head"><div><span className="eyebrow">Hoy</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Primero atiende lo pendiente. La semana conserva el contexto completo de la operación.</p></div><Link className="btn btn-secondary" to="/semana/ventas">Abrir operación</Link></header>
       <ActivarAvisos />
       <TareaHoy repartoHabilitado={repartoHabilitado} />
       <PanelAdmin />

@@ -16,7 +16,7 @@ const Ruta = lazy(() => import('../ruta/Ruta'));
 const Recepcion = lazy(() => import('../recepcion/Recepcion'));
 
 const operacionDiaria = [
-  { clave: 'ventas', label: 'Ventas' },
+  { clave: 'ventas', label: 'Pedidos' },
   { clave: 'despacho', label: 'Despacho' },
   { clave: 'reparto', label: 'Reparto' },
 ] as const;
@@ -29,7 +29,7 @@ const controlSemanal = [
 ] as const;
 
 const tareasPorRol = [
-  { clave: 'ventas', label: 'Ventas', roles: ['encargado_sucursal'] },
+  { clave: 'ventas', label: 'Pedidos', roles: ['encargado_sucursal'] },
   { clave: 'despacho', label: 'Despacho', roles: ['encargado_bodega'] },
   { clave: 'reparto', label: 'Reparto', roles: ['encargado_bodega'] },
   { clave: 'recepcion', label: 'Recepción', roles: ['encargado_sucursal'] },
@@ -52,15 +52,15 @@ function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; se
       <p>{!semana.actual
         ? 'Estás consultando una semana anterior. Sus registros y resultados se conservan sin cambios.'
         : esSabadoActual
-          ? 'Continúan las ventas y entregas; hoy también se registran compras y producción para conciliar y cerrar.'
-          : 'Captura ventas y prepara entregas. El inventario puede ser negativo provisionalmente hasta la regularización del sábado.'}</p>
+          ? 'Continúan los pedidos y despachos; hoy también se registran compras y producción para conciliar y cerrar.'
+          : 'Captura pedidos y prepara despachos. El inventario puede ser negativo provisionalmente hasta la regularización del sábado.'}</p>
     </div>
     <div className="weekly-cadence__groups">
       <div className={esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
         <div className="cadence-group__head"><span>Durante la semana</span><strong>Operación diaria</strong></div>
         <nav aria-label="Operación diaria">
-          <NavLink to={rutaSemana('/semana/ventas')} className={actual === 'ventas' ? 'is-active' : ''}>Ventas</NavLink>
-          <NavLink to={rutaSemana('/semana/despacho')} className={actual === 'despacho' ? 'is-active' : ''}>Entregas</NavLink>
+          <NavLink to={rutaSemana('/semana/ventas')} className={actual === 'ventas' ? 'is-active' : ''}>Pedidos</NavLink>
+          <NavLink to={rutaSemana('/semana/despacho')} className={actual === 'despacho' ? 'is-active' : ''}>Despacho</NavLink>
         </nav>
       </div>
       <div className={!esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
@@ -125,7 +125,7 @@ export default function SemanaOperacion() {
   const inicio = permitidos[0]?.clave ?? 'ventas';
   if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={rutaSemana(`/semana/${inicio}`)} replace />;
   const actual = alias as Tarea;
-  const tareasNavegacion = usuario.rol === 'encargado_bodega' ? permitidos.filter((p) => p.clave !== 'reparto') : permitidos;
+  const tareasNavegacion = permitidos;
 
   const tituloRol = usuario.rol === 'encargado_sucursal' ? 'Pedido y recepción' : 'Trabajo de bodega';
   return <div className="page weekly-operation weekly-operation--simple weekly-operation--field">

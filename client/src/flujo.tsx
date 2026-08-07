@@ -1,9 +1,10 @@
 // Lenguaje visual compartido del flujo de abastecimiento: chips de estado consistentes
-// y el stepper operativo (Ventas → Despacho → Ruta → Recepción), interactivo.
+// y el stepper operativo (Pedidos → Despacho → Reparto → Recepción), interactivo.
 import { NavLink } from 'react-router-dom';
 import { useAuth, type Rol } from './auth';
 import { useOperacionConfig } from './operacion-config';
 import { Icono } from './icons';
+import { useSemanaGlobal } from './semana-context';
 
 // ── Estado de la distribución ──────────────────────────────────────────────
 const DIST: Record<string, { label: string; cls: string }> = {
@@ -97,7 +98,7 @@ export const paradaLabel = (estado: string) => PARADA[estado]?.label ?? estado;
 // ── Stepper de 5 pasos (menú interactivo) ──────────────────────────────────
 export type PasoFlujo = 'conteo' | 'bodega' | 'ruta' | 'recepcion';
 const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] = [
-  { clave: 'conteo', label: 'Ventas', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'conteo', label: 'Pedidos', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
   { clave: 'bodega', label: 'Despacho', ruta: '/bodega', roles: ['admin', 'encargado_bodega'] },
   { clave: 'ruta', label: 'Reparto', ruta: '/ruta', roles: ['admin', 'encargado_bodega'] },
   { clave: 'recepcion', label: 'Recepción', ruta: '/recepcion', roles: ['admin', 'encargado_sucursal'] },
@@ -110,6 +111,7 @@ const PASOS: { clave: PasoFlujo; label: string; ruta: string; roles: Rol[] }[] =
 export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
   const { usuario } = useAuth();
   const { repartoHabilitado } = useOperacionConfig();
+  const { rutaSemana } = useSemanaGlobal();
   const pasos = PASOS.filter((p) => (p.clave !== 'ruta' || repartoHabilitado) && !(p.clave === 'recepcion' && usuario?.rol === 'admin'));
   const idxActivo = pasos.findIndex((p) => p.clave === activo);
   return (
@@ -127,7 +129,7 @@ export function FlujoStepper({ activo }: { activo: PasoFlujo }) {
         return (
           <div key={p.clave} style={{ display: 'contents' }}>
             {accesible ? (
-              <NavLink to={p.ruta} end className={cls} aria-current={estado === 'on' ? 'page' : undefined}>
+              <NavLink to={rutaSemana(p.ruta)} end className={cls} aria-current={estado === 'on' ? 'page' : undefined}>
                 {contenido}
               </NavLink>
             ) : (

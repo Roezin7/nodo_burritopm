@@ -448,7 +448,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
           const avance = await api<ResultadoConfirmacion>('/operacion/pedidos/confirmar-todos', { method: 'POST', body: { linea, desde: semana.inicio, hasta: semana.fin } });
           const faltantes = avance.cobertura_bpm.flatMap((c) => c.pendientes);
           const cobertura = faltantes.length ? ` · cobertura parcial: ${faltantes.length} sucursal${faltantes.length === 1 ? '' : 'es'} sin pedido` : ' · cobertura completa';
-          toast.ok(`${avance.preparaciones?.aprobadas ?? 0} consolidados listos${cobertura}.`);
+          toast.ok(`${avance.preparaciones?.aprobadas ?? 0} preparaciones listas${cobertura}.`);
           setRefresco((n) => n + 1); onActualizado();
         } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo completar la semana.'); }
         finally { setBusy(false); }
@@ -476,7 +476,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
         const faltantes = avance.cobertura_bpm.flatMap((c) => c.pendientes);
         const preparadas = avance.preparaciones?.aprobadas ?? 0;
         const cobertura = faltantes.length ? ` · cobertura parcial: ${faltantes.length} sucursal${faltantes.length === 1 ? '' : 'es'} sin pedido` : ' · cobertura completa';
-        toast.ok(`${resultado.guardados} ventas confirmadas${preparadas ? ` · ${preparadas} consolidados listos` : ''}${cobertura}.`);
+        toast.ok(`${resultado.guardados} pedidos confirmados${preparadas ? ` · ${preparadas} preparaciones listas` : ''}${cobertura}.`);
       } else {
         toast.ok(`${resultado.guardados} ventas actualizadas.`);
       }
@@ -506,7 +506,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     </section>}
     {error && <p className="error-msg">{error}</p>}
     {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
-    <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Ventas capturadas</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de {linea}</span><strong>{usd(importe)}</strong></div></div>
+    <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Pedidos capturados</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de pedidos</span><strong>{usd(importe)}</strong></div></div>
     <div className="matrix-edit-guide" role="note">
       <span><strong>Captura rápida:</strong> Enter baja en la misma columna · flechas para navegar · Shift extiende · Delete borra · ⌘/Ctrl+C, V y Z funcionan como en Excel.</span>
       {seleccion && <div><b>{celdasEnSeleccion} {celdasEnSeleccion === 1 ? 'celda seleccionada' : 'celdas seleccionadas'}</b><button type="button" className="link-btn txt-danger" disabled={semanaCerrada} onClick={borrarSeleccion}>Borrar selección</button><button type="button" className="link-btn" onClick={() => setSeleccion(null)}>Cancelar</button></div>}

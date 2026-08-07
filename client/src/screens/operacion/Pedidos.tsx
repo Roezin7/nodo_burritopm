@@ -11,6 +11,7 @@ import CapturaSemanalPedidos from './pedidos/CapturaSemanalPedidos';
 import HistorialPedidos from './pedidos/HistorialPedidos';
 import HistoryToggle from '../../components/HistoryToggle';
 import OrdenImprimible from './pedidos/OrdenImprimible';
+import { useLineaOperacion } from '../../linea-param';
 import {
   entregasDeSemana, esPieza, fechaEntregaCorta, hoy, unidadCorta, usd,
   type Catalogo, type Linea, type Pedido, type ResultadoConfirmacion,
@@ -21,7 +22,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
   const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
-  const [linea, setLinea] = useState<Linea>('carne');
+  const { linea, cambiarLinea } = useLineaOperacion('carne');
   const [ubicacionId, setUbicacionId] = useState('');
   const [fecha, setFecha] = useState('');
   const [fechaManual, setFechaManual] = useState(false);
@@ -184,7 +185,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         body: { ubicacion_id: Number(ubicacionId), linea, fecha_entrega: fecha, actualizado_at: version, confirmar, notas: notas.trim() || null, lineas: productos.map((p) => ({ product_id: p.id, cantidad: Number(cantidades[p.id] || 0) })) },
       });
       if (fueEncolado(r)) {
-        toast.ok('Venta guardada sin conexión; se enviará automáticamente al recuperar la red.');
+        toast.ok('Pedido guardado sin conexión; se enviará automáticamente al recuperar la red.');
         return;
       }
       setEstado(r.estado);
@@ -193,14 +194,14 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       setNotasGuardadas(notas);
       setPreciosPedido(Object.fromEntries(productos.map((p) => [p.id, p.precio])));
       if (claveBorradorIndividual) guardarBorradorLocal(claveBorradorIndividual, null);
-      toast.ok(esCorreccionProcesada ? 'Corrección aplicada a venta, despacho e inventario.' : confirmar ? 'Pedido confirmado.' : 'Avance guardado.');
+      toast.ok(esCorreccionProcesada ? 'Corrección aplicada a pedido, despacho e inventario.' : confirmar ? 'Pedido confirmado.' : 'Avance guardado.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar.'); }
     finally { setBusy(false); }
   }
 
   function cambiarLineaPedido(siguiente: Linea) {
     if (siguiente === linea) return;
-    setLinea(siguiente);
+    cambiarLinea(siguiente);
     setPasoIndividual('captura');
     setFiltroProductos(siguiente === 'carne' ? 'principales' : 'todos');
     setBuscar('');
@@ -232,8 +233,8 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       });
       const pendientes = r.cobertura_bpm.flatMap((c) => c.pendientes.map((nombre) => `${c.fecha}: ${nombre}`));
       const detalle = pendientes.length ? ` · cobertura parcial: ${pendientes.slice(0, 3).join(', ')}${pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : ''}` : ' · cobertura completa';
-      const preparaciones = r.preparaciones?.aprobadas ? ` · ${r.preparaciones.aprobadas} consolidados listos` : '';
-      toast.ok(`${r.confirmados} ventas confirmadas${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}${preparaciones}`);
+      const preparaciones = r.preparaciones?.aprobadas ? ` · ${r.preparaciones.aprobadas} preparaciones listas` : '';
+      toast.ok(`${r.confirmados} pedidos confirmados${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}${preparaciones}`);
       setRefrescoHistorial((n) => n + 1);
       if (desde === hasta && ubicacionId) {
         const rows = await api<Pedido[]>(`/operacion/pedidos?ubicacion_id=${ubicacionId}&linea=${linea}&desde=${desde}&hasta=${hasta}`);
@@ -265,17 +266,17 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const capturaSemanal = admin;
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
-      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Ventas' : 'Pedido del restaurante'}</span><h1>{admin ? 'Venta semanal' : 'Hacer pedido'}</h1></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
-      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Operación diaria' : 'Pedido del restaurante'}</span><h2>{admin ? 'Ventas' : 'Hacer pedido'}</h2></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Pedidos' : 'Pedido del restaurante'}</span><h1>{admin ? 'Pedidos de la semana' : 'Hacer pedido'}</h1><p className="page-sub">Semana {semana.numero} · Línea: {linea === 'carne' ? 'Carne' : 'Desechables'}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Operación diaria' : 'Pedido del restaurante'}</span><h2>{admin ? 'Pedidos' : 'Hacer pedido'}</h2><p className="page-sub">Semana {semana.numero} · Línea: {linea === 'carne' ? 'Carne' : 'Desechables'}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
         {admin && <div className="order-view-actions">
-          <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Despachos</button></div>
+          <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Preparaciones</button></div>
           <HistoryToggle active={vista === 'historial'} closeLabel="Volver a captura" onToggle={() => setVista(vista === 'historial' ? 'captura' : 'historial')} />
         </div>}
-        {vista !== 'consolidados' && <div className="segmented order-line-switch">
+        {vista !== 'consolidados' && <div className="order-line-context"><span className="segmented-context-label">Línea</span><div className="segmented order-line-switch" role="group" aria-label="Línea de pedidos">
         <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('carne')}>Carne</button>
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>
-        </div>}
+        </div></div>}
       </div>
       {error && <p className="error-msg">{error}</p>}
       {vista === 'consolidados' ? <Distribucion integrado semana={semana} soloRevision /> : vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>

@@ -7,6 +7,8 @@ import { useAuth } from '../../auth';
 import Modal from '../../components/Modal';
 import { Icono } from '../../icons';
 import MoreActions from '../../components/MoreActions';
+import BodegaRutaTabs from '../../components/BodegaRutaTabs';
+import { useLineaOperacion } from '../../linea-param';
 import HistoryToggle from '../../components/HistoryToggle';
 
 interface DistResumen {
@@ -262,7 +264,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
   const [rutas, setRutas] = useState<RutaDetalle[]>([]);
   const [productos, setProductos] = useState<ProductoOrdenable[]>([]);
   const [programacion, setProgramacion] = useState<Catalogo['plantillas']>([]);
-  const [lineaMovil, setLineaMovil] = useState<LineaOperacion>('carne');
+  const { linea: lineaMovil, cambiarLinea: cambiarLineaMovil } = useLineaOperacion('carne');
   const [mostrarCompletadas, setMostrarCompletadas] = useState(true);
   const [error, setError] = useState('');
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
@@ -342,18 +344,19 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
 
   return (
     <div className={integrado ? 'embedded-operation' : 'page'}>
-      {!integrado && <header className="page-head"><div><span className="eyebrow">Producción a restaurante</span><h1>Despacho</h1><p className="page-sub">Documentos para la entrega directa a cada restaurante.</p></div></header>}
-      {integrado && <header className="embedded-head"><div><span className="eyebrow">Producción a restaurante</span><h2>Despacho</h2></div></header>}
+      {!integrado && <header className="page-head"><div><span className="eyebrow">Bodega</span><h1>Despacho</h1><p className="page-sub">Surte, carga y documenta cada ruta. Semana {semana.numero} · Línea: {lineaMovil === 'carne' ? 'Carne' : 'Desechables'}.</p></div></header>}
+      {integrado && <header className="embedded-head"><div><span className="eyebrow">Bodega</span><h2>Despacho</h2><p className="page-sub">Semana {semana.numero} · Línea: {lineaMovil === 'carne' ? 'Carne' : 'Desechables'}</p></div></header>}
+      <BodegaRutaTabs activo="bodega" />
       {error && <p className="error-msg">{error}</p>}
 
-      <div className="history-access-bar"><strong>{mostrarCompletadas ? 'Todas las salidas de la semana' : 'Salidas por preparar'}</strong><HistoryToggle active={mostrarCompletadas} openLabel="Consultar completadas" closeLabel="Volver a pendientes" onToggle={() => setMostrarCompletadas((actual) => !actual)} /></div>
+      <div className="history-access-bar"><strong>{mostrarCompletadas ? 'Todos los despachos de la semana' : 'Despachos por preparar'}</strong><HistoryToggle active={mostrarCompletadas} openLabel="Consultar completados" closeLabel="Volver a pendientes" onToggle={() => setMostrarCompletadas((actual) => !actual)} /></div>
 
-      {!cargandoDetalle && <div className="dispatch-mobile-line" role="group" aria-label="Línea de despacho">
+      {!cargandoDetalle && <div className="dispatch-mobile-line" role="group" aria-label="Línea de operación">
         {(['carne', 'desechables'] as const).map((linea) => <button
           key={linea}
           className={lineaMovil === linea ? 'is-active' : ''}
           aria-pressed={lineaMovil === linea}
-          onClick={() => setLineaMovil(linea)}
+          onClick={() => cambiarLineaMovil(linea)}
         >{linea === 'carne' ? 'Carne' : 'Desechables'}</button>)}
       </div>}
       {cargandoDetalle ? <p className="muted">Preparando documentos…</p> : <section className={`dispatch-week-board dispatch-week-board--${lineaMovil}`}>
@@ -366,7 +369,7 @@ export default function Bodega({ integrado = false, semana = crearSemana() }: { 
               const programada = estaProgramado(dia.diaSemana, linea);
               return <div className={`dispatch-day-cell dispatch-day-cell--${linea}`} key={linea}>
                 {salidas.length ? salidas.map((salida) => <button className="dispatch-day-card" key={salida.id} onClick={() => void abrir(salida.ids)}>
-                  <div><strong>{salida.total_lineas} partidas</strong><span>Preparar salida</span></div><div><FaseChip estado={salida.estado} /><b><Icono name="chevron" /></b></div>
+                  <div><strong>{salida.total_lineas} partidas</strong><span>Preparar carga</span></div><div><FaseChip estado={salida.estado} /><b><Icono name="chevron" /></b></div>
                 </button>) : <div className={`dispatch-day-empty ${programada ? 'is-scheduled' : ''}`}><strong>{programada ? 'Salida programada' : 'Sin salida'}</strong>{programada && <span>Se generará al completar los pedidos</span>}</div>}
               </div>;
             })}
@@ -390,8 +393,8 @@ function OperacionView({
   const totalFaltante = op.total_carga.filter((t) => t.faltante > 0).length;
 
   return <div className={integrado ? 'embedded-operation dispatch-workspace' : 'page dispatch-workspace'}>
-    <button className="dispatch-back" onClick={onSalir}>← Volver a entregas</button>
-    <header className="page-head dispatch-page-head"><div><span className="eyebrow">{op.linea}</span><h1>Entrega del {fechaLegible(op.fecha_entrega)}</h1><p className="page-sub">{rutas.length} ruta{rutas.length === 1 ? '' : 's'} · {rutas.reduce((total, ruta) => total + destinosDeRuta(ruta).length, 0)} restaurantes · {op.total_carga.filter((p) => p.total_a_cargar > 0).length} productos</p></div><div className="page-actions"><FaseChip estado={op.estado} /><button className="btn btn-primary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'completo' })}>Imprimir</button><MoreActions><button className="btn btn-ghost" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'carga' })}>Hoja general</button></MoreActions></div></header>
+    <button className="dispatch-back" onClick={onSalir}>← Volver a despachos</button>
+    <header className="page-head dispatch-page-head"><div><span className="eyebrow">{op.linea === 'carne' ? 'Carne' : 'Desechables'}</span><h1>Despacho del {fechaLegible(op.fecha_entrega)}</h1><p className="page-sub">{rutas.length} ruta{rutas.length === 1 ? '' : 's'} · {rutas.reduce((total, ruta) => total + destinosDeRuta(ruta).length, 0)} restaurantes · {op.total_carga.filter((p) => p.total_a_cargar > 0).length} productos</p></div><div className="page-actions"><FaseChip estado={op.estado} /><button className="btn btn-primary" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'completo' })}>Imprimir paquete de despacho</button><MoreActions><button className="btn btn-ghost" disabled={!rutas.length} onClick={() => setImpresion({ tipo: 'carga' })}>Hoja general de carga</button></MoreActions></div></header>
     {totalFaltante > 0 && !ESTADOS_COMPLETADOS.includes(op.estado) && <p className="aviso-falt">{totalFaltante} producto{totalFaltante === 1 ? '' : 's'} requiere conciliación.</p>}
 
     {!rutas.length ? <div className="empty-state"><strong>No se generaron rutas</strong><span>Revisa la configuración de rutas para esta línea y día.</span></div> : <div className="dispatch-route-grid">
@@ -399,7 +402,7 @@ function OperacionView({
         const destinos = destinosDeRuta(ruta);
         const tapatios = esRutaTapatios(ruta);
         return <article className="dispatch-route-card" key={ruta.ruta_id}>
-          <header><div><span className="eyebrow">{ruta.conductor || 'Ruta'}</span><h2>{ruta.nombre}</h2><p>{tapatios ? 'Documento consolidado' : `${destinos.length} parada${destinos.length === 1 ? '' : 's'}`}</p></div><button className="btn btn-secondary" onClick={() => setImpresion({ tipo: 'ruta', rutaId: ruta.ruta_id })}>Imprimir ruta</button></header>
+          <header><div><span className="eyebrow">{ruta.conductor || 'Ruta'}</span><h2>{ruta.nombre}</h2><p>{tapatios ? 'Carga consolidada' : `${destinos.length} parada${destinos.length === 1 ? '' : 's'}`}</p></div><button className="btn btn-secondary" onClick={() => setImpresion({ tipo: 'ruta', rutaId: ruta.ruta_id })}>Imprimir ruta</button></header>
           <ol>{destinos.map((destino, indice) => <li key={destino.clave}><span>{indice + 1}</span><div><strong>{destino.nombre}</strong>{destino.entregaEn !== destino.nombre && <small>Se entrega en {destino.entregaEn}</small>}</div><b>{numero(destino.items.reduce((total, item) => total + item.esperado, 0))}</b></li>)}</ol>
         </article>;
       })}

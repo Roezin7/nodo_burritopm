@@ -63,7 +63,7 @@ export default function SyncCenter() {
         <span className="sync-center__status-icon"><Icono name={!estado.online ? 'wifiOff' : requiereAtencion ? 'alert' : estado.sincronizando ? 'refresh' : 'checks'} size={22} /></span>
         <div>
           <strong>{!estado.online ? 'Trabajando sin conexión' : requiereAtencion ? 'Hay cambios que necesitan revisión' : estado.sincronizando ? 'Enviando cambios…' : estado.pendientes > 0 ? 'Cambios listos para enviar' : 'Todo está al día'}</strong>
-          <span>{!estado.online ? 'Ventas e inventarios seguros se enviarán al recuperar la conexión.' : hora(estado.ultimaSincronizacion)}</span>
+          <span>{!estado.online ? 'Pedidos e inventarios seguros se enviarán al recuperar la conexión.' : hora(estado.ultimaSincronizacion)}</span>
         </div>
       </div>
 

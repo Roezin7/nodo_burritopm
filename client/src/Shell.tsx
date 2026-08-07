@@ -25,7 +25,7 @@ interface Item {
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
-  { ruta: '/semana/ventas', label: 'Ventas', icono: 'receipt', grupo: 'operacion_diaria', roles: ['admin', 'encargado_sucursal'] },
+  { ruta: '/semana/ventas', label: 'Pedidos', icono: 'clipboard', grupo: 'operacion_diaria', roles: ['admin', 'encargado_sucursal'] },
   { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'operacion_diaria', roles: ['admin', 'encargado_bodega'] },
   { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'operacion_diaria', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
   { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'operacion_diaria', roles: ['encargado_sucursal'], requiereReparto: true },
@@ -37,7 +37,7 @@ const ITEMS: Item[] = [
   { ruta: '/incidencias', label: 'Incidencias', icono: 'alert', grupo: 'administracion', soloAdmin: true },
 ];
 
-const OPERACION_ADMIN: Item = { ruta: '/semana', label: 'Semana', icono: 'checks', grupo: 'general', soloAdmin: true };
+const OPERACION_ADMIN: Item = { ruta: '/semana', label: 'Operación', icono: 'checks', grupo: 'general', soloAdmin: true };
 const CONFIGURACION_ADMIN: Item = { ruta: '/configuracion', label: 'Configuración', icono: 'settings', grupo: 'administracion', soloAdmin: true };
 
 const GRUPOS = [
@@ -100,7 +100,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   // Las rutas directas se conservan para marcadores y enlaces existentes.
   const itemsNavegacion = usuario?.rol === 'admin'
     ? [items.find((i) => i.ruta === '/')!, OPERACION_ADMIN, items.find((i) => i.ruta === '/facturacion')!, items.find((i) => i.ruta === '/incidencias')!, CONFIGURACION_ADMIN]
-    : items.filter((i) => !(usuario?.rol === 'encargado_bodega' && i.ruta === '/semana/reparto'));
+    : items;
 
   // "Más" siempre visible en móvil: además del overflow, ahí viven Tema y Cerrar sesión
   // (si no, roles con pocas secciones se quedaban sin forma de salir en el teléfono).
