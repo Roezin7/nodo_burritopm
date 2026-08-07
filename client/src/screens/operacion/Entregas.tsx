@@ -1,86 +1,113 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '../../api';
-import Spinner from '../../components/Spinner';
 import WeekPicker from '../../components/WeekPicker';
+import HistoryToggle from '../../components/HistoryToggle';
+import Spinner from '../../components/Spinner';
+import { Icono } from '../../icons';
 import type { SemanaSeleccionada } from '../../semana';
 
-interface RutaCalendario {
+type Linea = 'carne' | 'desechables';
+
+interface Salida {
   id: number;
-  nombre: string;
-  codigo: string;
-  linea: 'carne' | 'desechables';
-  dia_semana: number;
-  conductor: string;
-  paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[];
+  estado: string;
+  fecha_entrega: string | null;
+  linea: Linea | null;
+  total_lineas: number;
 }
 
-interface CatalogoEntregas {
-  plantillas: RutaCalendario[];
+interface CatalogoRutas {
+  plantillas: { linea: Linea; dia_semana: number; activo?: boolean }[];
 }
 
-const LINEA_LABEL: Record<RutaCalendario['linea'], string> = {
-  carne: 'Carne',
-  desechables: 'Desechables',
-};
+const COMPLETADAS = ['entregada', 'cerrada', 'cerrada_con_incidencias'];
 
-function fechasSemana(semana: SemanaSeleccionada) {
-  const fechas: { iso: string; dia: number; etiqueta: string }[] = [];
-  for (let iso = semana.inicio; iso <= semana.fin;) {
-    const fecha = new Date(`${iso}T12:00:00`);
-    fechas.push({
-      iso,
-      dia: fecha.getDay(),
-      etiqueta: fecha.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }),
+function diasDeSemana(semana: SemanaSeleccionada) {
+  const dias: { fecha: string; dia: string; numero: string; diaSemana: number }[] = [];
+  const cursor = new Date(`${semana.inicio}T12:00:00`);
+  while (cursor.toLocaleDateString('en-CA') <= semana.fin) {
+    dias.push({
+      fecha: cursor.toLocaleDateString('en-CA'),
+      dia: cursor.toLocaleDateString('es-MX', { weekday: 'long' }),
+      numero: cursor.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }),
+      diaSemana: cursor.getDay(),
     });
-    fecha.setDate(fecha.getDate() + 1);
-    iso = fecha.toLocaleDateString('en-CA');
+    cursor.setDate(cursor.getDate() + 1);
   }
-  return fechas;
+  return dias;
+}
+
+function estadoSalida(estado: string) {
+  if (COMPLETADAS.includes(estado)) {
+    return estado === 'cerrada_con_incidencias'
+      ? { label: 'Despachada c/ faltantes', cls: 'chip--warn' }
+      : { label: 'Despachada', cls: 'chip--ok' };
+  }
+  if (estado === 'cancelada') return { label: 'Cancelada', cls: 'chip--danger' };
+  if (['aprobada', 'en_preparacion', 'preparada', 'verificada', 'en_carga', 'cargada', 'en_transito', 'parcialmente_entregada'].includes(estado)) {
+    return { label: 'Programada', cls: 'chip--info' };
+  }
+  return { label: 'Pendiente', cls: 'chip--muted' };
 }
 
 export default function Entregas({ semana, onChange }: { semana: SemanaSeleccionada; onChange: (inicio: string) => void }) {
-  const [rutas, setRutas] = useState<RutaCalendario[]>([]);
+  const [salidas, setSalidas] = useState<Salida[]>([]);
+  const [programacion, setProgramacion] = useState<CatalogoRutas['plantillas']>([]);
+  const [mostrarCompletadas, setMostrarCompletadas] = useState(true);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
-  const fechas = useMemo(() => fechasSemana(semana), [semana.inicio, semana.fin]);
 
   useEffect(() => {
     let vigente = true;
-    setCargando(true);
-    setError('');
-    api<CatalogoEntregas>(`/operacion/catalogo?fecha_referencia=${semana.inicio}`)
-      .then((catalogo) => { if (vigente) setRutas(catalogo.plantillas); })
-      .catch((e) => { if (vigente) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el calendario de entregas.'); })
-      .finally(() => { if (vigente) setCargando(false); });
+    setCargando(true); setError(''); setSalidas([]);
+    Promise.all([
+      api<Salida[]>(`/distribuciones?desde=${semana.inicio}&hasta=${semana.fin}`),
+      api<CatalogoRutas>('/operacion/catalogo'),
+    ]).then(([filas, catalogo]) => {
+      if (!vigente) return;
+      setSalidas(filas);
+      setProgramacion(catalogo.plantillas.filter((plantilla) => plantilla.activo !== false));
+    }).catch((e) => {
+      if (vigente) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el calendario de entregas.');
+    }).finally(() => { if (vigente) setCargando(false); });
     return () => { vigente = false; };
-  }, [semana.inicio]);
+  }, [semana.inicio, semana.fin]);
 
-  return <div className="embedded-operation deliveries-calendar">
+  const dias = diasDeSemana(semana);
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+  const salidasPor = (fecha: string, linea: Linea) => salidas
+    .filter((salida) => salida.fecha_entrega === fecha && salida.linea === linea && salida.estado !== 'cancelada')
+    .filter((salida) => mostrarCompletadas || !COMPLETADAS.includes(salida.estado))
+    .sort((a, b) => a.id - b.id);
+  const estaProgramado = (diaSemana: number, linea: Linea) => programacion.some((plantilla) => plantilla.dia_semana === diaSemana && plantilla.linea === linea);
+
+  return <div className="embedded-operation">
     <header className="embedded-head">
-      <div>
-        <span className="eyebrow">Operación diaria</span>
-        <h2>Entregas</h2>
-        <p className="page-sub">Calendario de rutas configuradas para esta semana.</p>
-      </div>
-      <Link className="btn btn-secondary btn-sm" to={`/semana/ventas?semana=${semana.inicio}`}>Abrir pedidos</Link>
+      <div><span className="eyebrow">Producción a restaurante</span><h2>Entregas</h2><p className="page-sub">Salidas de la semana por día y línea.</p></div>
     </header>
     <WeekPicker semana={semana} onChange={onChange} />
     {error && <p className="error-msg">{error}</p>}
-    {cargando ? <Spinner /> : <div className="delivery-calendar-grid">
-      {fechas.map((fecha) => {
-        const delDia = rutas.filter((ruta) => ruta.dia_semana === fecha.dia);
-        return <section className="delivery-day-card" key={fecha.iso}>
-          <header><strong>{fecha.etiqueta}</strong><small>{delDia.length ? `${delDia.length} ruta${delDia.length === 1 ? '' : 's'}` : 'Sin rutas configuradas'}</small></header>
-          {delDia.length > 0 ? delDia.map((ruta) => <article className="delivery-route-card" key={`${ruta.id}-${ruta.linea}`}>
-            <div className="delivery-route-card__head">
-              <div><strong>{ruta.nombre}</strong><small>{LINEA_LABEL[ruta.linea]} · {ruta.conductor}</small></div>
-              <Link className="link-btn" to={`/semana/ventas?semana=${semana.inicio}&linea=${ruta.linea}`}>Ver pedidos</Link>
-            </div>
-            <ol>{ruta.paradas.map((parada) => <li key={`${ruta.id}-${parada.ubicacion_id}`}><span>{parada.orden}</span>{parada.nombre}{parada.opcional && <em>opcional</em>}</li>)}</ol>
-          </article>) : <p className="muted">No hay entrega programada para este día.</p>}
-        </section>;
-      })}
-    </div>}
+    <div className="history-access-bar"><strong>{mostrarCompletadas ? 'Todas las salidas de la semana' : 'Salidas pendientes'}</strong><HistoryToggle active={mostrarCompletadas} openLabel="Consultar completadas" closeLabel="Volver a pendientes" onToggle={() => setMostrarCompletadas((actual) => !actual)} /></div>
+    {cargando ? <Spinner /> : <section className="dispatch-week-board" aria-label={`Calendario de entregas de la semana ${semana.numero}`}>
+      <header className="dispatch-week-board__head"><div><span>Semana {semana.numero}</span><strong>Día</strong></div><div className="dispatch-line-title dispatch-line-title--carne"><span /><div><strong>Carne</strong><small>Carnicería</small></div></div><div className="dispatch-line-title dispatch-line-title--desechables"><span /><div><strong>Desechables</strong><small>Bodega Adison</small></div></div></header>
+      <div className="dispatch-week-board__body">
+        {dias.map((dia) => <div className={`dispatch-day-row ${dia.fecha === hoy ? 'is-today' : ''}`} key={dia.fecha}>
+          <div className="dispatch-day-label"><strong>{dia.dia}</strong><span>{dia.numero}</span>{dia.fecha === hoy && <small>Hoy</small>}</div>
+          {(['carne', 'desechables'] as const).map((linea) => {
+            const delDia = salidasPor(dia.fecha, linea);
+            const programada = estaProgramado(dia.diaSemana, linea);
+            return <div className={`dispatch-day-cell dispatch-day-cell--${linea}`} key={linea}>
+              {delDia.length ? delDia.map((salida) => {
+                const estado = estadoSalida(salida.estado);
+                return <Link className="dispatch-day-card" key={salida.id} to={`/semana/ventas?semana=${semana.inicio}&linea=${linea}`}>
+                  <div><strong>{salida.total_lineas} partidas</strong><span>Ver salida</span></div><div><span className={`chip chip-estado ${estado.cls}`}>{estado.label}</span><b><Icono name="chevron" /></b></div>
+                </Link>;
+              }) : <div className={`dispatch-day-empty ${programada ? 'is-scheduled' : ''}`}><strong>{programada ? 'Salida programada' : 'Sin salida'}</strong>{programada && <span>Se generará al completar los pedidos</span>}</div>}
+            </div>;
+          })}
+        </div>)}
+      </div>
+    </section>}
   </div>;
 }
