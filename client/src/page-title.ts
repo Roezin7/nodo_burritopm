@@ -12,7 +12,7 @@ const TITULOS: Record<string, string> = {
 };
 
 const PASOS: Record<string, string> = {
-  compras: 'Compras', produccion: 'Producción', ventas: 'Pedidos', inventario: 'Inventario', cierre: 'Cierre',
+  compras: 'Compras', produccion: 'Producción', ventas: 'Pedidos', entregas: 'Entregas', inventario: 'Inventario', cierre: 'Cierre',
 };
 
 export function usePageTitle(usuario: Usuario | null) {

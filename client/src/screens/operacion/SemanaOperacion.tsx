@@ -7,11 +7,13 @@ import { useSemanaGlobal } from '../../semana-context';
 // La operación semanal es grande. Cada área se descarga solo al abrirla para que capturar
 // pedidos no cargue módulos administrativos innecesarios.
 const Pedidos = lazy(() => import('./Pedidos'));
+const Entregas = lazy(() => import('./Entregas'));
 const OperacionAdmin = lazy(() => import('./OperacionAdmin'));
 const InventarioOperacion = lazy(() => import('./InventarioOperacion'));
 
 const operacionDiaria = [
   { clave: 'ventas', label: 'Pedidos' },
+  { clave: 'entregas', label: 'Entregas' },
 ] as const;
 
 const controlSemanal = [
@@ -50,6 +52,7 @@ function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; se
         <div className="cadence-group__head"><span>Durante la semana</span><strong>Operación diaria</strong></div>
         <nav aria-label="Operación diaria">
           <NavLink to={rutaSemana('/semana/ventas')} className={actual === 'ventas' ? 'is-active' : ''}>Pedidos</NavLink>
+          <NavLink to={rutaSemana('/semana/entregas')} className={actual === 'entregas' ? 'is-active' : ''}>Entregas</NavLink>
         </nav>
       </div>
       <div className={!esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
@@ -88,6 +91,7 @@ export default function SemanaOperacion() {
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}
         {actual === 'produccion' && <OperacionAdmin seccion="produccion" integrado semana={semana} />}
         {actual === 'ventas' && <Pedidos integrado semana={semana} />}
+        {actual === 'entregas' && <Entregas semana={semana} onChange={cambiarSemana} />}
         {actual === 'inventario' && <InventarioOperacion integrado semana={semana} />}
         {actual === 'cierre' && <OperacionAdmin seccion="cierre" integrado semana={semana} />}
       </div>
