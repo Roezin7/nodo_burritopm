@@ -18,7 +18,7 @@ const ROLES: { valor: Rol; label: string }[] = [
   { valor: 'admin', label: 'Admin' },
   { valor: 'encargado_sucursal', label: 'Sucursal' },
 ];
-const ROL_LABEL: Record<Rol, string> = { admin: 'Admin', encargado_bodega: 'Acceso anterior de bodega', encargado_sucursal: 'Sucursal' };
+const ROL_LABEL: Record<Rol, string> = { admin: 'Admin', encargado_bodega: 'Operación', encargado_sucursal: 'Sucursal' };
 
 interface FormState {
   id: number | null;
@@ -146,7 +146,7 @@ export default function Usuarios() {
   const filtrados = usuarios.filter((u) => !t || u.nombre.toLowerCase().includes(t) || ROL_LABEL[u.rol].toLowerCase().includes(t));
   const GRUPOS: { rol: Rol; titulo: string }[] = [
     { rol: 'admin', titulo: 'Administradores' },
-    { rol: 'encargado_bodega', titulo: 'Bodega y reparto' },
+    { rol: 'encargado_bodega', titulo: 'Operación' },
     { rol: 'encargado_sucursal', titulo: 'Sucursales' },
   ];
 

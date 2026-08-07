@@ -122,7 +122,7 @@ dashboardRouter.get(
   soloAdmin,
   asyncHandler(async (req, res) => {
     const negocioId = req.auth!.negocioId;
-    const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true, reparto_habilitado: true } });
+    const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true } });
     const tz = negocio?.zona_horaria ?? 'America/Chicago';
     const hoyISO = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const referencia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(hoyISO).parse(req.query.semana);
@@ -181,7 +181,6 @@ dashboardRouter.get(
       prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado }, estado: { not: 'cancelada' } } }),
       prisma.distribuciones.findMany({
         where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.domingo, lte: periodo.sabado }, estado: { notIn: [...DIST_FINAL] } },
-        include: { rutas: { include: { paradas: true } } },
       }),
       prisma.producto_ubicacion.findMany({
         where: { negocio_id: negocioId, habilitado: true, stock_min: { gt: 0 }, ubicaciones: { tipo: 'bodega', activo: true } },
@@ -310,11 +309,6 @@ dashboardRouter.get(
       + produccionesExtraordinarias.reduce((a, p) => a + p.salidas.reduce((x, s) => x + num0(s.cajas), 0), 0);
     const costoProduccion = producciones.reduce((a, p) => a + num0(p.costo_entrada), 0);
     const comprasTotal = comprasSemana.reduce((a, c) => a + num0(c.total), 0);
-    const paradasPendientes = negocio?.reparto_habilitado
-      ? distribuciones.reduce((a, d) => a + d.rutas
-        .filter((r) => r.estado === 'en_curso')
-        .reduce((x, r) => x + r.paradas.filter((p) => !['confirmada', 'con_incidencia', 'omitida'].includes(p.estado)).length, 0), 0)
-      : 0;
     const existenciaDe = new Map(existencias.map((e) => [`${e.ubicacion_id}:${e.product_id}`, num0(e.cantidad_disponible)]));
     const bajoMinimo = parametros.filter((p) => (existenciaDe.get(`${p.ubicacion_id}:${p.product_id}`) ?? 0) < num0(p.stock_min)).length;
     const provisionales = snapshot.length
@@ -324,7 +318,7 @@ dashboardRouter.get(
       ? r2(snapshot.reduce((total, e) => total + num0(e.cantidad_faltante), 0))
       : r2(conciliacion?.cajas_perdidas ?? existencias.reduce((total, e) => total + Math.max(0, -num0(e.cantidad_disponible)), 0));
 
-    const alertas: { tipo: 'inventario' | 'pedido' | 'reparto'; titulo: string; detalle: string; ruta: string }[] = [];
+    const alertas: { tipo: 'inventario' | 'pedido'; titulo: string; detalle: string; ruta: string }[] = [];
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
     if (provisionales > 0) alertas.unshift({
       tipo: 'inventario',
@@ -335,7 +329,6 @@ dashboardRouter.get(
     if (!usarFacturas && proteinasSinPrecio.length > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Venta pendiente de producción', detalle: `Falta calcular costo + $15 de ${proteinasSinPrecio.map((p) => p.nombre).join(', ')}`, ruta: '/semana/produccion' });
     const borradores = pedidos.filter((p) => p.estado === 'borrador').length;
     if (borradores > 0) alertas.push({ tipo: 'pedido', titulo: 'Pedidos sin confirmar', detalle: `${borradores} pedidos permanecen en borrador`, ruta: '/pedidos' });
-    if (paradasPendientes > 0) alertas.push({ tipo: 'reparto', titulo: 'Entregas por completar', detalle: `${paradasPendientes} paradas pendientes`, ruta: '/ruta' });
 
     res.json({
       periodo: { anio: periodo.anio, semana: periodo.semana, inicia_at: iso(periodo.domingo), termina_at: iso(periodo.sabado), estado: semana?.estado ?? 'abierta' },
@@ -352,7 +345,7 @@ dashboardRouter.get(
         balance_neto: r2(snapshot.length && semana ? num0(semana.balance_neto) : inventarioTotal + porCobrar - porPagar),
       },
       produccion: { costo: r2(costoProduccion), cajas: r2(cajasProduccion), yield: pesoEntrada > 0 ? r2((pesoSalida / pesoEntrada) * 100) : 0, compras_semana: r2(comprasTotal) },
-      operacion: { pedidos_confirmados: pedidos.filter((p) => !['borrador', 'cancelado'].includes(p.estado)).length, pedidos_borrador: borradores, distribuciones_abiertas: distribuciones.length, paradas_pendientes: paradasPendientes, productos_bajo_minimo: bajoMinimo },
+      operacion: { pedidos_confirmados: pedidos.filter((p) => !['borrador', 'cancelado'].includes(p.estado)).length, pedidos_borrador: borradores, distribuciones_abiertas: distribuciones.length, productos_bajo_minimo: bajoMinimo },
       alertas,
     });
   }),

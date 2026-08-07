@@ -5,7 +5,6 @@ import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { nombreEnVenta, productosParaPedido } from '../../operationOrder';
 import { crearSemana, inicioDeSemana, type SemanaSeleccionada } from '../../semana';
-import Distribucion from '../distribucion/Distribucion';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 import CapturaSemanalPedidos from './pedidos/CapturaSemanalPedidos';
 import HistorialPedidos from './pedidos/HistorialPedidos';
@@ -29,7 +28,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
   const [notas, setNotas] = useState('');
   const [buscar, setBuscar] = useState('');
-  const [vista, setVista] = useState<'captura' | 'historial' | 'consolidados'>('captura');
+  const [vista, setVista] = useState<'captura' | 'historial'>('captura');
   const [pasoIndividual, setPasoIndividual] = useState<'captura' | 'revision'>('captura');
   const [filtroProductos, setFiltroProductos] = useState<'todos' | 'principales' | 'complementos' | 'seleccionados'>('principales');
   const [historial, setHistorial] = useState<Pedido[]>([]);
@@ -233,8 +232,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       });
       const pendientes = r.cobertura_bpm.flatMap((c) => c.pendientes.map((nombre) => `${c.fecha}: ${nombre}`));
       const detalle = pendientes.length ? ` · cobertura parcial: ${pendientes.slice(0, 3).join(', ')}${pendientes.length > 3 ? ` y ${pendientes.length - 3} más` : ''}` : ' · cobertura completa';
-      const preparaciones = r.preparaciones?.aprobadas ? ` · ${r.preparaciones.aprobadas} preparaciones listas` : '';
-      toast.ok(`${r.confirmados} pedidos confirmados${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}${preparaciones}`);
+      toast.ok(`${r.confirmados} pedidos confirmados${r.borradores_vacios ? ` · ${r.borradores_vacios} borradores vacíos omitidos` : ''}${detalle}`);
       setRefrescoHistorial((n) => n + 1);
       if (desde === hasta && ubicacionId) {
         const rows = await api<Pedido[]>(`/operacion/pedidos?ubicacion_id=${ubicacionId}&linea=${linea}&desde=${desde}&hasta=${hasta}`);
@@ -270,16 +268,16 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
       {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Operación diaria' : 'Pedido del restaurante'}</span><h2>{admin ? 'Pedidos' : 'Hacer pedido'}</h2><p className="page-sub">Semana {semana.numero} · Línea: {linea === 'carne' ? 'Carne' : 'Desechables'}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
         {admin && <div className="order-view-actions">
-          <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button><button className={vista === 'consolidados' ? 'tab tab--on' : 'tab'} onClick={() => setVista('consolidados')}>Preparaciones</button></div>
+          <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button></div>
           <HistoryToggle active={vista === 'historial'} closeLabel="Volver a captura" onToggle={() => setVista(vista === 'historial' ? 'captura' : 'historial')} />
         </div>}
-        {vista !== 'consolidados' && <div className="order-line-context"><span className="segmented-context-label">Línea</span><div className="segmented order-line-switch" role="group" aria-label="Línea de pedidos">
+        <div className="order-line-context"><span className="segmented-context-label">Línea</span><div className="segmented order-line-switch" role="group" aria-label="Línea de pedidos">
         <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('carne')}>Carne</button>
         <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>
-        </div></div>}
+        </div></div>
       </div>
       {error && <p className="error-msg">{error}</p>}
-      {vista === 'consolidados' ? <Distribucion integrado semana={semana} soloRevision /> : vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>
+      {vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>
         <section className="order-capture order-capture--guided">
           <div className="workspace-card order-context order-context--guided">
             {admin || ubicaciones.length > 1 ? <label className="field field--wide"><span>Restaurante</span><select value={ubicacionId} onChange={(e) => { setUbicacionId(e.target.value); setPasoIndividual('captura'); }}>{ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.nombre} · {u.empresa?.nombre}</option>)}</select></label> : <div className="order-context-value"><span>Restaurante</span><strong>{ubic?.nombre ?? 'Sin restaurante asignado'}</strong><small>{ubic?.empresa?.nombre}</small></div>}
@@ -315,7 +313,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
             <div className="order-review__context"><div><span>Restaurante</span><strong>{ubic?.nombre}</strong></div><div><span>Entrega</span><strong>{fecha ? fechaEntregaCorta(fecha) : 'Sin fecha'}</strong></div><div><span>Línea</span><strong>{linea === 'carne' ? 'Carne' : 'Desechables'}</strong></div></div>
             <div className="order-review__list">{seleccionados.map((p) => <div key={p.id}><span><strong>{nombreProducto(p)}</strong><small>{unidadCorta(p)}</small></span><b>{Number(cantidades[p.id] || 0).toLocaleString('es-MX')}</b></div>)}</div>
             <label className="field order-notes"><span>Notas del pedido <em>opcional</em></span><textarea disabled={cargandoPedido || !editable} rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Instrucciones especiales, sustituciones o entrega…" /></label>
-            <p className="order-review__explanation">Al confirmar, administración podrá incluir este pedido en preparación y despacho.</p>
+            <p className="order-review__explanation">Al confirmar, el sistema registra el pedido para su despacho automático.</p>
           </section>}
         </section>
         <aside className="order-summary order-summary--guided">

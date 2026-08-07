@@ -21,7 +21,6 @@ export interface ResultadoConfirmacion {
   confirmados: number;
   borradores_vacios: number;
   cobertura_bpm: { fecha: string; total: number; confirmados: number; pendientes: string[] }[];
-  preparaciones?: { creadas: number; existentes: number; aprobadas: number };
 }
 
 export interface EntregaOpcion {

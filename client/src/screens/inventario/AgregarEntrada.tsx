@@ -3,7 +3,7 @@ import { api, nuevaClaveIdempotencia } from '../../api';
 import { useToast, mensajeError } from '../../toast';
 import type { ProdCat } from './types';
 
-/** Panel "Registrar entrada" a la bodega (compra/recepción): sube stock y recalcula costo. */
+/** Panel "Registrar entrada" al inventario central: compra de proveedor, sube stock y recalcula costo. */
 export default function AgregarEntrada({ abierto, onClose, onHecho }: { abierto: boolean; onClose: () => void; onHecho: () => void }) {
   const toast = useToast();
   const [productos, setProductos] = useState<ProdCat[]>([]);
@@ -53,7 +53,7 @@ export default function AgregarEntrada({ abierto, onClose, onHecho }: { abierto:
       <div className="form-pro-head">
         <div className="form-pro-title">
           <strong>Registrar entrada a bodega</strong>
-          <small className="muted">Compra o recepción de proveedor</small>
+          <small className="muted">Compra de proveedor o ajuste de entrada</small>
         </div>
         <button className="link-btn" onClick={cerrar}>Cerrar</button>
       </div>

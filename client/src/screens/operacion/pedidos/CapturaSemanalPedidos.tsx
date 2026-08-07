@@ -448,7 +448,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
           const avance = await api<ResultadoConfirmacion>('/operacion/pedidos/confirmar-todos', { method: 'POST', body: { linea, desde: semana.inicio, hasta: semana.fin } });
           const faltantes = avance.cobertura_bpm.flatMap((c) => c.pendientes);
           const cobertura = faltantes.length ? ` · cobertura parcial: ${faltantes.length} sucursal${faltantes.length === 1 ? '' : 'es'} sin pedido` : ' · cobertura completa';
-          toast.ok(`${avance.preparaciones?.aprobadas ?? 0} preparaciones listas${cobertura}.`);
+          toast.ok(`Pedidos confirmados${cobertura}.`);
           setRefresco((n) => n + 1); onActualizado();
         } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo completar la semana.'); }
         finally { setBusy(false); }
@@ -474,9 +474,8 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
           method: 'POST', body: { linea, desde: semana.inicio, hasta: semana.fin },
         });
         const faltantes = avance.cobertura_bpm.flatMap((c) => c.pendientes);
-        const preparadas = avance.preparaciones?.aprobadas ?? 0;
         const cobertura = faltantes.length ? ` · cobertura parcial: ${faltantes.length} sucursal${faltantes.length === 1 ? '' : 'es'} sin pedido` : ' · cobertura completa';
-        toast.ok(`${resultado.guardados} pedidos confirmados${preparadas ? ` · ${preparadas} preparaciones listas` : ''}${cobertura}.`);
+        toast.ok(`${resultado.guardados} pedidos confirmados${cobertura}.`);
       } else {
         toast.ok(`${resultado.guardados} ventas actualizadas.`);
       }

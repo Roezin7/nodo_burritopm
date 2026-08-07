@@ -1,24 +1,17 @@
 import { Navigate, NavLink, useParams } from 'react-router-dom';
 import { lazy } from 'react';
 import { useAuth, type Rol } from '../../auth';
-import { useOperacionConfig } from '../../operacion-config';
-import Spinner from '../../components/Spinner';
 import WeekPicker from '../../components/WeekPicker';
 import { useSemanaGlobal } from '../../semana-context';
 
-// La operación semanal es grande. Cada área se descarga solo al abrirla, evitando que una
-// conexión lenta cargue Compras, Producción, Reparto, etc. para capturar una sola venta.
+// La operación semanal es grande. Cada área se descarga solo al abrirla para que capturar
+// pedidos no cargue módulos administrativos innecesarios.
 const Pedidos = lazy(() => import('./Pedidos'));
 const OperacionAdmin = lazy(() => import('./OperacionAdmin'));
 const InventarioOperacion = lazy(() => import('./InventarioOperacion'));
-const Bodega = lazy(() => import('../bodega/Bodega'));
-const Ruta = lazy(() => import('../ruta/Ruta'));
-const Recepcion = lazy(() => import('../recepcion/Recepcion'));
 
 const operacionDiaria = [
   { clave: 'ventas', label: 'Pedidos' },
-  { clave: 'despacho', label: 'Despacho' },
-  { clave: 'reparto', label: 'Reparto' },
 ] as const;
 
 const controlSemanal = [
@@ -30,9 +23,6 @@ const controlSemanal = [
 
 const tareasPorRol = [
   { clave: 'ventas', label: 'Pedidos', roles: ['encargado_sucursal'] },
-  { clave: 'despacho', label: 'Despacho', roles: ['encargado_bodega'] },
-  { clave: 'reparto', label: 'Reparto', roles: ['encargado_bodega'] },
-  { clave: 'recepcion', label: 'Recepción', roles: ['encargado_sucursal'] },
   { clave: 'inventario', label: 'Inventario', roles: ['encargado_bodega'] },
 ] as const;
 
@@ -52,15 +42,14 @@ function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; se
       <p>{!semana.actual
         ? 'Estás consultando una semana anterior. Sus registros y resultados se conservan sin cambios.'
         : esSabadoActual
-          ? 'Continúan los pedidos y despachos; hoy también se registran compras y producción para conciliar y cerrar.'
-          : 'Captura pedidos y prepara despachos. El inventario puede ser negativo provisionalmente hasta la regularización del sábado.'}</p>
+          ? 'Continúan los pedidos; hoy también se registran compras y producción para conciliar y cerrar.'
+          : 'Captura pedidos. El sistema vincula el despacho automáticamente y el inventario puede ser negativo provisionalmente hasta la regularización del sábado.'}</p>
     </div>
     <div className="weekly-cadence__groups">
       <div className={esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
         <div className="cadence-group__head"><span>Durante la semana</span><strong>Operación diaria</strong></div>
         <nav aria-label="Operación diaria">
           <NavLink to={rutaSemana('/semana/ventas')} className={actual === 'ventas' ? 'is-active' : ''}>Pedidos</NavLink>
-          <NavLink to={rutaSemana('/semana/despacho')} className={actual === 'despacho' ? 'is-active' : ''}>Despacho</NavLink>
         </nav>
       </div>
       <div className={!esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>
@@ -78,28 +67,18 @@ function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; se
 
 export default function SemanaOperacion() {
   const { usuario } = useAuth();
-  const { repartoHabilitado, cargando: cargandoConfig } = useOperacionConfig();
   const { paso } = useParams();
   const { semana, seleccionarSemana: cambiarSemana, rutaSemana } = useSemanaGlobal();
   if (!usuario) return null;
-  if (cargandoConfig) return <Spinner />;
-  if (paso === 'reparto' && !repartoHabilitado) {
-    const destino = usuario.rol === 'encargado_sucursal' ? '/semana/recepcion' : '/semana/despacho';
-    return <Navigate to={rutaSemana(destino)} replace />;
+  if (paso === 'despacho' || paso === 'reparto' || paso === 'seguimiento' || paso === 'recepcion') {
+    return <Navigate to={rutaSemana('/semana/ventas')} replace />;
   }
-
-  const operacionDiariaVisible = operacionDiaria.filter((p) => p.clave !== 'reparto' || repartoHabilitado);
 
   if (usuario.rol === 'admin') {
     if (paso === 'pedidos') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
     if (paso === 'preparacion') return <Navigate to={rutaSemana('/semana/ventas')} replace />;
-    if (paso === 'seguimiento') return <Navigate to={rutaSemana('/semana/despacho')} replace />;
-    if (paso === 'recepcion') return <div className="page weekly-operation weekly-operation--simple">
-      <WeekPicker semana={semana} onChange={cambiarSemana} />
-      <div className="weekly-operation__content"><Recepcion integrado semana={semana} /></div>
-    </div>;
     const actual = (paso ?? 'ventas') as AreaAdmin;
-    const todos = [...operacionDiariaVisible, ...controlSemanal];
+    const todos = [...operacionDiaria, ...controlSemanal];
     if (!todos.some((p) => p.clave === actual)) return <Navigate to={rutaSemana('/semana/ventas')} replace />;
     return <div className="page weekly-operation weekly-operation--simple">
       <WeekPicker semana={semana} onChange={cambiarSemana} />
@@ -109,8 +88,6 @@ export default function SemanaOperacion() {
         {actual === 'compras' && <OperacionAdmin seccion="compras" integrado semana={semana} />}
         {actual === 'produccion' && <OperacionAdmin seccion="produccion" integrado semana={semana} />}
         {actual === 'ventas' && <Pedidos integrado semana={semana} />}
-        {actual === 'despacho' && <Bodega integrado semana={semana} />}
-        {actual === 'reparto' && <Ruta integrado semana={semana} />}
         {actual === 'inventario' && <InventarioOperacion integrado semana={semana} />}
         {actual === 'cierre' && <OperacionAdmin seccion="cierre" integrado semana={semana} />}
       </div>
@@ -119,15 +96,14 @@ export default function SemanaOperacion() {
 
   const permitidos = tareasPorRol.filter((p) =>
     (p.roles as readonly Rol[]).includes(usuario.rol)
-    && (p.clave !== 'reparto' || repartoHabilitado)
-    && (p.clave !== 'recepcion' || repartoHabilitado));
+    );
   const alias = paso === 'pedidos' ? 'ventas' : paso;
   const inicio = permitidos[0]?.clave ?? 'ventas';
   if (!alias || !permitidos.some((p) => p.clave === alias)) return <Navigate to={rutaSemana(`/semana/${inicio}`)} replace />;
   const actual = alias as Tarea;
   const tareasNavegacion = permitidos;
 
-  const tituloRol = usuario.rol === 'encargado_sucursal' ? 'Pedido y recepción' : 'Trabajo de bodega';
+  const tituloRol = usuario.rol === 'encargado_sucursal' ? 'Pedido' : 'Operación';
   return <div className="page weekly-operation weekly-operation--simple weekly-operation--field">
     {permitidos.length > 1 && <header className="weekly-operation__head weekly-operation__head--simple"><div><span className="eyebrow">Trabajo del día</span><h1>{tituloRol}</h1></div></header>}
     <WeekPicker semana={semana} onChange={cambiarSemana} />
@@ -136,9 +112,6 @@ export default function SemanaOperacion() {
     </nav>}
     <div className="weekly-operation__content">
       {actual === 'ventas' && <Pedidos integrado semana={semana} />}
-      {actual === 'despacho' && <Bodega integrado semana={semana} />}
-      {actual === 'reparto' && <Ruta integrado semana={semana} />}
-      {actual === 'recepcion' && <Recepcion integrado semana={semana} />}
       {actual === 'inventario' && <InventarioOperacion integrado semana={semana} />}
     </div>
   </div>;

@@ -12,7 +12,7 @@ interface Panorama {
   inventario: { total: number; materia_prima_fresca: number; materia_prima_congelada: number; carne_terminada: number; desechables: number };
   cartera: { por_cobrar: number; facturas_pendientes: number; por_pagar: number; compras_pendientes: number; balance_neto: number };
   produccion: { costo: number; cajas: number; yield: number; compras_semana: number };
-  operacion: { pedidos_confirmados: number; pedidos_borrador: number; distribuciones_abiertas: number; paradas_pendientes: number; productos_bajo_minimo: number };
+  operacion: { pedidos_confirmados: number; pedidos_borrador: number; distribuciones_abiertas: number; productos_bajo_minimo: number };
   alertas: { tipo: string; titulo: string; detalle: string; ruta: string }[];
 }
 
@@ -82,8 +82,7 @@ export default function PanelAdmin() {
     <section className="card overview-card operation-strip">
       <div><small>Pedidos confirmados</small><strong>{p.operacion.pedidos_confirmados}</strong></div>
       <div className={p.operacion.pedidos_borrador ? 'strip-warn' : ''}><small>Sin confirmar</small><strong>{p.operacion.pedidos_borrador}</strong></div>
-      <div><small>Distribuciones abiertas</small><strong>{p.operacion.distribuciones_abiertas}</strong></div>
-      <div className={p.operacion.paradas_pendientes ? 'strip-warn' : ''}><small>Paradas pendientes</small><strong>{p.operacion.paradas_pendientes}</strong></div>
+      <div><small>Despachos vinculados</small><strong>{p.operacion.distribuciones_abiertas}</strong></div>
       <div className={p.operacion.productos_bajo_minimo ? 'strip-warn' : ''}><small>Bajo mínimo</small><strong>{p.operacion.productos_bajo_minimo}</strong></div>
     </section>
   </div>;

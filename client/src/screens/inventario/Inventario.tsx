@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../api';
 import { useAuth, type UbicacionAsignada } from '../../auth';
 import { useToast, mensajeError } from '../../toast';
-import { FlujoStepper } from '../../flujo';
 import UbicacionPicker, { type OpcionUbic } from '../../components/UbicacionPicker';
 import Spinner from '../../components/Spinner';
 import CollapsibleSection from '../../components/CollapsibleSection';
@@ -42,7 +41,7 @@ export default function Inventario() {
   const bodega = ubicaciones.find((u) => u.tipo === 'bodega') ?? null;
   const ubicActiva = ubicaciones.find((u) => String(u.id) === ubicId) ?? null;
   // Lista de sucursales para el destino de una salida/transferencia. El admin ya trae todas las
-  // ubicaciones; bodega y reparto solo tiene asignada su bodega, así que se piden aparte.
+  // ubicaciones; el rol operativo central solo tiene asignada su ubicación principal.
   const [sucursalesDestino, setSucursalesDestino] = useState<UbicacionAsignada[]>([]);
   const sucursales = esAdmin ? ubicaciones.filter((u) => u.tipo === 'sucursal') : sucursalesDestino;
   useEffect(() => {
@@ -139,7 +138,7 @@ export default function Inventario() {
   const t = q.trim().toLowerCase();
   const histFiltrado = inventarios.filter((c) => !t || fechaLarga(c.fecha).toLowerCase().includes(t) || c.estado.toLowerCase().includes(t));
 
-  // Solo el historial de inventarios (lista). Se reutiliza en bodega y sucursales.
+  // Solo el historial de inventarios (lista). Se reutiliza en la ubicación central y sucursales.
   const renderHistorial = (esPedido = false) => (
     <CollapsibleSection title={esPedido ? 'Historial de pedidos' : 'Historial de inventarios'} count={histFiltrado.length} defaultOpen={false}>
       {inventarios.length > 8 && (
@@ -185,7 +184,6 @@ export default function Inventario() {
             <p className="page-sub">Gestiona el inventario de la bodega central y revisa el de cada sucursal.</p>
           </div>
         </header>
-        <FlujoStepper activo="conteo" />
 
         <div className="tabs">
           <button className={modo === 'bodega' ? 'tab tab--on' : 'tab'} onClick={() => { setModo('bodega'); if (bodega) setUbicId(String(bodega.id)); }}>Bodega central</button>
@@ -233,7 +231,7 @@ export default function Inventario() {
     );
   }
 
-  // ── Bodega y reparto: gestiona su bodega (sin conteo programado, es a demanda) ──────
+  // ── Rol operativo central: gestiona inventario a demanda ───────────────────────────
   const esBodegaRol = ubicActiva?.tipo === 'bodega';
   if (esBodegaRol) {
     return (
@@ -244,7 +242,6 @@ export default function Inventario() {
             <p className="page-sub">Registra entradas, salidas y corrige cantidades cuando haga falta.</p>
           </div>
         </header>
-        <FlujoStepper activo="conteo" />
         {error && <p className="error-msg">{error}</p>}
         <StockActual key={`${ubicId}:${stockKey}`} ubicId={ubicId} nombre={ubicActiva.nombre} />
         <AccionesBodega
@@ -280,7 +277,6 @@ export default function Inventario() {
           <p className="page-sub">Elige cuánto producto quieres que te envíen.</p>
         </div>
       </header>
-      <FlujoStepper activo="conteo" />
 
       {ubicaciones.length === 0 ? (
         <p className="muted">No tienes ubicaciones asignadas. Pide a un administrador que te asigne una.</p>

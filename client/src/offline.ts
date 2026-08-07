@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { openDB, type IDBPDatabase } from 'idb';
 
-// Cola limitada a capturas idempotentes. Movimientos financieros, carga, recepción, cierres y
+// Cola limitada a capturas idempotentes. Movimientos financieros, inventario, cierres y
 // eliminaciones requieren confirmación inmediata del servidor y nunca deben reproducirse tarde.
 
 export interface PendingReq {

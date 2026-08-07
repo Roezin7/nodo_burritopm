@@ -22,11 +22,11 @@ function setUltimoUsuario(id: number) {
   }
 }
 
-/** Etiqueta visible del rol. `encargado_bodega` cubre bodega + reparto (rol unificado). */
+/** Etiqueta visible del rol operativo heredado. */
 export function rolLabel(rol: Rol): string {
   switch (rol) {
     case 'admin': return 'Admin';
-    case 'encargado_bodega': return 'Bodega y reparto';
+    case 'encargado_bodega': return 'Operación';
     case 'encargado_sucursal': return 'Sucursal';
   }
 }

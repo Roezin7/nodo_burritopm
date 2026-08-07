@@ -42,23 +42,15 @@ const DIAS = [
 ];
 
 /** Ajustes de la operación directa y días de conteo. */
-const AUTO_CIERRE_OPCIONES = [
-  { h: 0, label: 'Nunca' },
-  { h: 12, label: '12 h' },
-  { h: 24, label: '24 h' },
-  { h: 48, label: '48 h' },
-];
-
 function Operacion() {
   const [cargando, setCargando] = useState(true);
   const [dias, setDias] = useState<number[]>([]);
-  const [autoCierre, setAutoCierre] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api<{ inventario_dias: number[]; auto_cierre_horas: number }>('/negocio')
-      .then((n) => { setDias(n.inventario_dias ?? []); setAutoCierre(n.auto_cierre_horas ?? 0); })
+    api<{ inventario_dias: number[] }>('/negocio')
+      .then((n) => { setDias(n.inventario_dias ?? []); })
       .catch(() => setError('No se pudo cargar la configuración'))
       .finally(() => setCargando(false));
   }, []);
@@ -83,12 +75,6 @@ function Operacion() {
     if (!await guardar({ inventario_dias: next })) setDias(anterior);
   }
 
-  async function elegirAutoCierre(h: number) {
-    const anterior = autoCierre;
-    setAutoCierre(h);
-    if (!await guardar({ auto_cierre_horas: h })) setAutoCierre(anterior);
-  }
-
   if (cargando) return <Spinner />;
   return (
     <>
@@ -111,24 +97,6 @@ function Operacion() {
         {dias.length === 0 && <small>Sin programación automática</small>}
       </div>
 
-      <div className="settings-card">
-        <strong>Auto-cierre de recepción</strong>
-        <div className="dias-selector">
-          {AUTO_CIERRE_OPCIONES.map((o) => (
-            <button
-              key={o.h}
-              type="button"
-              className={`dia-pill ${autoCierre === o.h ? 'dia-pill--on' : ''}`}
-              disabled={busy}
-              aria-pressed={autoCierre === o.h}
-              onClick={() => void elegirAutoCierre(o.h)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-        {autoCierre === 0 && <small>Las recepciones quedan pendientes hasta confirmarlas</small>}
-      </div>
       {error && <p className="error-msg">{error}</p>}
     </>
   );
@@ -152,7 +120,7 @@ export default function Configuracion() {
           {GRUPOS.map((grupo) => <div key={grupo.titulo}><span>{grupo.titulo}</span>{grupo.items.map((item) => <button key={item.clave} className={tab === item.clave ? 'is-active' : ''} onClick={() => setTab(item.clave)}><strong>{item.label}</strong><small>{item.descripcion}</small></button>)}</div>)}
         </nav>
         <main className="configuration-content">
-          <header className="configuration-content__head"><div><h2>{actual.label}</h2><p>{actual.descripcion}</p></div>{tab === 'operacion' && <Link className="btn btn-secondary btn-sm" to="/rutas">Editar rutas</Link>}</header>
+          <header className="configuration-content__head"><div><h2>{actual.label}</h2><p>{actual.descripcion}</p></div>{tab === 'operacion' && <Link className="btn btn-secondary btn-sm" to="/rutas">Editar rutas de entrega</Link>}</header>
           <div className="tab-body">
             {tab === 'ubicaciones' && <Ubicaciones />}
             {tab === 'usuarios' && <Usuarios />}

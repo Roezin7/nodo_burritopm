@@ -8,12 +8,11 @@ const TITULOS: Record<string, string> = {
   '/incidencias': 'Incidencias',
   '/configuracion': 'Configuración',
   '/conteos': 'Conteos',
-  '/rutas': 'Rutas',
+  '/rutas': 'Rutas de entrega',
 };
 
 const PASOS: Record<string, string> = {
-  compras: 'Compras', produccion: 'Producción', ventas: 'Pedidos', despacho: 'Despacho',
-  reparto: 'Reparto', recepcion: 'Recepción', inventario: 'Inventario', cierre: 'Cierre',
+  compras: 'Compras', produccion: 'Producción', ventas: 'Pedidos', inventario: 'Inventario', cierre: 'Cierre',
 };
 
 export function usePageTitle(usuario: Usuario | null) {

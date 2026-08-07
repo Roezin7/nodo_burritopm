@@ -1,6 +1,6 @@
 import { Icono } from '../../icons';
 
-/** Tres acciones claras de la bodega: entrada (suma), salida (resta) y contar (conteo físico). */
+/** Tres acciones claras de inventario central: entrada, salida y conteo físico. */
 export default function AccionesBodega({ busy, entradaAbierta, salidaAbierta, onToggleEntrada, onToggleSalida, onTomarInventario }: {
   busy: boolean; entradaAbierta: boolean; salidaAbierta: boolean;
   onToggleEntrada: () => void; onToggleSalida: () => void; onTomarInventario: () => void;
@@ -18,7 +18,7 @@ export default function AccionesBodega({ busy, entradaAbierta, salidaAbierta, on
         <span className="accion-ico accion-ico--out" aria-hidden="true">−</span>
         <span className="accion-tx">
           <strong>Registrar salida</strong>
-          <small>Salió producto fuera del reparto. Resta del stock.</small>
+          <small>Salió producto sin pedido regular. Resta del stock.</small>
         </span>
       </button>
       <button type="button" className="accion-tile" disabled={busy} onClick={onTomarInventario}>

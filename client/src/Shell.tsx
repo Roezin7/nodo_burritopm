@@ -4,7 +4,6 @@ import { useAuth, rolLabel } from './auth';
 import { useTema } from './theme';
 import { Icono } from './icons';
 import BurritoLockup from './brand/BurritoLockup';
-import { useOperacionConfig } from './operacion-config';
 import { api, ApiError } from './api';
 import { useSemanaGlobal } from './semana-context';
 import Modal from './components/Modal';
@@ -20,15 +19,11 @@ interface Item {
   grupo: 'general' | 'operacion_diaria' | 'control_semanal' | 'administracion';
   soloAdmin?: boolean;
   roles?: Rol[]; // si se define, solo estos roles ven el ítem
-  requiereReparto?: boolean;
 }
 
 const ITEMS: Item[] = [
   { ruta: '/', label: 'Resumen', icono: 'home', grupo: 'general' },
   { ruta: '/semana/ventas', label: 'Pedidos', icono: 'clipboard', grupo: 'operacion_diaria', roles: ['admin', 'encargado_sucursal'] },
-  { ruta: '/semana/despacho', label: 'Despacho', icono: 'truck', grupo: 'operacion_diaria', roles: ['admin', 'encargado_bodega'] },
-  { ruta: '/semana/reparto', label: 'Reparto', icono: 'map', grupo: 'operacion_diaria', roles: ['admin', 'encargado_bodega'], requiereReparto: true },
-  { ruta: '/semana/recepcion', label: 'Recepción', icono: 'inbox', grupo: 'operacion_diaria', roles: ['encargado_sucursal'], requiereReparto: true },
   { ruta: '/semana/compras', label: 'Compras', icono: 'cart', grupo: 'control_semanal', soloAdmin: true },
   { ruta: '/semana/produccion', label: 'Producción', icono: 'factory', grupo: 'control_semanal', soloAdmin: true },
   { ruta: '/semana/inventario', label: 'Inventario', icono: 'boxes', grupo: 'control_semanal', roles: ['admin', 'encargado_bodega'] },
@@ -84,7 +79,6 @@ function AvisoPinTemporal() {
 export default function Shell({ children }: { children: ReactNode }) {
   const { usuario, logout } = useAuth();
   const { tema, alternar } = useTema();
-  const { repartoHabilitado } = useOperacionConfig();
   const { pathname } = useLocation();
   const { rutaSemana } = useSemanaGlobal();
   const [masAbierto, setMasAbierto] = useState(false);
@@ -92,7 +86,6 @@ export default function Shell({ children }: { children: ReactNode }) {
   const items = ITEMS.filter((i) => {
     if (i.soloAdmin && usuario?.rol !== 'admin') return false;
     if (i.roles && !(usuario && i.roles.includes(usuario.rol))) return false;
-    if (i.requiereReparto && !repartoHabilitado) return false;
     return true;
   });
 
@@ -168,7 +161,7 @@ export default function Shell({ children }: { children: ReactNode }) {
             <span className="ctx-negocio">Burrito Parrilla</span>
             {usuario && (
               <span className="ctx-user">
-                {usuario.nombre} · {usuario.rol === 'encargado_bodega' && !repartoHabilitado ? 'Bodega' : rolLabel(usuario.rol)}
+                {usuario.nombre} · {rolLabel(usuario.rol)}
               </span>
             )}
           </div>

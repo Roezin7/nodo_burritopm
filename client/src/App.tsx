@@ -4,7 +4,6 @@ import { ToastProvider } from './toast';
 import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
 import { Component, Suspense, lazy, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
-import { OperacionConfigProvider } from './operacion-config';
 import { SemanaProvider } from './semana-context';
 import { DialogProvider } from './dialog';
 import { usePageTitle } from './page-title';
@@ -100,9 +99,9 @@ function AppBody() {
         <Route path="/facturacion" element={<SoloRol roles={['admin']}><Facturacion /></SoloRol>} />
         <Route path="/operacion" element={<Navigate to="/semana" replace />} />
         <Route path="/distribucion" element={<Navigate to="/semana/ventas" replace />} />
-        <Route path="/bodega" element={<Navigate to="/semana/despacho" replace />} />
-        <Route path="/ruta" element={<Navigate to="/semana/reparto" replace />} />
-        <Route path="/recepcion" element={<Navigate to="/semana/recepcion" replace />} />
+        <Route path="/bodega" element={<Navigate to="/semana/ventas" replace />} />
+        <Route path="/ruta" element={<Navigate to="/semana/ventas" replace />} />
+        <Route path="/recepcion" element={<Navigate to="/semana/ventas" replace />} />
         <Route path="/incidencias" element={<SoloRol roles={['admin']}><Incidencias /></SoloRol>} />
         <Route path="/configuracion" element={<SoloRol roles={['admin']}><Configuracion /></SoloRol>} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -151,9 +150,7 @@ export default function App() {
           <AuthProvider>
             <BrowserRouter>
               <SemanaProvider>
-                <OperacionConfigProvider>
-                  <AppBody />
-                </OperacionConfigProvider>
+                <AppBody />
               </SemanaProvider>
             </BrowserRouter>
           </AuthProvider>
