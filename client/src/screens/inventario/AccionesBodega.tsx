@@ -11,21 +11,21 @@ export default function AccionesBodega({ busy, entradaAbierta, salidaAbierta, on
         <span className="accion-ico accion-ico--in" aria-hidden="true">＋</span>
         <span className="accion-tx">
           <strong>Registrar entrada</strong>
-          <small>Llegó mercancía o compra. Suma al stock.</small>
+          <small>Suma una compra o entrada.</small>
         </span>
       </button>
       <button type="button" className={`accion-tile ${salidaAbierta ? 'accion-tile--on' : ''}`} onClick={onToggleSalida}>
         <span className="accion-ico accion-ico--out" aria-hidden="true">−</span>
         <span className="accion-tx">
           <strong>Registrar salida</strong>
-          <small>Salió producto sin pedido regular. Resta del stock.</small>
+          <small>Registra una salida excepcional.</small>
         </span>
       </button>
       <button type="button" className="accion-tile" disabled={busy} onClick={onTomarInventario}>
         <span className="accion-ico accion-ico--count" aria-hidden="true"><Icono name="clipboard" size={20} /></span>
         <span className="accion-tx">
           <strong>Contar inventario</strong>
-          <small>Conteo físico completo para fijar las cantidades exactas.</small>
+          <small>Fija el stock físico.</small>
         </span>
       </button>
     </div>

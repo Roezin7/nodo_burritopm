@@ -22,7 +22,7 @@ function TareaHoy() {
         if (usuario.rol === 'encargado_sucursal') {
           const suc = usuario.ubicaciones?.find((u) => u.tipo === 'sucursal');
           if (!suc) return null;
-          return { titulo: 'Captura tu pedido', sub: 'Carne y desechables por fecha de entrega', ruta: '/pedidos' };
+          return { titulo: 'Captura tu pedido', sub: 'Carne y desechables', ruta: '/pedidos' };
         }
         if (usuario.rol === 'encargado_bodega') return null;
         if (usuario.rol === 'admin') {
@@ -63,12 +63,12 @@ interface Modulo {
 }
 
 const MODULOS: Modulo[] = [
-  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables por restaurante y semana', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
-  { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Materia prima, lotes y cuentas por pagar', ruta: '/semana/compras', soloAdmin: true },
-  { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Yield, costo por caja y markup', ruta: '/semana/produccion', soloAdmin: true },
-  { clave: 'inventario', titulo: 'Inventario', icono: 'boxes', desc: 'Bodega Adison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
-  { clave: 'rutas', titulo: 'Rutas de entrega', icono: 'map', desc: 'Orden de entrega por día', ruta: '/rutas', soloAdmin: true },
-  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cobros, pagos y facturas pendientes', ruta: '/facturacion', soloAdmin: true },
+  { clave: 'pedidos', titulo: 'Pedidos', icono: 'clipboard', desc: 'Carne y desechables', ruta: '/semana/ventas', roles: ['admin', 'encargado_sucursal'] },
+  { clave: 'compras', titulo: 'Compras', icono: 'cart', desc: 'Compras y cuentas por pagar', ruta: '/semana/compras', soloAdmin: true },
+  { clave: 'produccion', titulo: 'Producción', icono: 'factory', desc: 'Costo y rendimiento', ruta: '/semana/produccion', soloAdmin: true },
+  { clave: 'inventario', titulo: 'Inventario', icono: 'boxes', desc: 'Adison y Carnicería', ruta: '/semana/inventario', roles: ['admin', 'encargado_bodega'] },
+  { clave: 'rutas', titulo: 'Rutas', icono: 'map', desc: 'Orden de entrega', ruta: '/rutas', soloAdmin: true },
+  { clave: 'facturacion', titulo: 'Facturación', icono: 'receipt', desc: 'Cobros y facturas', ruta: '/facturacion', soloAdmin: true },
   { clave: 'incidencias', titulo: 'Incidencias', icono: 'alert', desc: 'Diferencias y alertas', ruta: '/incidencias', soloAdmin: true },
   { clave: 'ajustes', titulo: 'Configuración', icono: 'settings', desc: 'Ubicaciones, usuarios, catálogo', ruta: '/configuracion', soloAdmin: true },
 ];
@@ -94,7 +94,7 @@ export default function Home() {
 
   if (esAdmin) return (
     <div className="page admin-home">
-      <header className="page-head operation-page-head"><div><span className="eyebrow">Hoy</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Primero atiende lo pendiente. La semana conserva el contexto completo de la operación.</p></div><Link className="btn btn-secondary" to="/semana/ventas">Abrir operación</Link></header>
+      <header className="page-head operation-page-head"><div><span className="eyebrow">Hoy</span><h1>{saludo()}, {usuario.nombre}</h1><p className="page-sub">Atiende lo pendiente.</p></div><Link className="btn btn-secondary" to="/semana/ventas">Abrir operación</Link></header>
       <ActivarAvisos />
       <TareaHoy />
       <PanelAdmin />
@@ -106,7 +106,7 @@ export default function Home() {
       <header className="page-head">
         <div>
           <h1>{saludo()}, {usuario.nombre}</h1>
-          <p className="page-sub">¿Qué quieres revisar hoy?</p>
+          <p className="page-sub">¿Qué necesitas?</p>
         </div>
       </header>
 

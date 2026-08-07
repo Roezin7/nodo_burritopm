@@ -62,8 +62,8 @@ export default function SyncCenter() {
       <div className={`sync-center__status ${!estado.online ? 'is-offline' : requiereAtencion ? 'needs-attention' : ''}`} role="status" aria-live="polite">
         <span className="sync-center__status-icon"><Icono name={!estado.online ? 'wifiOff' : requiereAtencion ? 'alert' : estado.sincronizando ? 'refresh' : 'checks'} size={22} /></span>
         <div>
-          <strong>{!estado.online ? 'Trabajando sin conexión' : requiereAtencion ? 'Hay cambios que necesitan revisión' : estado.sincronizando ? 'Enviando cambios…' : estado.pendientes > 0 ? 'Cambios listos para enviar' : 'Todo está al día'}</strong>
-          <span>{!estado.online ? 'Pedidos e inventarios seguros se enviarán al recuperar la conexión.' : hora(estado.ultimaSincronizacion)}</span>
+          <strong>{!estado.online ? 'Trabajando sin conexión' : requiereAtencion ? 'Cambios por revisar' : estado.sincronizando ? 'Enviando cambios…' : estado.pendientes > 0 ? 'Cambios listos para enviar' : 'Todo está al día'}</strong>
+          <span>{!estado.online ? 'Se enviarán al recuperar la conexión.' : hora(estado.ultimaSincronizacion)}</span>
         </div>
       </div>
 
@@ -73,7 +73,7 @@ export default function SyncCenter() {
       </div>
 
       {estado.fallidos.length > 0 && <div className="sync-center__issues">
-        <h3>Cambios que necesitan atención</h3>
+        <h3>Cambios por revisar</h3>
         {estado.fallidos.map((fallo) => <article key={fallo.id}>
           <span className="sync-center__issue-icon"><Icono name="alert" size={18} /></span>
           <div><strong>No se pudo enviar un cambio</strong><p>{fallo.error}</p><small>{new Date(fallo.ts).toLocaleString('es-MX')}</small></div>

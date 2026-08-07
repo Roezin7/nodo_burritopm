@@ -84,7 +84,7 @@ export default function Entregas({ semana, onChange }: { semana: SemanaSeleccion
 
   return <div className="embedded-operation">
     <header className="embedded-head">
-      <div><span className="eyebrow">Producción a restaurante</span><h2>Entregas</h2><p className="page-sub">Salidas de la semana por día y línea.</p></div>
+      <div><span className="eyebrow">Producción a restaurante</span><h2>Entregas</h2><p className="page-sub">Salidas de la semana.</p></div>
     </header>
     <WeekPicker semana={semana} onChange={onChange} />
     {error && <p className="error-msg">{error}</p>}

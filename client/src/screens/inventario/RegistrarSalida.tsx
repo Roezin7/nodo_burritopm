@@ -60,7 +60,7 @@ export default function RegistrarSalida({ abierto, sucursales, onClose, onHecho 
       <div className="form-pro-head">
       <div className="form-pro-title">
         <strong>Registrar salida de bodega</strong>
-        <small className="muted">Retiro directo o envío excepcional a una sucursal</small>
+        <small className="muted">Retiro o envío excepcional.</small>
         </div>
         <button className="link-btn" onClick={cerrar}>Cerrar</button>
       </div>

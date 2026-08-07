@@ -33,7 +33,7 @@ export default function PanelAdmin() {
     api<Panorama>(`/dashboard/general?semana=${semana.inicio}`).then(setP).catch(() => setError('No se pudo cargar el panorama general.'));
   }, [semana.inicio]);
   if (error) return <p className="error-msg">{error}</p>;
-  if (!p) return <Spinner label="Calculando panorama…" />;
+  if (!p) return <Spinner label="Cargando panorama…" />;
 
   const maxEmpresa = Math.max(1, ...p.ventas.por_empresa.map((e) => e.total));
   return <div className="panel-admin overview">
@@ -53,13 +53,13 @@ export default function PanelAdmin() {
 
     <div className="kpi-grid overview-kpis">
       <div className="kpi-card"><span className="kpi-label">{p.ventas.fuente === 'facturado' ? 'Venta facturada' : 'Venta proyectada'}</span><span className="big-number">{usd(p.ventas.total)}</span><small>Carne {usd(p.ventas.carne)} · desechables {usd(p.ventas.desechables)}</small></div>
-      <div className="kpi-card"><span className="kpi-label">Inventario al corte</span><span className="big-number">{usd(p.inventario.total)}</span><small>Materia prima, carne terminada y desechables</small></div>
-      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + ciclo por cobrar de 3 semanas − por pagar</small></div>
+      <div className="kpi-card"><span className="kpi-label">Inventario al corte</span><span className="big-number">{usd(p.inventario.total)}</span><small>Materia prima y producto terminado</small></div>
+      <div className={`kpi-card ${p.cartera.balance_neto < 0 ? 'kpi-card--warn' : ''}`}><span className="kpi-label">Balance operativo</span><span className="big-number">{usd(p.cartera.balance_neto)}</span><small>Inventario + cartera − cuentas por pagar</small></div>
     </div>
 
     <div className="overview-grid">
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Quién genera la venta de la semana</div></div><Link className="link-btn" to={rutaSemana('/semana/ventas')}>Ver ventas →</Link></div>
+        <div className="card-head"><div><strong>Venta por empresa</strong><div className="muted">Total de la semana</div></div><Link className="link-btn" to={rutaSemana('/semana/ventas')}>Ver ventas →</Link></div>
         {p.ventas.por_empresa.map((e) => <div className="company-sale" key={e.codigo}><div className="overview-row-head"><span><strong>{e.codigo}</strong> · {e.nombre}</span><strong>{usd(e.total)}</strong></div><div className="company-track"><span className="company-meat" style={{ width: `${(e.carne / maxEmpresa) * 100}%` }} /><span className="company-disposable" style={{ width: `${(e.desechables / maxEmpresa) * 100}%` }} /></div><small>Carne {usd(e.carne)} · Desechables {usd(e.desechables)}</small></div>)}
       </section>
 
@@ -69,12 +69,12 @@ export default function PanelAdmin() {
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Cuentas del cierre</strong><div className="muted">Importes usados para calcular el balance</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
+        <div className="card-head"><div><strong>Cuentas del cierre</strong><div className="muted">Saldos del cierre</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
         <div className="cash-grid"><div><small>Por cobrar · ciclo 3 semanas</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>semana actual + 2 anteriores</span></div><div><small>Por pagar al corte</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras con saldo</span></div><div><small>Balance operativo</small><strong>{usd(p.cartera.balance_neto)}</strong><span>inventario + por cobrar − por pagar</span></div></div>
       </section>
 
       <section className="card overview-card">
-        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Acumulado semanal</div></div><Link className="link-btn" to={rutaSemana('/semana/compras')}>Registrar →</Link></div>
+        <div className="card-head"><div><strong>Producción y compras</strong><div className="muted">Semana actual</div></div><Link className="link-btn" to={rutaSemana('/semana/compras')}>Registrar →</Link></div>
         <div className="production-summary"><div><small>Costo procesado</small><strong>{usd(p.produccion.costo)}</strong></div><div><small>Cajas producidas</small><strong>{p.produccion.cajas.toLocaleString('es-MX')}</strong></div><div><small>Yield</small><strong>{p.produccion.yield.toFixed(1)}%</strong></div><div><small>Compras</small><strong>{usd(p.produccion.compras_semana)}</strong></div></div>
       </section>
     </div>

@@ -59,10 +59,10 @@ export default function StockActual({ ubicId, nombre }: { ubicId: string; nombre
       {enHold.length > 0 && (
         <section className="hold-stock" aria-label="Reservas compradas por adelantado">
           <div className="hold-stock-head">
-            <strong>Comprado por adelantado · en hold</strong>
+            <strong>Comprado por adelantado</strong>
             <span>{enHold.length} productos</span>
           </div>
-          <p className="muted">Cuando llegue físicamente, muévelo a Bodega Adison.</p>
+          <p className="muted">Muévelo a Bodega Adison al recibirlo.</p>
           {enHold.map((i) => (
             <div key={`hold-${i.product_id}`} className="hold-stock-row">
               <span><strong>{i.nombre}</strong><small>{i.transito} {i.unidad}</small></span>

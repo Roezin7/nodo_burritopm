@@ -42,10 +42,10 @@ function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; se
       <span className="eyebrow">Cadencia de la semana</span>
       <h1 id="weekly-cadence-title">{!semana.actual ? 'Consulta histórica' : esSabadoActual ? 'Sábado de regularización' : 'Operación diaria'}</h1>
       <p>{!semana.actual
-        ? 'Estás consultando una semana anterior. Sus registros y resultados se conservan sin cambios.'
+        ? 'Semana anterior. Solo consulta.'
         : esSabadoActual
-          ? 'Continúan los pedidos; hoy también se registran compras y producción para conciliar y cerrar.'
-          : 'Captura pedidos. El sistema vincula el despacho automáticamente y el inventario puede ser negativo provisionalmente hasta la regularización del sábado.'}</p>
+          ? 'Compras, producción y cierre de la semana.'
+          : 'Captura pedidos; el despacho se vincula automáticamente.'}</p>
     </div>
     <div className="weekly-cadence__groups">
       <div className={esOperacion ? 'cadence-group cadence-group--active' : 'cadence-group'}>

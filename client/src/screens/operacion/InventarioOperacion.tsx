@@ -247,7 +247,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     {error && <p className="error-msg">{error}</p>}
     {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} cajas perdidas.</strong> Se mostrarán en 0 y no bloquearán el cierre.</p>}
     {!semana.actual && <p className="context-note">{stock?.fuente === 'cierre_semanal' ? <>Vista del cierre contable de la semana {semana.numero}.</> : capturaSemana ? <>Conteo físico del {capturaSemana.fecha}; valuado al costo vigente.</> : stock?.fuente === 'conciliacion_semanal' ? <>Saldo teórico aislado de la semana {semana.numero}; no incluye movimientos posteriores.</> : <>Sin cierre histórico; se muestra el saldo actual.</>}</p>}
-    {!stock && !error ? <Spinner label="Calculando inventario…" /> : stock && <>
+    {!stock && !error ? <Spinner label="Cargando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
         <div><span>Valor</span><strong>{usd(totales.valor)}</strong></div>
         <div><span>Existencia</span><strong>{totales.disponible.toLocaleString('es-MX')}</strong></div>
@@ -270,7 +270,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
             <span data-label="Costo">{i.costo_promedio == null ? '—' : usd(i.costo_promedio)}{i.transito > 0 && i.costo_transito_promedio != null && <small>Hold {usd(i.costo_transito_promedio)}</small>}</span>
             <span data-label="Valor"><strong>{usd(editando ? fisico * (i.costo_promedio ?? 0) : i.valor)}</strong></span>
           </div>; })}
-          {!filas.length && <div className="empty-state"><strong>Sin existencias para este filtro</strong><span>Cambia de almacén o línea.</span></div>}
+          {!filas.length && <div className="empty-state"><strong>Sin resultados</strong><span>Cambia el almacén o la línea.</span></div>}
         </div>
       </CollapsibleSection>
       {admin && <><div className="history-access-bar"><strong>Conteos físicos · semana {semana.numero}</strong><HistoryToggle active={mostrarHistorial} openLabel={`Consultar anteriores (${historialSemana.length})`} onToggle={() => setMostrarHistorial((actual) => !actual)} /></div>{mostrarHistorial && <section className="workspace-card inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin conteo físico · no bloquea el cierre</strong></div>}</section>}</>}

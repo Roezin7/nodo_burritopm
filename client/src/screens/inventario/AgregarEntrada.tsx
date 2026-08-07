@@ -53,7 +53,7 @@ export default function AgregarEntrada({ abierto, onClose, onHecho }: { abierto:
       <div className="form-pro-head">
         <div className="form-pro-title">
           <strong>Registrar entrada a bodega</strong>
-          <small className="muted">Compra de proveedor o ajuste de entrada</small>
+          <small className="muted">Compra o ajuste.</small>
         </div>
         <button className="link-btn" onClick={cerrar}>Cerrar</button>
       </div>
@@ -99,7 +99,7 @@ export default function AgregarEntrada({ abierto, onClose, onHecho }: { abierto:
 
       <div className="form-pro-foot">
         <button className="btn btn-primary btn-block" disabled={busy || !sel || !(Number(cantidad) > 0)} onClick={() => void registrar()}>Registrar entrada</button>
-        <p className="muted">Para fijar cantidades exactas usa <strong>Tomar inventario</strong> (concilia el stock).</p>
+        <p className="muted">Usa <strong>Tomar inventario</strong> para fijar el stock.</p>
       </div>
     </div>
   );

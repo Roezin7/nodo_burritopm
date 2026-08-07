@@ -239,7 +239,7 @@ export default function Inventario() {
         <header className="page-head">
           <div>
             <h1>Inventario</h1>
-            <p className="page-sub">Registra entradas, salidas y corrige cantidades cuando haga falta.</p>
+            <p className="page-sub">Entradas, salidas y conteos.</p>
           </div>
         </header>
         {error && <p className="error-msg">{error}</p>}
@@ -274,12 +274,12 @@ export default function Inventario() {
       <header className="page-head">
         <div>
           <h1>Inventario</h1>
-          <p className="page-sub">Elige cuánto producto quieres que te envíen.</p>
+          <p className="page-sub">Captura cantidades.</p>
         </div>
       </header>
 
       {ubicaciones.length === 0 ? (
-        <p className="muted">No tienes ubicaciones asignadas. Pide a un administrador que te asigne una.</p>
+        <p className="muted">Solicita una ubicación al administrador.</p>
       ) : (
         <>
           <UbicacionPicker label="Ubicación" opciones={opciones} value={ubicId} onChange={setUbicId} />
