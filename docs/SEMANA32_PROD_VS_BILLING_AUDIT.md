@@ -293,3 +293,21 @@ vista previa ahora reconoce `$239,078.93` en lugar de tratar decenas de renglone
 con costo nulo como valor cero. El saldo restante de `$136.07` no justifica una
 alteración automática; corresponde a diferencias de fuente entre el inventario
 físico/libro y el método FIFO. Debe resolverse conciliando renglón por renglón.
+
+## 11. Arrastre a la semana 33
+
+La apertura de Carnicería de la semana 33 aparecía en cero porque la
+conciliación priorizaba el snapshot de la última semana cerrada con inventario
+(semana 29), aunque existía un conteo físico final más reciente de la semana 32.
+
+Se corrigió la regla: el conteo físico final más reciente prevalece sobre un
+snapshot anterior. En producción se creó la apertura de la semana 33 a partir
+del conteo final de la semana 32:
+
+- conteo origen: `24`, 8 de agosto de 2026;
+- conteo apertura: `26`, 9 de agosto de 2026;
+- 21 productos;
+- 561 cajas totales.
+
+La corrección quedó registrada en `auditoria_operativa` con la acción
+`arrastre_inventario_semana_siguiente`.
