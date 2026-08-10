@@ -58,6 +58,15 @@ export function aperturaConDatos<T>(mapa: Map<string, T> | null | undefined) {
   return mapa != null && mapa.size > 0;
 }
 
+/**
+ * Un conteo físico posterior debe prevalecer sobre el snapshot de una semana
+ * cerrada anterior. Esto permite abrir la semana siguiente con el sobrante real
+ * aunque la semana anterior todavía no haya sido cerrada en el sistema.
+ */
+export function prefiereConteoFisicoAnterior(fechaConteo: Date | null | undefined, finSnapshot: Date | null | undefined) {
+  return Boolean(fechaConteo && (!finSnapshot || fechaConteo.getTime() >= finSnapshot.getTime()));
+}
+
 /** Ecuación operativa: inicio + entradas − salidas, separada en los cortes de miércoles y sábado. */
 export function calcularFilaConciliacion(f: FilaConciliacionCalculable) {
   const entradas1 = f.compras1 + f.produccionSalida1;
@@ -168,15 +177,16 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   const snapshotAnteriorDe = new Map(semanaAnterior?.inventario_semanal
     .map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)] as const) ?? []);
   const fisicoDe = new Map(final?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
+  const usarCierreAnterior = prefiereConteoFisicoAnterior(cierreAnterior?.fecha, semanaAnterior?.termina_at);
   const filas = productos.map((p) => {
     const a = acumulados.get(p.id.toString()) ?? vacio();
     const actual = actualDe.get(p.id.toString()) ?? 0;
     // El cierre físico anterior es la apertura más confiable. Solo si no existe se
     // reconstruye hacia atrás desde el saldo vivo y los movimientos de la semana.
-    const inicialCalculado = normalizarSaldoApertura(semanaAnterior
-      ? (snapshotAnteriorDe.get(p.id.toString()) ?? 0)
-      : cierreAnterior
-        ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
+    const inicialCalculado = normalizarSaldoApertura(usarCierreAnterior
+      ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
+      : semanaAnterior
+        ? (snapshotAnteriorDe.get(p.id.toString()) ?? 0)
         : r3(actual - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
           + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2));
     // También protege semanas que ya tenían una apertura histórica negativa fijada.
@@ -195,7 +205,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
     periodo: { desde, hasta, corte_miercoles: iso(corte) },
     inicial_fijado: Boolean(inicial), inventario_inicial_id: inicial ? Number(inicial.id) : null,
-    origen_inicial: inicial ? 'fijado' : (semanaAnterior || cierreAnterior ? 'cierre_anterior' : 'reconstruido'),
+    origen_inicial: inicial ? 'fijado' : (usarCierreAnterior || semanaAnterior ? 'cierre_anterior' : 'reconstruido'),
     inventario_anterior_id: cierreAnterior ? Number(cierreAnterior.id) : null,
     final_capturado: Boolean(final), inventario_final_id: final ? Number(final.id) : null,
     filas,

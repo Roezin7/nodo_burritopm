@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aperturaConDatos, calcularFilaConciliacion, calcularSaldoSemanal, normalizarSaldoApertura, rangoSemana } from './conciliacion.js';
+import { aperturaConDatos, calcularFilaConciliacion, calcularSaldoSemanal, normalizarSaldoApertura, prefiereConteoFisicoAnterior, rangoSemana } from './conciliacion.js';
 
 describe('conciliación semanal de inventario', () => {
   it('aísla desechables a apertura + entradas − salidas del periodo', () => {
@@ -69,6 +69,11 @@ describe('conciliación semanal de inventario', () => {
   it('no arrastra un faltante negativo como inventario inicial de la semana siguiente', () => {
     expect(normalizarSaldoApertura(-7.25)).toBe(0);
     expect(normalizarSaldoApertura(12.3454)).toBe(12.345);
+  });
+
+  it('prefiere el conteo físico de la semana anterior al snapshot más antiguo', () => {
+    expect(prefiereConteoFisicoAnterior(new Date('2026-08-08T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z'))).toBe(true);
+    expect(prefiereConteoFisicoAnterior(new Date('2026-07-31T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z'))).toBe(false);
   });
 
   it('aísla el saldo semanal aunque el inventario vivo ya tenga movimientos posteriores', () => {
