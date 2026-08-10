@@ -268,3 +268,28 @@ La corrección no inventa cantidades ni reemplaza el inventario físico. Para
 llegar exactamente al balance objetivo todavía hay que reconciliar la fuente
 de cantidades de Paperware, la diferencia de `$3,647.31` entre Billing 32 FIFO
 y el libro Excel, y el desfase de `$0.02` de Amigos.
+
+## 10. Verificación posterior al despliegue
+
+El servicio de producción respondió correctamente (`/api/health`, base de datos
+conectada) y la vista previa de la semana 32 se regeneró después del commit
+`c8289a0`.
+
+| Concepto | Vista previa actual | Imagen objetivo | Diferencia |
+|---|---:|---:|---:|
+| Carne fresca | `$104,700.98` | `$100,234.15` | `+$4,466.83` |
+| Desechables | `$239,078.93` | `$239,762.41` | `-$683.48` |
+| Inventario total | `$343,779.91` | `$339,996.56` | `+$3,783.35` |
+| CxC ciclo de 3 semanas | `$259,644.31` | `$263,291.62`* | `-$3,647.31` |
+| CxP | `$153,390.59` | `$153,390.61` | `-$0.02` |
+| **Balance estimado** | **`$450,033.63`** | **`$449,897.56`** | **`+$136.07`** |
+
+\* La cifra de CxC objetivo se obtiene sumando Billing 30, 31 y 32 del libro
+entregado. La aplicación calcula Billing 32 con FIFO y producción vigente, por
+eso la diferencia de `$3,647.31` es de método/precio, no de pagos o inventario.
+
+La corrección de costos eliminó la subvaluación severa de los desechables: la
+vista previa ahora reconoce `$239,078.93` en lugar de tratar decenas de renglones
+con costo nulo como valor cero. El saldo restante de `$136.07` no justifica una
+alteración automática; corresponde a diferencias de fuente entre el inventario
+físico/libro y el método FIFO. Debe resolverse conciliando renglón por renglón.
