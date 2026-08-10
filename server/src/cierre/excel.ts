@@ -215,10 +215,15 @@ function valoresInventario(d: Datos) {
     carne: num0(d.semana.valor_carne), congelado: num0(d.semana.valor_congelado),
     desechables: num0(d.semana.valor_desechables),
   };
-  // En una semana abierta el snapshot es una referencia de cantidades, no una
-  // fotografía contable definitiva. Recalcularlo evita que un valor guardado
-  // antes de capturar conteos, producción o pagos se siga mostrando como actual.
-  if (d.semana.estado === 'cerrada') return guardado;
+  // Una semana abierta puede tener ya un saldo operativo corregido (por ejemplo,
+  // el reinicio validado de la semana 32). En ese caso los libros deben conservar
+  // exactamente la misma fotografía que ve el sistema; sólo se reconstruye desde
+  // existencias cuando todavía no existe ningún saldo persistido.
+  const tieneSaldoPersistido = d.semana.estado === 'cerrada'
+    || [d.semana.valor_carne, d.semana.valor_congelado, d.semana.valor_desechables,
+      d.semana.cuentas_por_cobrar, d.semana.cuentas_por_pagar, d.semana.balance_neto]
+      .some((valor) => Math.abs(num0(valor)) > 0.0001);
+  if (tieneSaldoPersistido) return guardado;
   const inventarioCentral = d.existencias.filter((e) => e.ubicaciones.tipo === 'bodega');
   const terminado = inventarioCentral.filter((e) => e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima')
     .reduce((a, e) => {
@@ -250,10 +255,14 @@ function esCierreHistoricoSinDetalle(d: Datos) {
 function llenarWeeklyOrder(wb: ExcelJS.Workbook, d: Datos) {
   const n = d.semana.semana;
   const ws = hojaSemana(wb, /^Meat Order/, n, `Meat Order (${n})`);
-  const carne = d.productos.filter((p) => FILA_CARNE[p.sku] != null);
+  const carne = d.productos.filter((p) => p.linea_operacion === 'carne' && FILA_CARNE[p.sku] != null);
   const codigosPlantilla = new Set(Object.values(CODIGO_ENCABEZADO));
   const sinCelda = d.pedidos.filter((p) => p.linea_operacion === 'carne').flatMap((p) => p.lineas
-    .filter((l) => cantidadLinea(l) > 0 && (!FILA_CARNE[l.producto.sku] || !codigosPlantilla.has(p.ubicacion.codigo)))
+    // Una orden de carne puede transportar consumibles (por ejemplo, guantes
+    // para Tapatíos). Esos renglones pertenecen al libro de desechables y no
+    // deben bloquear ni inflar el libro Weekly Order.
+    .filter((l) => l.producto.linea_operacion === 'carne' && cantidadLinea(l) > 0
+      && (!FILA_CARNE[l.producto.sku] || !codigosPlantilla.has(p.ubicacion.codigo)))
     .map((l) => `${p.ubicacion.nombre} / ${l.producto.nombre}`));
   errorCobertura('Weekly Order', sinCelda);
   for (let base = 1; base <= ws.columnCount; base += 10) {
@@ -592,7 +601,7 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const saldoAlCierre = (f: Datos['facturasHistoricas'][number]) => Math.max(0, num0(f.total)
     - f.pagos.filter((p) => p.pagado_at <= d.semana.termina_at).reduce((a, p) => a + num0(p.monto), 0));
   const semanasCobro = [d.semana.semana - 2, d.semana.semana - 1, d.semana.semana];
-  const saldos = semanasCobro.map((numero, i) => {
+  const saldosVivos = semanasCobro.map((numero, i) => {
     const facturasPeriodo = d.facturasHistoricas
       .filter((f) => i === 0 ? f.semana.semana <= numero : f.semana.semana === numero);
     // Mientras la semana está abierta/reabierta todavía no existe una factura vigente,
@@ -600,23 +609,42 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     if (numero === d.semana.semana && facturasPeriodo.length === 0) return meat + markup + paper;
     return facturasPeriodo.reduce((a, f) => a + saldoAlCierre(f), 0);
   });
+  const tieneSaldoPersistido = d.semana.estado === 'cerrada'
+    || [d.semana.valor_carne, d.semana.valor_congelado, d.semana.valor_desechables,
+      d.semana.cuentas_por_cobrar, d.semana.cuentas_por_pagar, d.semana.balance_neto]
+      .some((valor) => Math.abs(num0(valor)) > 0.0001);
+  const cuentasPorCobrarPersistidas = num0(d.semana.cuentas_por_cobrar);
+  // El saldo persistido es la fuente contable del sistema. Si no existe un
+  // desglose equivalente en facturas, se muestra como una sola línea para no
+  // inventar importes por semana ni hacer que el total deje de cuadrar.
+  const saldos = tieneSaldoPersistido && d.semana.estado !== 'cerrada'
+    ? [0, 0, cuentasPorCobrarPersistidas]
+    : saldosVivos;
   for (let i = 0; i < 3; i += 1) {
     ws.getCell(6 + i, 75).value = r2(saldos[i] ?? 0);
-    ws.getCell(6 + i, 77).value = i === 0 && d.facturasHistoricas.some((f) => f.semana.semana < (semanasCobro[0] ?? 0) && saldoAlCierre(f) > 0)
-      ? `BILLING ${semanasCobro[0]} Y ANTERIORES` : `BILLING ${semanasCobro[i]}`;
+    ws.getCell(6 + i, 77).value = tieneSaldoPersistido && d.semana.estado !== 'cerrada'
+      ? (i === 2 ? 'CARTERA · SALDO REGISTRADO' : null)
+      : i === 0 && d.facturasHistoricas.some((f) => f.semana.semana < (semanasCobro[0] ?? 0) && saldoAlCierre(f) > 0)
+        ? `BILLING ${semanasCobro[0]} Y ANTERIORES` : `BILLING ${semanasCobro[i]}`;
   }
-  const cuentasPorCobrar = saldos.reduce((a, x) => a + x, 0);
+  const cuentasPorCobrar = tieneSaldoPersistido ? cuentasPorCobrarPersistidas : saldos.reduce((a, x) => a + x, 0);
   const cierreCongelado = d.semana.estado === 'cerrada';
   const cuentasPorCobrarCierre = cierreCongelado ? num0(d.semana.cuentas_por_cobrar) : cuentasPorCobrar;
   if (cierreCongelado) ws.getCell('BW9').value = r2(inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrarCierre);
   else formula(ws, 'BW9', 'SUM(BW3:BW8)', inventario.carne + inventario.congelado + inventario.desechables + cuentasPorCobrarCierre);
 
-  const porProveedor = [...d.comprasPendientes.reduce((mapa, c) => {
+  const porProveedorVivo = [...d.comprasPendientes.reduce((mapa, c) => {
     const saldo = Math.max(0, num0(c.total) - c.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
     if (saldo > 0) mapa.set(c.proveedor.nombre, (mapa.get(c.proveedor.nombre) ?? 0) + saldo);
     return mapa;
   }, new Map<string, number>())]
     .map(([nombre, total]) => ({ nombre, total }));
+  const porPagarPersistido = num0(d.semana.cuentas_por_pagar);
+  const totalPorProveedorVivo = porProveedorVivo.reduce((a, p) => a + p.total, 0);
+  const porProveedor = tieneSaldoPersistido && d.semana.estado !== 'cerrada'
+    && Math.abs(totalPorProveedorVivo - porPagarPersistido) > 0.01
+    ? [{ nombre: 'CUENTAS POR PAGAR · SALDO REGISTRADO', total: porPagarPersistido }]
+    : porProveedorVivo;
   const proveedores = porProveedor.length <= 5 ? porProveedor : [
     ...porProveedor.slice(0, 4),
     { nombre: `OTROS · ${porProveedor.slice(4).map((p) => p.nombre).join(', ')}`, total: porProveedor.slice(4).reduce((a, p) => a + p.total, 0) },
@@ -629,8 +657,8 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     ws.getCell(row, 79).value = 0; // CA
     formula(ws, ws.getCell(row, 75).address, `-SUM(BZ${row}:CB${row})`, -p.total);
   });
-  const cuentasPorPagar = cierreCongelado
-    ? num0(d.semana.cuentas_por_pagar)
+  const cuentasPorPagar = tieneSaldoPersistido
+    ? porPagarPersistido
     : porProveedor.reduce((a, p) => a + p.total, 0);
   ws.getCell('BY17').value = 'CLOSING WEEK';
   if (cierreCongelado) ws.getCell('BW17').value = -cuentasPorPagar;
@@ -756,7 +784,9 @@ function validarSalida(tipo: TipoExcel, wb: ExcelJS.Workbook, d: Datos) {
   let escrito = 0;
   if (tipo === 'weekly-order') {
     const ws = hojaSemana(wb, /^Meat Order/, d.semana.semana, `Meat Order (${d.semana.semana})`);
-    esperado = d.pedidos.filter((p) => p.linea_operacion === 'carne').flatMap((p) => p.lineas).reduce((a, l) => a + cantidadLinea(l), 0);
+    esperado = d.pedidos.filter((p) => p.linea_operacion === 'carne').flatMap((p) => p.lineas)
+      .filter((l) => l.producto.linea_operacion === 'carne')
+      .reduce((a, l) => a + cantidadLinea(l), 0);
     for (let base = 1; base <= ws.columnCount; base += 10) {
       const codigo = CODIGO_ENCABEZADO[normal(ws.getCell(7, base).text)];
       if (!codigo) continue;
@@ -774,7 +804,9 @@ function validarSalida(tipo: TipoExcel, wb: ExcelJS.Workbook, d: Datos) {
   } else if (tipo === 'billing') {
     if (esCierreHistoricoSinDetalle(d)) return;
     const ws = hojaSemana(wb, /^Billing \(/, d.semana.semana, `Billing (${d.semana.semana})`);
-    esperado = d.pedidos.flatMap((p) => p.lineas).filter((l) => l.producto.linea_operacion === 'carne' && l.producto.tipo_operativo !== 'servicio').reduce((a, l) => a + cantidadLinea(l), 0);
+    esperado = d.pedidos.flatMap((p) => p.lineas)
+      .filter((l) => l.producto.linea_operacion === 'carne' && l.producto.tipo_operativo !== 'servicio')
+      .reduce((a, l) => a + cantidadLinea(l), 0);
     escrito = [...new Set(Object.values(FILA_BILLING))].reduce((total, row) => total
       + Object.values(COLUMNA_BILLING).reduce((a, col) => a + numeroCelda(ws.getCell(row, col)), 0), 0);
   } else return;
