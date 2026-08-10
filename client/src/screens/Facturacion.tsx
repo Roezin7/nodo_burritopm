@@ -132,7 +132,11 @@ export default function Facturacion() {
   }), [datos, vista, consulta]);
   const recibidasPorProveedor = useMemo(() => agruparPor(recibidas, (factura) => factura.proveedor)
     .sort(([a], [b]) => a.localeCompare(b, 'es')), [recibidas]);
-  const emitidasPorEmpresa = useMemo(() => agruparPor(emitidas, (factura) => factura.empresa)
+  // Las cuentas por cobrar se muestran por restaurante, no por empresa matriz.
+  // Una empresa puede tener varias sucursales y cada sucursal puede tener una
+  // factura de carne y otra de desechables; agrupar sólo por empresa hacía
+  // parecer que todo era una sola factura.
+  const emitidasPorRestaurante = useMemo(() => agruparPor(emitidas, (factura) => `${factura.empresa} · ${factura.ubicacion}`)
     .sort(([a], [b]) => a.localeCompare(b, 'es')), [emitidas]);
 
   async function registrarMovimiento() {
@@ -281,7 +285,7 @@ export default function Facturacion() {
       {tipo === 'cobrar' && <section className="workspace-card billing-ledger">
         <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Entran durante tres semanas y después pasan solas al historial.</p></div><div className="billing-select-head"><span>{emitidas.length}</span></div></div>
         <div className="billing-groups">
-          {emitidasPorEmpresa.map(([empresa, facturas]) => <details className="billing-group" open key={empresa}><summary><span><strong>{empresa}</strong><small>{facturas.length} factura{facturas.length === 1 ? '' : 's'}</small></span><strong>{usd(facturas.reduce((total, factura) => total + (factura.en_ciclo ? factura.saldo : factura.total), 0))}</strong></summary><div className="billing-list">{facturas.map(filaEmitida)}</div></details>)}
+          {emitidasPorRestaurante.map(([restaurante, facturas]) => <details className="billing-group" open key={restaurante}><summary><span><strong>{restaurante}</strong><small>{facturas.length} factura{facturas.length === 1 ? '' : 's'} separadas por línea</small></span><strong>{usd(facturas.reduce((total, factura) => total + (factura.en_ciclo ? factura.saldo : factura.total), 0))}</strong></summary><div className="billing-list">{facturas.map(filaEmitida)}</div></details>)}
           {emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
         </div>
       </section>}

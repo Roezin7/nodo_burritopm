@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal } from './service.js';
+import { claveFacturaPorRestaurante, distribuirCreditosCliente, estaEnCicloTresSemanas, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal } from './service.js';
 
 describe('folios de cierre semanal', () => {
   it('no colisiona sucursales cuyos códigos comparten los primeros cinco caracteres', () => {
@@ -9,6 +9,11 @@ describe('folios de cierre semanal', () => {
     expect(naperville).toBe('2026-29-BPM-NAPER-M');
     expect(napervilleDos).toBe('2026-29-BPM-NAPER2-M');
     expect(napervilleDos).not.toBe(naperville);
+  });
+
+  it('mantiene separadas carne y desechables por restaurante aunque compartan empresa', () => {
+    expect(claveFacturaPorRestaurante(1, 10, 'carne')).not.toBe(claveFacturaPorRestaurante(1, 10, 'desechables'));
+    expect(claveFacturaPorRestaurante(1, 10, 'carne')).not.toBe(claveFacturaPorRestaurante(1, 11, 'carne'));
   });
 });
 
@@ -51,6 +56,14 @@ describe('ventana móvil de cuentas por cobrar', () => {
   it('incluye la semana del cierre y exactamente las dos anteriores', () => {
     expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-12T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-06-28');
     expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-19T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-07-05');
+  });
+
+  it('incluye las dos semanas anteriores, excluye la cuarta y no incluye una semana futura', () => {
+    const ventana = new Date('2026-07-26T00:00:00.000Z');
+    const cierre = new Date('2026-08-15T00:00:00.000Z');
+    expect(estaEnCicloTresSemanas(new Date('2026-07-26T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z'), ventana, cierre)).toBe(true);
+    expect(estaEnCicloTresSemanas(new Date('2026-07-19T00:00:00.000Z'), new Date('2026-07-25T00:00:00.000Z'), ventana, cierre)).toBe(false);
+    expect(estaEnCicloTresSemanas(new Date('2026-08-16T00:00:00.000Z'), new Date('2026-08-22T00:00:00.000Z'), ventana, cierre)).toBe(false);
   });
 });
 

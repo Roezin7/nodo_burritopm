@@ -3,7 +3,7 @@ import { prisma } from '../db.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { eliminarConteo } from '../conteos/service.js';
+import { eliminarConteo, eliminarConteoEnTx } from '../conteos/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 import { asegurarInventarioInicialSemanal, obtenerConciliacionSemanal, obtenerInventarioSemanalDesechables, rangoSemana, repararPedidosHuerfanos } from './conciliacion.js';
 import { confirmarCarga } from '../distribuciones/service.js';
@@ -1697,12 +1697,26 @@ export async function guardarInventarioFinal(
   const baseDe = (productId: number) => conciliacion
     ? (cantidadTeorica.get(String(productId)) ?? 0)
     : (cantidadPrevia.get(String(productId)) ?? 0);
-  const generaAjuste = input.lineas.some((l) => Math.abs(l.cantidad - baseDe(l.product_id)) > 0.0001);
-  if (generaAjuste && !input.motivo?.trim()) {
-    throw new HttpError(400, 'Explica la diferencia de conteo antes de guardar el inventario físico final.');
-  }
+  // El conteo físico es evidencia y debe conservarse aunque exista una diferencia.
+  // Antes la validación del motivo abortaba toda la transacción y el usuario perdía
+  // la captura. La observación sigue siendo opcional; los ajustes quedan auditados
+  // por el movimiento que los origina.
+  const advertencias = new Set<string>();
+  const conteoExistente = await prisma.conteos.findFirst({
+    where: {
+      negocio_id: negocioId,
+      ubicacion_id: ubicacionId,
+      fecha: fecha(input.fecha),
+      notas: { startsWith: 'inventario_final_operativo' },
+    },
+    select: { id: true },
+    orderBy: { id: 'desc' },
+  });
   let ajustes = 0;
   const conteo = await transaccionSerializable(async (tx) => {
+    // Una captura por almacén y fecha: reintentar o corregir el mismo conteo
+    // reemplaza sus ajustes anteriores en vez de crear una segunda fotografía.
+    if (conteoExistente) await eliminarConteoEnTx(tx, negocioId, conteoExistente.id, usuarioId, 'reemplazar_conteo');
     const registro = await tx.conteos.create({
       data: {
         negocio_id: negocioId,
@@ -1739,40 +1753,43 @@ export async function guardarInventarioFinal(
         const costoDisponible = lotes.reduce((a, lote) => a + num0(lote.costo_disponible), 0);
         costoLotes = cajasLotes > 0 ? r4(costoDisponible / cajasLotes) : null;
         if (deltaConteo > 0.0001) {
-          throw new HttpError(409, `${producto.nombre}: el conteo agrega ${deltaConteo} unidades sin una compra FIFO que las respalde. Registra la compra faltante antes de cerrar inventario.`);
-        }
-        if (Math.abs(Math.min(0, deltaConteo)) > cajasLotes + 0.0001) {
+          // No inventamos una entrada FIFO por una diferencia positiva. La foto
+          // se conserva y se deja una alerta para que se documente la compra o
+          // recepción faltante por separado.
+          advertencias.add(`${producto.nombre}: el físico supera el saldo FIFO en ${deltaConteo} unidades; no se ajustó el ledger.`);
+        } else if (Math.abs(deltaConteo) > cajasLotes + 0.0001) {
           throw new HttpError(409, `${producto.nombre}: no quedan suficientes unidades FIFO para aplicar retroactivamente la diferencia de ${deltaConteo}.`);
+        } else {
+          let faltanteFisico = r3(Math.abs(Math.min(0, deltaConteo)));
+          let costoRetirado = 0;
+          for (const lote of lotes) {
+            if (faltanteFisico <= 0.0001) break;
+            const disponibles = num0(lote.cajas_disponibles);
+            const cajas = Math.min(faltanteFisico, disponibles);
+            const proporcion = disponibles > 0 ? cajas / disponibles : 0;
+            const peso = r3(num0(lote.peso_disponible_lb) * proporcion);
+            const costo = r2(num0(lote.costo_disponible) * proporcion);
+            costoRetirado = r2(costoRetirado + costo);
+            await tx.conteo_ajustes_lote.create({ data: { conteo_id: registro.id, lote_id: lote.id, cajas: r3(cajas), peso_lb: peso, costo } });
+            await tx.lotes_materia_prima.update({
+              where: { id: lote.id },
+              data: {
+                cajas_disponibles: r3(disponibles - cajas),
+                peso_disponible_lb: r3(num0(lote.peso_disponible_lb) - peso),
+                costo_disponible: r2(num0(lote.costo_disponible) - costo),
+              },
+            });
+            faltanteFisico = r3(faltanteFisico - cajas);
+          }
+          const cajasRestantes = r3(cajasLotes - Math.abs(Math.min(0, deltaConteo)));
+          costoLotes = cajasRestantes > 0 ? r4(Math.max(0, costoDisponible - costoRetirado) / cajasRestantes) : null;
         }
-        let faltanteFisico = r3(Math.abs(Math.min(0, deltaConteo)));
-        let costoRetirado = 0;
-        for (const lote of lotes) {
-          if (faltanteFisico <= 0.0001) break;
-          const disponibles = num0(lote.cajas_disponibles);
-          const cajas = Math.min(faltanteFisico, disponibles);
-          const proporcion = disponibles > 0 ? cajas / disponibles : 0;
-          const peso = r3(num0(lote.peso_disponible_lb) * proporcion);
-          const costo = r2(num0(lote.costo_disponible) * proporcion);
-          costoRetirado = r2(costoRetirado + costo);
-          await tx.conteo_ajustes_lote.create({ data: { conteo_id: registro.id, lote_id: lote.id, cajas: r3(cajas), peso_lb: peso, costo } });
-          await tx.lotes_materia_prima.update({
-            where: { id: lote.id },
-            data: {
-              cajas_disponibles: r3(disponibles - cajas),
-              peso_disponible_lb: r3(num0(lote.peso_disponible_lb) - peso),
-              costo_disponible: r2(num0(lote.costo_disponible) - costo),
-            },
-          });
-          faltanteFisico = r3(faltanteFisico - cajas);
-        }
-        const cajasRestantes = r3(cajasLotes - Math.abs(Math.min(0, deltaConteo)));
-        costoLotes = cajasRestantes > 0 ? r4(Math.max(0, costoDisponible - costoRetirado) / cajasRestantes) : null;
       }
 
       const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } } });
       // Aplicar únicamente la diferencia detectada en esa semana conserva intactos
       // todos los movimientos posteriores que ya forman parte del saldo vivo.
-      const delta = deltaConteo;
+      const delta = (manejaLote && deltaConteo > 0.0001) ? 0 : deltaConteo;
       if (Math.abs(delta) >= 0.0001) {
         const costo = costoLotes ?? num(actual?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
         await aplicarMovimiento(tx, {
@@ -1795,7 +1812,7 @@ export async function guardarInventarioFinal(
     }
     return registro;
   });
-  return { ok: true, ajustes, inventario_id: Number(conteo.id) };
+  return { ok: true, ajustes, inventario_id: Number(conteo.id), advertencias: [...advertencias] };
 }
 
 const claveInventarioLegacy = (key: string) => {

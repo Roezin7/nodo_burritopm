@@ -206,13 +206,20 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     if (!almacenId || !stock) return;
     setBusy(true); setError('');
     try {
-      const r = await api<{ ajustes: number }>('/operacion/inventario-final', {
+      const r = await api<{ ajustes: number; advertencias?: string[] }>('/operacion/inventario-final', {
         method: 'PUT',
         body: { ubicacion_id: Number(almacenId), fecha, motivo: observacion.trim() || null, lineas: stock.items.map((i) => ({ product_id: i.product_id, cantidad: Number(cantidades[i.product_id] || 0) })) },
       });
-      await recargar();
       setEditando(false);
+      try {
+        await recargar();
+      } catch {
+        // El conteo ya está confirmado en el servidor. No lo presentamos como
+        // fallido sólo porque una lectura posterior no pudo refrescar la vista.
+        setError('Conteo guardado. Recarga la vista para consultar el saldo actualizado.');
+      }
       toast.ok(`Inventario guardado · ${r.ajustes} ajustes.`);
+      if (r.advertencias?.length) toast.error(`Conteo guardado con observación: ${r.advertencias[0]}`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo guardar el inventario.'); }
     finally { setBusy(false); }
   }

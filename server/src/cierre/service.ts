@@ -125,6 +125,22 @@ export function inicioVentanaCuentasPorCobrar(iniciaAt: Date) {
   return sumarDias(iniciaAt, -14);
 }
 
+/** Identidad de una factura: cada restaurante y cada línea operativa conserva
+ * su documento propio, aunque pertenezcan a la misma empresa matriz. */
+export function claveFacturaPorRestaurante(empresaId: bigint | number | string, ubicacionId: bigint | number | string, linea: LineaOperacion) {
+  return `${empresaId.toString()}:${ubicacionId.toString()}:${linea}`;
+}
+
+/** La ventana incluye la semana del cierre y exactamente las dos anteriores. */
+export function estaEnCicloTresSemanas(
+  iniciaFactura: Date,
+  terminaFactura: Date,
+  iniciaVentana: Date,
+  terminaVentana: Date,
+) {
+  return iniciaFactura.getTime() >= iniciaVentana.getTime() && terminaFactura.getTime() <= terminaVentana.getTime();
+}
+
 export async function asegurarSemana(negocioId: bigint, fechaCierre: string) {
   const s = semanaDeFecha(fecha(fechaCierre));
   return prisma.semanas_operativas.upsert({
@@ -185,7 +201,7 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
       // La ruta puede ser de carne y llevar consumibles solicitados en la misma hoja.
       // La factura se separa por la línea real del producto, como en los libros actuales.
       const linea = l.producto.linea_operacion ?? pedido.linea_operacion;
-      const k = `${pedido.ubicacion_id}:${linea}`;
+      const k = claveFacturaPorRestaurante(pedido.empresa.id, pedido.ubicacion_id, linea);
       if (!grupos.has(k)) grupos.set(k, { empresa: pedido.empresa, ubicacion: pedido.ubicacion, linea, items: new Map() });
       const g = grupos.get(k)!;
       const cantidad = await cantidadFacturable(l);
@@ -196,7 +212,7 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
     }
   }
   for (const ajuste of ajustes) {
-    const k = `${ajuste.ubicacion_id}:${ajuste.linea_operacion}`;
+    const k = claveFacturaPorRestaurante(ajuste.empresa.id, ajuste.ubicacion_id, ajuste.linea_operacion);
     if (!grupos.has(k)) grupos.set(k, { empresa: ajuste.empresa, ubicacion: ajuste.ubicacion, linea: ajuste.linea_operacion, items: new Map() });
     grupos.get(k)!.items.set(`ajuste:${ajuste.id}`, {
       productId: null,
@@ -861,11 +877,11 @@ export async function listarCartera(negocioId: bigint) {
     }),
   ]);
 
-  const facturasCiclo = facturas.filter((factura) => factura.semana.inicia_at >= inicioCiclo && factura.semana.termina_at <= periodoActual.sabado);
+  const facturasCiclo = facturas.filter((factura) => estaEnCicloTresSemanas(factura.semana.inicia_at, factura.semana.termina_at, inicioCiclo, periodoActual.sabado));
   const cartera = saldosFacturas(facturasCiclo, undefined, true);
   const emitidas = facturas.filter((f) => num0(f.total) >= 0).map((f) => {
     const pagado = r2(f.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
-    const enCiclo = f.semana.inicia_at >= inicioCiclo && f.semana.termina_at <= periodoActual.sabado;
+    const enCiclo = estaEnCicloTresSemanas(f.semana.inicia_at, f.semana.termina_at, inicioCiclo, periodoActual.sabado);
     return {
       id: Number(f.id),
       numero: f.numero,
