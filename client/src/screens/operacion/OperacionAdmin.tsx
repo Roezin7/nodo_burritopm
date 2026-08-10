@@ -727,8 +727,20 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   const dialog = useDialog();
   const [factura, setFactura] = useState<Factura | null>(null);
   const [vistaPrevia, setVistaPrevia] = useState<VistaPreviaCierre | null>(null);
-  useEffect(() => { setFactura(null); setVistaPrevia(null); }, [semana.inicio, semana.fin]);
-  async function revisarCierre() { setBusy(true); setError(''); try { setVistaPrevia(await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } })); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la vista previa del cierre.'); } finally { setBusy(false); } }
+  const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
+  const [balanceVivo, setBalanceVivo] = useState<number | null>(null);
+  useEffect(() => { setFactura(null); setVistaPrevia(null); setBalanceVivo(null); }, [semana.inicio, semana.fin]);
+  // Las semanas abiertas deben mostrar el mismo balance vivo que la vista previa,
+  // no el snapshot histórico guardado al iniciar la semana.
+  useEffect(() => {
+    if (!cierreSeleccionado || cierreSeleccionado.estado === 'cerrada' || semana.fin > hoy()) return;
+    let activo = true;
+    void api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } })
+      .then((resultado) => { if (activo) setBalanceVivo(resultado.balance_estimado); })
+      .catch(() => { /* la vista previa manual mostrará el error */ });
+    return () => { activo = false; };
+  }, [cierreSeleccionado?.id, cierreSeleccionado?.estado, semana.fin]);
+  async function revisarCierre() { setBusy(true); setError(''); try { const resultado = await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } }); setVistaPrevia(resultado); setBalanceVivo(resultado.balance_estimado); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la vista previa del cierre.'); } finally { setBusy(false); } }
   async function pagarProveedor(proveedor: string, documentos: VistaPreviaCierre['cartera']['documentos_por_pagar']) {
     const total = documentos.reduce((suma, documento) => suma + documento.saldo, 0);
     if (!await dialog.confirm({
@@ -740,7 +752,8 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     try {
       if (documentos.length === 1) await api(`/cierre/compras/${documentos[0]!.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy(), monto: documentos[0]!.saldo } });
       else await api('/cierre/compras/pagar-lote', { method: 'POST', body: { ids: documentos.map((documento) => documento.id), fecha_pago: hoy() } });
-      setVistaPrevia(await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } }));
+      const resultado = await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } });
+      setVistaPrevia(resultado); setBalanceVivo(resultado.balance_estimado);
       await onDone();
       toast.ok(`Pago a ${proveedor} registrado.`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); }
@@ -762,12 +775,11 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     finally { setBusy(false); }
   }
   const libros = [['weekly-order', 'Weekly Order'], ['disposables', 'Disposables'], ['production', 'Production'], ['billing', 'Billing'], ['lbt', 'LBT'], ['aurora', 'Aurora']] as const;
-  const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   return <div className="operation-stack">
     <ConciliacionSemanal semana={semana} busy={busy} setBusy={setBusy} setError={setError} />
     <section className="close-week-card"><div><span className="eyebrow">Semana {semana.numero}</span><h2>Revisar y cerrar</h2><p>{semana.inicio} al {semana.fin} · consulta el resultado antes de generar facturas.</p></div><div className="close-week-action"><button className="btn btn-primary" disabled={busy || semana.fin > hoy() || cierreSeleccionado?.estado === 'cerrada'} onClick={() => void revisarCierre()}>{busy ? 'Calculando…' : cierreSeleccionado?.estado === 'cerrada' ? 'Semana cerrada' : semana.fin > hoy() ? 'Semana en curso' : 'Vista previa del cierre'}</button></div></section>
 
-    <div className="week-list">{cierreSeleccionado ? [cierreSeleccionado].map((s) => <section className="week-card" key={s.id}><header><div><span className={`status-dot status-dot--${s.estado}`} /> <strong>Semana {s.semana} · {s.anio}</strong><p>{s.inicia_at} al {s.termina_at}</p></div><div className="week-balance"><span>Balance</span><strong>{usd(s.balance_neto)}</strong></div></header>
+    <div className="week-list">{cierreSeleccionado ? [cierreSeleccionado].map((s) => <section className="week-card" key={s.id}><header><div><span className={`status-dot status-dot--${s.estado}`} /> <strong>Semana {s.semana} · {s.anio}</strong><p>{s.inicia_at} al {s.termina_at}</p></div><div className="week-balance"><span>{s.estado === 'cerrada' ? 'Balance' : 'Balance actual'}</span><strong>{s.estado === 'cerrada' ? usd(s.balance_neto) : balanceVivo == null ? 'Calculando…' : usd(balanceVivo)}</strong></div></header>
       <div className="metric-strip metric-strip--five"><div><span>Carne</span><strong>{usd(s.valor_carne)}</strong></div><div><span>Congelado</span><strong>{usd(s.valor_congelado)}</strong></div><div><span>Desechables</span><strong>{usd(s.valor_desechables)}</strong></div><div><span>Por cobrar · 3 semanas</span><strong>{usd(s.cuentas_por_cobrar)}</strong></div><div><span>Por pagar</span><strong>{usd(s.cuentas_por_pagar)}</strong></div></div>
       <div className="week-toolbar"><div className="export-menu">{libros.map(([tipo, label]) => <button className="export-chip" key={tipo} onClick={() => void descargar(s.id, tipo)}>{label}<small>.xlsx</small></button>)}</div>{s.estado === 'cerrada' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void reabrir(s.id)}>Reabrir semana</button>}</div>
       <CollapsibleSection title="Facturas" count={s.facturas.length}><div className="invoice-list"><div className="invoice-row invoice-row--head"><span>Factura</span><span>Empresa / ubicación</span><span>Vencimiento</span><span>Estado</span><span>Total</span><span /></div>{s.facturas.map((f) => <div className="invoice-row" key={f.id}><button className="invoice-number" onClick={() => setFactura(f)}>{f.numero}<small>v{f.version} · {f.linea}</small></button><span data-label="Ubicación"><strong>{f.ubicacion}</strong><small>{f.empresa}</small></span><span data-label="Vence">{f.vence_at}</span><span data-label="Estado"><span className="chip chip--info">Ciclo automático</span></span><span data-label="Total"><strong>{usd(f.total)}</strong></span><span /></div>)}</div></CollapsibleSection>
