@@ -227,82 +227,6 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-/**
- * El crédito de producción de Lisle es semanal y permanece vigente hasta que el
- * usuario lo cambie. Al abrir una semana nueva copiamos el último valor conocido;
- * cada semana conserva su propio ajuste para que los cierres anteriores no cambien.
- */
-async function asegurarCreditoLisleSemanal(
-  negocioId: bigint,
-  usuarioId: bigint,
-  semana: SemanaCierre,
-) {
-  const creditoActual = await prisma.ajustes_facturacion.findFirst({
-    where: {
-      negocio_id: negocioId,
-      semana_id: semana.id,
-      tipo: 'credito',
-      ubicacion: { codigo: 'LISLE' },
-    },
-    select: { id: true },
-  });
-  if (creditoActual) return;
-
-  const anterior = await prisma.ajustes_facturacion.findFirst({
-    where: {
-      negocio_id: negocioId,
-      tipo: 'credito',
-      semana: { inicia_at: { lt: semana.inicia_at } },
-      ubicacion: { codigo: 'LISLE' },
-    },
-    include: { ubicacion: { select: { codigo: true } } },
-    orderBy: [{ semana: { inicia_at: 'desc' } }, { id: 'desc' }],
-  });
-  if (!anterior) return;
-
-  await transaccionSerializable(async (tx) => {
-    const existente = await tx.ajustes_facturacion.findFirst({
-      where: {
-        negocio_id: negocioId,
-        semana_id: semana.id,
-        tipo: 'credito',
-        ubicacion: { codigo: 'LISLE' },
-      },
-      select: { id: true },
-    });
-    if (existente) return;
-    const ajuste = await tx.ajustes_facturacion.create({
-      data: {
-        negocio_id: negocioId,
-        semana_id: semana.id,
-        empresa_cliente_id: anterior.empresa_cliente_id,
-        ubicacion_id: anterior.ubicacion_id,
-        linea_operacion: anterior.linea_operacion,
-        tipo: anterior.tipo,
-        descripcion: anterior.descripcion,
-        monto: anterior.monto,
-        creado_por: usuarioId,
-        idempotency_key: `credito-lisle-arrastre:${semana.id}`,
-      },
-    });
-    await tx.auditoria_operativa.create({
-      data: {
-        negocio_id: negocioId,
-        usuario_id: usuarioId,
-        accion: 'arrastrar_credito_lisle',
-        entidad: 'ajuste_facturacion',
-        entidad_id: ajuste.id,
-        datos: {
-          semana: semana.semana,
-          anio: semana.anio,
-          monto: num0(anterior.monto),
-          ajuste_origen_id: Number(anterior.id),
-        },
-      },
-    });
-  }, { reintentarUnico: true });
-}
-
 async function valuacionInventario(
   negocioId: bigint,
   db: Db = prisma,
@@ -456,7 +380,6 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
-  await asegurarCreditoLisleSemanal(negocioId, usuarioId, semana);
   const { grupos, ajustes } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
   const facturas = [...grupos.values()].flatMap((g) => {
     const lineas = [...g.items.values()].filter((item) => item.cantidad > 0);
@@ -603,7 +526,6 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
-  await asegurarCreditoLisleSemanal(negocioId, usuarioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
   const cierre = await transaccionSerializable(async (tx) => {
