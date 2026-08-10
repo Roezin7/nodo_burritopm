@@ -35,6 +35,19 @@ export function saldoCuentaPorPagar(total: number, pagos: number[]) {
   return Math.max(0, r2(total - pagos.reduce((suma, monto) => suma + monto, 0)));
 }
 
+/**
+ * Valuación defensiva: algunos saldos históricos sólo conservaron el costo en
+ * products y dejaron existencias.costo_promedio nulo. Un renglón con cantidad no
+ * puede valuarse como cero por esa ausencia de metadato.
+ */
+export function costoParaValuacionInventario(
+  costoExistencia: number | Prisma.Decimal | null | undefined,
+  costoProducto: number | Prisma.Decimal | null | undefined,
+  ultimoCosto: number | Prisma.Decimal | null | undefined,
+) {
+  return num(costoExistencia) ?? num(costoProducto) ?? num(ultimoCosto) ?? 0;
+}
+
 export interface DocumentoCarteraCliente {
   id: string;
   ubicacion_id: string;
@@ -243,7 +256,10 @@ async function valuacionInventario(
           ? {}
           : { OR: [{ cantidad_disponible: { gt: 0 } }, { cantidad_transito: { gt: 0 } }] }),
       },
-      include: { products: { select: { linea_operacion: true, tipo_operativo: true } }, ubicaciones: { select: { nombre: true } } },
+      include: {
+        products: { select: { linea_operacion: true, tipo_operativo: true, costo_promedio: true, ultimo_costo: true } },
+        ubicaciones: { select: { nombre: true } },
+      },
     }),
     db.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 }, producto: { tipo_operativo: 'materia_prima' } } }),
   ]);
@@ -252,8 +268,10 @@ async function valuacionInventario(
   for (const e of existencias) {
     const cantidad = cantidadesAisladas.get(`${e.ubicacion_id}:${e.product_id}`)
       ?? num0(e.cantidad_disponible);
-    const valor = Math.max(0, cantidad) * num0(e.costo_promedio)
-      + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio));
+    const costo = costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo);
+    const costoTransito = num(e.costo_transito_promedio) ?? costo;
+    const valor = Math.max(0, cantidad) * costo
+      + Math.max(0, num0(e.cantidad_transito)) * costoTransito;
     if (e.products.linea_operacion === 'desechables') desechables += valor;
     else if (e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima') terminada += valor;
   }

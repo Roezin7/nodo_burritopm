@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claveFacturaPorRestaurante, distribuirCreditosCliente, estaEnCicloTresSemanas, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal } from './service.js';
+import { claveFacturaPorRestaurante, costoParaValuacionInventario, distribuirCreditosCliente, estaEnCicloTresSemanas, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal } from './service.js';
 
 describe('folios de cierre semanal', () => {
   it('no colisiona sucursales cuyos códigos comparten los primeros cinco caracteres', () => {
@@ -98,5 +98,16 @@ describe('cuentas por pagar al cierre', () => {
 
   it('nunca presenta un saldo negativo por sobrepago', () => {
     expect(saldoCuentaPorPagar(500, [600])).toBe(0);
+  });
+});
+
+describe('valuación defensiva de inventario', () => {
+  it('usa el costo del producto cuando la existencia no tiene costo', () => {
+    expect(costoParaValuacionInventario(null, 33.95, 30)).toBe(33.95);
+    expect(costoParaValuacionInventario(undefined, null, 30)).toBe(30);
+  });
+
+  it('conserva el costo específico de la existencia cuando existe', () => {
+    expect(costoParaValuacionInventario(31.25, 33.95, 30)).toBe(31.25);
   });
 });

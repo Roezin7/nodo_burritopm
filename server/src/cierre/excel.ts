@@ -4,6 +4,7 @@ import path from 'node:path';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
+import { costoParaValuacionInventario } from './service.js';
 
 export type TipoExcel = 'weekly-order' | 'disposables' | 'production' | 'billing' | 'lbt' | 'aurora';
 
@@ -214,14 +215,23 @@ function valoresInventario(d: Datos) {
     carne: num0(d.semana.valor_carne), congelado: num0(d.semana.valor_congelado),
     desechables: num0(d.semana.valor_desechables),
   };
-  if (d.semana.estado === 'cerrada' || guardado.carne + guardado.congelado + guardado.desechables > 0) return guardado;
+  // En una semana abierta el snapshot es una referencia de cantidades, no una
+  // fotografía contable definitiva. Recalcularlo evita que un valor guardado
+  // antes de capturar conteos, producción o pagos se siga mostrando como actual.
+  if (d.semana.estado === 'cerrada') return guardado;
   const inventarioCentral = d.existencias.filter((e) => e.ubicaciones.tipo === 'bodega');
   const terminado = inventarioCentral.filter((e) => e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima')
-    .reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio)
-      + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio)), 0);
+    .reduce((a, e) => {
+      const costo = costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo);
+      return a + Math.max(0, num0(e.cantidad_disponible)) * costo
+        + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? costo);
+    }, 0);
   const desechables = inventarioCentral.filter((e) => e.products.linea_operacion === 'desechables')
-    .reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio)
-      + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio)), 0);
+    .reduce((a, e) => {
+      const costo = costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo);
+      return a + Math.max(0, num0(e.cantidad_disponible)) * costo
+        + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? costo);
+    }, 0);
   const fresca = d.lotesVivos.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   const congelado = d.lotesVivos.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
   return { carne: r2(terminado + fresca), congelado: r2(congelado), desechables: r2(desechables) };
