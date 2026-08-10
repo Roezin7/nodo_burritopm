@@ -82,9 +82,26 @@ export function calcularCostoSalidaProduccion(costoEntrada: number, pesoSalidaTo
   return { costoTotal, costoUnidad: cantidad > 0 ? r4(costoTotal / cantidad) : 0 };
 }
 
+/**
+ * Para una semana abierta, una proteína puede venderse desde el inventario que
+ * ya existía al inicio de la semana. El snapshot cerrado anterior sigue siendo
+ * la fuente histórica prioritaria; el inventario vivo sólo cubre la apertura
+ * operativa que todavía no tiene snapshot. Una semana cerrada nunca debe leer
+ * costos vivos porque eso reescribiría la historia.
+ */
+export function costoProteinaSinProduccion(
+  costoSnapshot: number | null | undefined,
+  costoInventarioVivo: number | null | undefined,
+  semanaAbierta: boolean,
+) {
+  if (costoSnapshot != null) return costoSnapshot;
+  return semanaAbierta ? (costoInventarioVivo ?? null) : null;
+}
+
 /** Para proteínas producidas en la semana usa costo total / cajas + markup. Si una
  * proteína se vende desde inventario inicial, conserva el costo de la fotografía
- * cerrada anterior; no obliga a inventar una producción para poder facturarla. */
+ * cerrada anterior o, mientras la semana sigue abierta, el costo del inventario
+ * inicial vivo; no obliga a inventar una producción para poder facturarla. */
 export async function preciosVentaSemana(
   negocioId: bigint,
   productos: ProductoPrecioSemanal[],
@@ -113,6 +130,22 @@ export async function preciosVentaSemana(
       },
     },
   }) : null;
+  const [semanaObjetivo, existenciasBodega] = proteinas.length ? await Promise.all([
+    prisma.semanas_operativas.findFirst({
+      where: { negocio_id: negocioId, inicia_at: fecha(desde), termina_at: fecha(hasta) },
+      select: { estado: true },
+    }),
+    prisma.existencias.findMany({
+      where: {
+        negocio_id: negocioId,
+        product_id: { in: proteinas.map((p) => p.id) },
+        ubicaciones: { tipo: 'bodega' },
+        cantidad_disponible: { gt: 0 },
+        costo_promedio: { not: null },
+      },
+      select: { product_id: true, costo_promedio: true },
+    }),
+  ]) : [null, []];
   const costoAnterior = new Map<string, number>();
   for (const inventario of semanaAnterior?.inventario_semanal ?? []) {
     const costo = num(inventario.costo_promedio);
@@ -120,6 +153,14 @@ export async function preciosVentaSemana(
       costoAnterior.set(inventario.product_id.toString(), costo);
     }
   }
+  const costoInventarioVivo = new Map<string, number>();
+  for (const existencia of existenciasBodega) {
+    const costo = num(existencia.costo_promedio);
+    if (costo != null && !costoInventarioVivo.has(existencia.product_id.toString())) {
+      costoInventarioVivo.set(existencia.product_id.toString(), costo);
+    }
+  }
+  const semanaAbierta = semanaObjetivo?.estado !== 'cerrada';
   const producido = new Map<string, { cajas: number; costo: number }>();
   for (const salida of salidas) {
     const clave = salida.product_id.toString();
@@ -132,10 +173,12 @@ export async function preciosVentaSemana(
     if (p.tipo_operativo !== 'proteina') return [p.id.toString(), precioVentaProducto(p)] as const;
     const total = producido.get(p.id.toString());
     const costoArrastrado = costoAnterior.get(p.id.toString());
+    const costoInventario = costoInventarioVivo.get(p.id.toString());
+    const costoSinProduccion = costoProteinaSinProduccion(costoArrastrado, costoInventario, semanaAbierta);
     const precio = total
       ? calcularPrecioProteinaSemanal(total.cajas, total.costo)
-      : costoArrastrado != null
-        ? r4(costoArrastrado + MARKUP_PROTEINA)
+      : costoSinProduccion != null
+        ? r4(costoSinProduccion + MARKUP_PROTEINA)
         : null;
     return [p.id.toString(), precio] as const;
   }));

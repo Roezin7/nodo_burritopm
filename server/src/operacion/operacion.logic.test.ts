@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, fechasConPedidosParciales, fechasDespachables, loteCompraTrasCubrirNegativo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
+import { calcularCoberturaBpm, calcularConsumoFifo, calcularCostoSalidaProduccion, calcularPrecioProteinaSemanal, calcularResumenProteina, costoProteinaSinProduccion, fechasConPedidosParciales, fechasDespachables, loteCompraTrasCubrirNegativo, precioVentaProducto, skuPastorParaEmpresa } from './service.js';
 import { semanaDeFecha } from '../cierre/service.js';
 
 const d = (n: number) => new Prisma.Decimal(n);
@@ -64,6 +64,12 @@ describe('reglas de precio de carne', () => {
   it('usa el costo promedio ponderado de toda la producción semanal más $15', () => {
     expect(calcularPrecioProteinaSemanal(10, 1200)).toBe(135);
     expect(calcularPrecioProteinaSemanal(0, 0)).toBeNull();
+  });
+
+  it('usa el costo del inventario vivo sólo para una semana abierta sin producción', () => {
+    expect(costoProteinaSinProduccion(null, 142.13, true)).toBe(142.13);
+    expect(costoProteinaSinProduccion(null, 142.13, false)).toBeNull();
+    expect(costoProteinaSinProduccion(140, 142.13, true)).toBe(140);
   });
 
   it('separa costo total, costo por caja y venta por caja con markup fijo', () => {
