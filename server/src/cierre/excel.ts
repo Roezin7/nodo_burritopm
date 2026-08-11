@@ -603,9 +603,13 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const saldoAlCierre = (f: Datos['facturasHistoricas'][number]) => Math.max(0, num0(f.total)
     - f.pagos.filter((p) => p.pagado_at <= d.semana.termina_at).reduce((a, p) => a + num0(p.monto), 0));
   const semanasCobro = [d.semana.semana - 2, d.semana.semana - 1, d.semana.semana];
-  const saldosVivos = semanasCobro.map((numero, i) => {
+  const saldosVivos = semanasCobro.map((numero) => {
     const facturasPeriodo = d.facturasHistoricas
-      .filter((f) => i === 0 ? f.semana.semana <= numero : f.semana.semana === numero);
+      // The billing workbook shows the three-week collection cycle as three
+      // separate billing rows. Do not roll every older open invoice into the
+      // first row: that makes `Billing 30` contain weeks 27–29 as well and
+      // causes the exported workbook to diverge from the source workbook.
+      .filter((f) => f.semana.semana === numero);
     // Mientras la semana está abierta/reabierta todavía no existe una factura vigente,
     // pero Billing sí debe mostrar la venta calculada de Closing Week (BW23).
     if (numero === d.semana.semana && facturasPeriodo.length === 0) return meat + markup + paper;
@@ -626,8 +630,7 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     ws.getCell(6 + i, 75).value = r2(saldos[i] ?? 0);
     ws.getCell(6 + i, 77).value = tieneSaldoPersistido && d.semana.estado !== 'cerrada'
       ? (i === 2 ? 'CARTERA · SALDO REGISTRADO' : null)
-      : i === 0 && d.facturasHistoricas.some((f) => f.semana.semana < (semanasCobro[0] ?? 0) && saldoAlCierre(f) > 0)
-        ? `BILLING ${semanasCobro[0]} Y ANTERIORES` : `BILLING ${semanasCobro[i]}`;
+      : `BILLING ${semanasCobro[i]}`;
   }
   const cuentasPorCobrar = tieneSaldoPersistido ? cuentasPorCobrarPersistidas : saldos.reduce((a, x) => a + x, 0);
   const cierreCongelado = d.semana.estado === 'cerrada';
