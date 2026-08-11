@@ -92,7 +92,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   // El administrador entra a una sola área Operación; sus pasos viven dentro de ella.
   // Las rutas directas se conservan para marcadores y enlaces existentes.
   const itemsNavegacion = usuario?.rol === 'admin'
-    ? [items.find((i) => i.ruta === '/')!, OPERACION_ADMIN, items.find((i) => i.ruta === '/facturacion')!, items.find((i) => i.ruta === '/incidencias')!, CONFIGURACION_ADMIN]
+    ? [items.find((i) => i.ruta === '/')!, OPERACION_ADMIN, items.find((i) => i.ruta === '/semana/cierre')!, items.find((i) => i.ruta === '/facturacion')!, items.find((i) => i.ruta === '/incidencias')!, CONFIGURACION_ADMIN]
     : items;
 
   // "Más" siempre visible en móvil: además del overflow, ahí viven Tema y Cerrar sesión
