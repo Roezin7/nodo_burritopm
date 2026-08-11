@@ -4,7 +4,7 @@ import { useAuth } from '../../auth';
 import Spinner from '../../components/Spinner';
 import { useToast } from '../../toast';
 import { nombreEnVenta, productosParaPedido } from '../../operationOrder';
-import { crearSemana, inicioDeSemana, type SemanaSeleccionada } from '../../semana';
+import { crearSemana, type SemanaSeleccionada } from '../../semana';
 import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../../use-unsaved';
 import CapturaSemanalPedidos from './pedidos/CapturaSemanalPedidos';
 import HistorialPedidos from './pedidos/HistorialPedidos';
@@ -21,7 +21,9 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
   const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
-  const { linea, cambiarLinea } = useLineaOperacion('carne');
+  // La línea sigue llegando por URL para conservar enlaces existentes; la captura
+  // semanal ya no expone un selector adicional que distraiga del flujo principal.
+  const { linea } = useLineaOperacion('carne');
   const [ubicacionId, setUbicacionId] = useState('');
   const [fecha, setFecha] = useState('');
   const [fechaManual, setFechaManual] = useState(false);
@@ -111,9 +113,9 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
     setFecha(proxima?.fecha ?? '');
   }, [entregas, semana.inicio]);
 
-  useEffect(() => {
-    if (admin && semana.inicio < inicioDeSemana(hoy())) setVista('historial');
-  }, [admin, semana.inicio]);
+  // Cambiar de semana siempre devuelve al trabajo principal. El historial se
+  // abre sólo cuando el usuario lo solicita explícitamente.
+  useEffect(() => { setVista('captura'); }, [semana.inicio, semana.fin]);
 
   useEffect(() => {
     if (vista !== 'captura' || admin || !ubicacionId || !fecha) {
@@ -198,14 +200,6 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
     finally { setBusy(false); }
   }
 
-  function cambiarLineaPedido(siguiente: Linea) {
-    if (siguiente === linea) return;
-    cambiarLinea(siguiente);
-    setPasoIndividual('captura');
-    setFiltroProductos(siguiente === 'carne' ? 'principales' : 'todos');
-    setBuscar('');
-  }
-
   function cambiarCantidadIndividual(productId: number, valor: string) {
     setCantidades((actuales) => ({ ...actuales, [productId]: valor }));
   }
@@ -264,17 +258,12 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const capturaSemanal = admin;
   return (
     <div className={integrado ? 'order-page order-embedded' : 'page order-page'}>
-      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Pedidos' : 'Pedido'}</span><h1>{admin ? 'Pedidos de la semana' : 'Hacer pedido'}</h1><p className="page-sub">Semana {semana.numero} · {linea === 'carne' ? 'Carne' : 'Desechables'}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
-      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Operación diaria' : 'Pedido'}</span><h2>{admin ? 'Pedidos' : 'Hacer pedido'}</h2><p className="page-sub">Semana {semana.numero} · {linea === 'carne' ? 'Carne' : 'Desechables'}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{admin ? 'Pedidos' : 'Pedido'}</span><h1>{admin ? 'Pedidos de la semana' : 'Hacer pedido'}</h1><p className="page-sub">Semana {semana.numero}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
+      {integrado && <header className="embedded-head embedded-head--status"><div><span className="eyebrow">{admin ? 'Operación diaria' : 'Pedido'}</span><h2>{admin ? 'Pedidos' : 'Hacer pedido'}</h2><p className="page-sub">Semana {semana.numero}</p></div>{vista === 'captura' && !capturaSemanal && estado && <span className={`order-status order-status--${estado}`}>{estado.replaceAll('_', ' ')}</span>}</header>}
       <div className="order-switches">
         {admin && <div className="order-view-actions">
-          <div className="segmented order-view-switch"><button className={vista === 'captura' ? 'tab tab--on' : 'tab'} onClick={() => setVista('captura')}>Captura</button></div>
           <HistoryToggle active={vista === 'historial'} closeLabel="Volver a captura" onToggle={() => setVista(vista === 'historial' ? 'captura' : 'historial')} />
         </div>}
-        <div className="order-line-context"><span className="segmented-context-label">Línea</span><div className="segmented order-line-switch" role="group" aria-label="Línea de pedidos">
-        <button className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('carne')}>Carne</button>
-        <button className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>
-        </div></div>
       </div>
       {error && <p className="error-msg">{error}</p>}
       {vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>

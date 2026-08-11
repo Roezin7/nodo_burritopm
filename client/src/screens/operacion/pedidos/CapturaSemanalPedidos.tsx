@@ -48,10 +48,6 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [refresco, setRefresco] = useState(0);
-  const [herramientas, setHerramientas] = useState(false);
-  const [fechaHerramienta, setFechaHerramienta] = useState('todas');
-  const [ubicacionHerramienta, setUbicacionHerramienta] = useState('todas');
-  const [productoHerramienta, setProductoHerramienta] = useState('todos');
   const [seleccion, setSeleccion] = useState<SeleccionMatriz | null>(null);
   const arrastrandoSeleccion = useRef(false);
   const restauradoRef = useRef<string | null>(null);
@@ -264,32 +260,6 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     setHistorialCambios((historial) => historial.slice(0, -1));
   }
 
-  function clavesDeHerramienta() {
-    const formato = filasFormato.find((fila) => fila.nombre === productoHerramienta);
-    const claves: string[] = [];
-    for (const fila of programadas) {
-      if (ubicacionHerramienta !== 'todas' && fila.ubicacion.id !== Number(ubicacionHerramienta)) continue;
-      for (const entrega of fila.entregas) {
-        if (fechaHerramienta !== 'todas' && entrega.fecha !== fechaHerramienta) continue;
-        const pedido = porClave.get(clavePedidoSemanal(fila.ubicacion.id, entrega.fecha));
-        if (!pedidoEditable(pedido)) continue;
-        for (const producto of fila.productos) {
-          if (formato && !formato.skus.includes(producto.sku)) continue;
-          claves.push(claveCantidadSemanal(fila.ubicacion.id, entrega.fecha, producto.id));
-        }
-      }
-    }
-    return claves;
-  }
-
-  function limpiarAlcance() {
-    aplicarValores(clavesDeHerramienta().map((clave) => ({ clave, valor: '' })));
-  }
-
-  function restaurarAlcance() {
-    aplicarValores(clavesDeHerramienta().map((clave) => ({ clave, valor: cantidadesGuardadas[clave] ?? '' })));
-  }
-
   function pegarMatriz(
     evento: ReactClipboardEvent<HTMLInputElement>,
     fechaEntrega: string,
@@ -493,16 +463,8 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
     <section className="workspace-card weekly-sales-toolbar">
       <div><span className="eyebrow">Semana {semana.numero}</span><h2>Pedidos por restaurante</h2><p>{etiquetaRango(semana)}</p></div>
       <label className="field"><span>Buscar restaurante</span><input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre o empresa" /></label>
-      <div className="weekly-sales-toolbar-actions"><button className="btn btn-ghost" disabled={cargando || busy || cambios.length > 0} title={cambios.length > 0 ? 'Guarda o descarta tus cambios antes de actualizar' : 'Traer los pedidos más recientes'} onClick={() => setRefresco((actual) => actual + 1)}><Icono name="refresh" size={16} /> Actualizar</button>{historialCambios.length > 0 && <button className="btn btn-ghost" disabled={busy} onClick={deshacer}>Deshacer</button>}<button className="btn btn-secondary" disabled={cargando || busy || semanaCerrada} onClick={() => setHerramientas((actual) => !actual)}>{herramientas ? 'Cerrar herramientas' : 'Herramientas'}</button>{cambios.length === 0 && <button className="btn btn-primary" disabled={cargando || busy || semanaCerrada} onClick={() => void guardarSemana(true)}>{busy ? 'Confirmando…' : 'Confirmar semana'}</button>}</div>
+      <div className="weekly-sales-toolbar-actions"><button className="btn btn-ghost" disabled={cargando || busy || cambios.length > 0} title={cambios.length > 0 ? 'Guarda o descarta tus cambios antes de actualizar' : 'Traer los pedidos más recientes'} onClick={() => setRefresco((actual) => actual + 1)}><Icono name="refresh" size={16} /> Actualizar</button>{historialCambios.length > 0 && <button className="btn btn-ghost" disabled={busy} onClick={deshacer}>Deshacer</button>}{cambios.length === 0 && <button className="btn btn-primary" disabled={cargando || busy || semanaCerrada} onClick={() => void guardarSemana(true)}>{busy ? 'Confirmando…' : 'Confirmar semana'}</button>}</div>
     </section>
-    {herramientas && <section className="workspace-card weekly-sales-tools">
-      <div><span className="eyebrow">Acciones masivas</span><strong>Elige qué parte de la cuadrícula quieres modificar</strong></div>
-      <label className="field"><span>Fecha</span><select value={fechaHerramienta} onChange={(e) => setFechaHerramienta(e.target.value)}><option value="todas">Toda la semana</option>{[...new Set(programadas.flatMap((fila) => fila.entregas.map((entrega) => entrega.fecha)))].sort().map((fechaEntrega) => <option value={fechaEntrega} key={fechaEntrega}>{fechaLarga(fechaEntrega)}</option>)}</select></label>
-      <label className="field"><span>Restaurante</span><select value={ubicacionHerramienta} onChange={(e) => setUbicacionHerramienta(e.target.value)}><option value="todas">Todos</option>{programadas.map((fila) => <option value={fila.ubicacion.id} key={fila.ubicacion.id}>{fila.ubicacion.nombre}</option>)}</select></label>
-      <label className="field"><span>Producto</span><select value={productoHerramienta} onChange={(e) => setProductoHerramienta(e.target.value)}><option value="todos">Todos</option>{filasFormato.map((fila) => <option value={fila.nombre} key={fila.nombre}>{fila.nombre}</option>)}</select></label>
-      <div className="weekly-sales-tools__actions"><button className="btn btn-secondary" disabled={busy} onClick={restaurarAlcance}>Restaurar guardado</button><button className="btn btn-danger-ghost" disabled={busy} onClick={limpiarAlcance}>Limpiar selección</button></div>
-      <small>Puedes pegar un bloque copiado de Excel directamente sobre cualquier celda. Las filas y columnas se llenarán desde ese punto.</small>
-    </section>}
     {error && <p className="error-msg">{error}</p>}
     {semanaCerrada && <p className="notice notice--warning">La semana {semana.numero} está cerrada. Reábrela para corregir sus ventas.</p>}
     <div className="metric-strip metric-strip--four"><div><span>Restaurantes</span><strong>{programadas.length}</strong></div><div><span>Pedidos capturados</span><strong>{ventasCapturadas}</strong></div><div><span>Unidades de {linea}</span><strong>{unidades.toLocaleString('es-MX')}</strong></div><div><span>Importe de pedidos</span><strong>{usd(importe)}</strong></div></div>

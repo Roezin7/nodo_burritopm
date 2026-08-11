@@ -256,16 +256,17 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo eliminar la compra.'); } finally { setBusy(false); }
   }
 
-  const comprasAgrupadas = [...resumen.compras]
-    .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id - a.id)
-    .reduce<{ fecha: string; compras: Resumen['compras']; total: number }[]>((grupos, compra) => {
-      const ultimo = grupos[grupos.length - 1];
-      if (ultimo?.fecha === compra.fecha) {
-        ultimo.compras.push(compra);
-        ultimo.total += compra.total;
-      } else grupos.push({ fecha: compra.fecha, compras: [compra], total: compra.total });
-      return grupos;
-    }, []);
+  const comprasPorProveedor = useMemo(() => {
+    const ordenadas = [...resumen.compras].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id);
+    const grupos = new Map<number, { proveedor_id: number; proveedor: string; compras: Resumen['compras']; total: number }>();
+    for (const compra of ordenadas) {
+      const grupo = grupos.get(compra.proveedor_id) ?? { proveedor_id: compra.proveedor_id, proveedor: compra.proveedor, compras: [], total: 0 };
+      grupo.compras.push(compra);
+      grupo.total += compra.total;
+      grupos.set(compra.proveedor_id, grupo);
+    }
+    return [...grupos.values()].sort((a, b) => a.proveedor.localeCompare(b.proveedor, 'es-MX'));
+  }, [resumen.compras]);
   const totalCarne = resumen.compras.filter((compra) => lineaDeCompra(compra) === 'carne').reduce((total, compra) => total + compra.total, 0);
   const totalDesechables = resumen.compras.filter((compra) => lineaDeCompra(compra) === 'desechables').reduce((total, compra) => total + compra.total, 0);
 
@@ -300,10 +301,10 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
 
     <CollapsibleSection title="Compras registradas" count={resumen.cantidad_compras} summary={`Semana ${semana.numero} · ${usd(resumen.total_compras)}`} className="purchase-history">
       <div className="purchase-history-totals"><span><small>Carne</small><strong>{usd(totalCarne)}</strong></span><span><small>Desechables</small><strong>{usd(totalDesechables)}</strong></span><span><small>Total semanal</small><strong>{usd(resumen.total_compras)}</strong></span></div>
-      {comprasAgrupadas.length === 0 ? <div className="empty-state"><strong>Sin compras registradas</strong></div> : <div className="purchase-day-groups">{comprasAgrupadas.map((grupo) => <section className="purchase-day-group" key={grupo.fecha}>
-        <header><div><strong>{new Date(`${grupo.fecha}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}</strong><small>{grupo.compras.length} compra{grupo.compras.length === 1 ? '' : 's'}</small></div><strong>{usd(grupo.total)}</strong></header>
+      {comprasPorProveedor.length === 0 ? <div className="empty-state"><strong>Sin compras registradas</strong></div> : <div className="purchase-provider-groups">{comprasPorProveedor.map((grupo) => <section className="purchase-provider-group" key={grupo.proveedor_id}>
+        <header><div><strong>{grupo.proveedor}</strong><small>{grupo.compras.length} factura{grupo.compras.length === 1 ? '' : 's'} · acumulado en la semana</small></div><strong>{usd(grupo.total)}</strong></header>
         <div className="purchase-records">{grupo.compras.map((c) => { const costoInventarioCompra = c.lineas.reduce((total, lineaCompra) => total + (lineaCompra.es_cargo_compra ? 0 : lineaCompra.costo), 0); const cargosCompra = c.lineas.reduce((total, lineaCompra) => total + (lineaCompra.es_cargo_compra ? lineaCompra.costo : 0), 0); const totalLineas = costoInventarioCompra + cargosCompra; const tipoCompra = lineaDeCompra(c); return <article className="purchase-record" key={c.id}>
-          <div className="purchase-record__main"><div><span className={`chip ${tipoCompra === 'carne' ? 'chip--warn' : 'chip--info'}`}>{tipoCompra === 'carne' ? 'Carne' : 'Desechables'}</span><strong>{c.proveedor}</strong></div><span>{c.referencia || `Compra #${c.id}`} · vence {c.vence_at}</span></div>
+          <div className="purchase-record__main"><div><span className={`chip ${tipoCompra === 'carne' ? 'chip--warn' : 'chip--info'}`}>{tipoCompra === 'carne' ? 'Carne' : 'Desechables'}</span><strong>{c.referencia || `Compra #${c.id}`}</strong></div><span>{new Date(`${c.fecha}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })} · vence {c.vence_at}</span></div>
           <div className="purchase-record__amount"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span></div>
           <details className="purchase-record__detail"><summary><span>{c.lineas.length} producto{c.lineas.length === 1 ? '' : 's'}</span><small>{cargosCompra > 0 ? `Inventario ${usd(costoInventarioCompra)} · cargos ${usd(cargosCompra)}` : `Inventario ${usd(costoInventarioCompra)}`}</small><i>⌄</i></summary><div>{c.lineas.map((l, i) => <div key={i}><span><strong>{l.producto}</strong><small>{l.es_cargo_compra ? 'Cargo contable · sin inventario' : `${l.cajas} cajas${l.peso_lb > 0 ? ` · ${l.peso_lb.toLocaleString('es-MX')} lb · ${(l.peso_lb / l.cajas).toFixed(2)} lb/caja` : ''}`}{l.congelado ? ' · congelado' : ''}</small></span><strong>{usd(l.costo)}</strong></div>)}{Math.abs(c.total - totalLineas) > 0.009 && <p>Renglones {usd(totalLineas)} · factura {usd(c.total)}</p>}</div></details>
           <div className="purchase-record__actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div>
@@ -637,7 +638,7 @@ function Produccion({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDon
       <div className="form-actions"><button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setExtraordinariaAbierta(false)}>Cancelar</button><button type="button" className="btn btn-primary" disabled={busy || !productosExtraordinarios.some((producto) => Number(cantidadesExtraordinarias[producto.id] || 0) > 0)} onClick={() => void guardarExtraordinaria()}>{busy ? 'Guardando…' : 'Registrar producción'}</button></div>
     </Modal>}
 
-    <CollapsibleSection title="Resumen semanal por proteína" count={resumen.resumen_proteinas.length} summary="Costo por caja + $15">
+    <CollapsibleSection title="Resumen semanal por proteína" count={resumen.resumen_proteinas.length} summary="Costo por caja + $15" defaultOpen={false}>
       {resumen.resumen_proteinas.length === 0 ? <div className="empty-state"><strong>Sin producción registrada</strong><span>El resumen aparecerá al guardar las proteínas de esta semana.</span></div> : <div className="protein-summary-list">
         {resumen.resumen_proteinas.map((p) => <article className="protein-summary-row" key={p.product_id}>
           <div className="protein-summary-name"><strong>{p.producto}</strong><span>{p.cajas.toLocaleString('es-MX')} cajas producidas</span></div>

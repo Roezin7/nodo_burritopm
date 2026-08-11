@@ -3555,13 +3555,13 @@ form > .form-actions .btn,
 .purchase-history-totals > span:last-child { border-right: 0; }
 .purchase-history-totals small { color: var(--ink-3); font-size: 0.65rem; }
 .purchase-history-totals strong { margin-top: 0.1rem; font: 800 0.95rem var(--font-mono); }
-.purchase-day-groups { display: flex; flex-direction: column; }
-.purchase-day-group + .purchase-day-group { border-top: 1px solid var(--border); }
-.purchase-day-group > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.7rem 1rem; background: color-mix(in srgb, var(--surface-2) 72%, var(--surface)); }
-.purchase-day-group > header > div { display: flex; flex-direction: column; }
-.purchase-day-group > header > div > strong { font-size: 0.8rem; text-transform: capitalize; }
-.purchase-day-group > header small { color: var(--ink-3); font-size: 0.63rem; }
-.purchase-day-group > header > strong { font: 800 0.88rem var(--font-mono); }
+.purchase-provider-groups { display: flex; flex-direction: column; }
+.purchase-provider-group + .purchase-provider-group { border-top: 1px solid var(--border); }
+.purchase-provider-group > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.7rem 1rem; background: color-mix(in srgb, var(--surface-2) 72%, var(--surface)); }
+.purchase-provider-group > header > div { display: flex; flex-direction: column; }
+.purchase-provider-group > header > div > strong { font-size: 0.82rem; }
+.purchase-provider-group > header small { color: var(--ink-3); font-size: 0.63rem; }
+.purchase-provider-group > header > strong { font: 800 0.92rem var(--font-mono); }
 .purchase-records { display: flex; flex-direction: column; padding: 0 1rem; }
 .purchase-record { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.55rem 0.9rem; padding: 0.72rem 0; border-top: 1px solid var(--border); }
 .purchase-record:first-child { border-top: 0; }
@@ -3631,7 +3631,7 @@ form > .form-actions .btn,
   .purchase-history-totals { grid-template-columns: 1fr; }
   .purchase-history-totals > span { flex-direction: row; justify-content: space-between; border-right: 0; border-bottom: 1px solid var(--border); }
   .purchase-history-totals > span:last-child { border-bottom: 0; }
-  .purchase-day-group > header { align-items: flex-end; }
+  .purchase-provider-group > header { align-items: flex-end; }
   .purchase-records { padding: 0 0.75rem; }
   .purchase-record__main > div { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
   .purchase-record__detail > summary { grid-template-columns: auto minmax(0, 1fr) auto; }

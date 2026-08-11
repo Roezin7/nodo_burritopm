@@ -248,7 +248,7 @@ export default function Facturacion() {
     <header className="page-head billing-page-head"><div><span className="eyebrow">Finanzas</span><h1>{tipo === 'pagar' ? 'Cuentas por pagar' : 'Facturación a restaurantes'}</h1><p className="page-sub">{tipo === 'pagar' ? 'Documentos y pagos agrupados por proveedor.' : 'Facturas generadas por el cierre y ventana operativa de tres semanas.'}</p></div></header>
     {error && <p className="notice notice--error">{error}</p>}
 
-    {tipo === 'pagar' && datos.excepciones.length > 0 && <details className="billing-help billing-exceptions" open>
+    {tipo === 'pagar' && datos.excepciones.length > 0 && <details className="billing-help billing-exceptions">
       <summary>{datos.excepciones.length} excepción{datos.excepciones.length === 1 ? '' : 'es'} por revisar</summary>
       <div>{datos.excepciones.map((excepcion, indice) => <button type="button" key={`${excepcion.tipo}:${excepcion.compra_id}:${indice}`} onClick={() => { const factura = datos.recibidas.find((item) => item.id === excepcion.compra_id); if (factura) setDetalle({ tipo: 'pagar', factura }); }}><span><strong>{excepcion.titulo}</strong><small>{excepcion.detalle}</small></span><Icono name="chevron" size={16} /></button>)}</div>
     </details>}
