@@ -9,6 +9,12 @@ import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { avisarAdminFaltantesInventario } from '../push/service.js';
+import { costoParaValuacionInventario, valorExistencia } from '../inventario/valuacion.js';
+
+// Compatibilidad para consumidores existentes; la implementación vive en el
+// módulo común de valuación para que cierre, inventario, dashboard y exports
+// no vuelvan a divergir.
+export { costoParaValuacionInventario } from '../inventario/valuacion.js';
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
@@ -33,19 +39,6 @@ export function saldoParaCierreSemanal(cantidad: number) {
 /** El cierre usa el saldo vigente al momento de ejecutarse; la fecha del pago es informativa. */
 export function saldoCuentaPorPagar(total: number, pagos: number[]) {
   return Math.max(0, r2(total - pagos.reduce((suma, monto) => suma + monto, 0)));
-}
-
-/**
- * Valuación defensiva: algunos saldos históricos sólo conservaron el costo en
- * products y dejaron existencias.costo_promedio nulo. Un renglón con cantidad no
- * puede valuarse como cero por esa ausencia de metadato.
- */
-export function costoParaValuacionInventario(
-  costoExistencia: number | Prisma.Decimal | null | undefined,
-  costoProducto: number | Prisma.Decimal | null | undefined,
-  ultimoCosto: number | Prisma.Decimal | null | undefined,
-) {
-  return num(costoExistencia) ?? num(costoProducto) ?? num(ultimoCosto) ?? 0;
 }
 
 export interface DocumentoCarteraCliente {
@@ -268,10 +261,8 @@ async function valuacionInventario(
   for (const e of existencias) {
     const cantidad = cantidadesAisladas.get(`${e.ubicacion_id}:${e.product_id}`)
       ?? num0(e.cantidad_disponible);
-    const costo = costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo);
-    const costoTransito = num(e.costo_transito_promedio) ?? costo;
-    const valor = Math.max(0, cantidad) * costo
-      + Math.max(0, num0(e.cantidad_transito)) * costoTransito;
+    const valor = valorExistencia(cantidad, e.cantidad_transito, e.costo_promedio,
+      e.costo_transito_promedio, e.products.costo_promedio, e.products.ultimo_costo);
     if (e.products.linea_operacion === 'desechables') desechables += valor;
     else if (e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima') terminada += valor;
   }
@@ -581,7 +572,10 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
     const [existencias, lotesCierre] = await Promise.all([
       tx.existencias.findMany({
         where: { negocio_id: negocioId },
-        include: { ubicaciones: { select: { tipo: true } } },
+        include: {
+          ubicaciones: { select: { tipo: true } },
+          products: { select: { costo_promedio: true, ultimo_costo: true } },
+        },
       }),
       tx.lotes_materia_prima.findMany({ where: { negocio_id: negocioId, cajas_disponibles: { gt: 0 } } }),
     ]);
@@ -640,10 +634,10 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
           semana_id: semana.id, negocio_id: negocioId, ubicacion_id: e.ubicacion_id, product_id: e.product_id,
           cantidad_disponible: disponible, cantidad_faltante: saldo.faltante, cantidad_reservada: reservada,
           cantidad_transito: transito,
-          costo_promedio: e.costo_promedio,
-          costo_transito_promedio: e.costo_transito_promedio,
+          costo_promedio: costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo),
+          costo_transito_promedio: num(e.costo_transito_promedio) ?? costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo),
           peso_total_lb: lote?.peso ?? null,
-          costo_total: lote?.costo ?? r2(disponible * num0(e.costo_promedio)),
+          costo_total: lote?.costo ?? r2(disponible * costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo)),
         }; }),
       });
     }

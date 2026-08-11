@@ -10,8 +10,6 @@ import HistoryToggle from '../../components/HistoryToggle';
 import { useUnsavedChanges } from '../../use-unsaved';
 import { useDialog } from '../../dialog';
 
-type Linea = 'todas' | 'carne' | 'desechables';
-
 interface Almacen {
   id: number;
   nombre: string;
@@ -62,7 +60,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const [almacenes, setAlmacenes] = useState<Almacen[]>([]);
   const [almacenId, setAlmacenId] = useState('');
   const [stock, setStock] = useState<Stock | null>(null);
-  const [linea, setLinea] = useState<Linea>('todas');
+  const [resumenAlmacenes, setResumenAlmacenes] = useState<Record<number, number>>({});
   const [buscar, setBuscar] = useState('');
   const [error, setError] = useState('');
   const [editando, setEditando] = useState(false);
@@ -107,6 +105,21 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       })
       .catch((e) => { if (solicitud === cargaActual.current) setError(e instanceof ApiError ? e.message : 'No se pudo cargar el inventario.'); });
   }, [almacenId, admin, semana.inicio]);
+
+  useEffect(() => {
+    if (!almacenes.length) {
+      setResumenAlmacenes({});
+      return;
+    }
+    let vivo = true;
+    Promise.all(almacenes.map(async (almacen) => {
+      const resultado = await api<Stock>(`/existencias?ubicacion=${almacen.id}&semana=${semana.inicio}`);
+      return [almacen.id, resultado.valor_total] as const;
+    }))
+      .then((filas) => { if (vivo) setResumenAlmacenes(Object.fromEntries(filas)); })
+      .catch(() => { if (vivo) setResumenAlmacenes({}); });
+    return () => { vivo = false; };
+  }, [almacenes, semana.inicio]);
   useEffect(() => { setFecha(fechaDentroDeSemana(semana)); setEditando(false); setTocados(new Set()); }, [semana.inicio, semana.fin]);
 
   async function recargar() {
@@ -133,12 +146,11 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const filas = useMemo(() => {
     const q = buscar.trim().toLowerCase();
     return itemsPeriodo.filter((i) => {
-      if (linea !== 'todas' && i.linea !== linea) return false;
       if (q && !`${i.nombre} ${i.sku} ${i.tipo ?? ''}`.toLowerCase().includes(q)) return false;
       if (editando && soloDiferencias && Number(cantidades[i.product_id] || 0) === i.disponible) return false;
       return editando || i.disponible !== 0 || i.reservada !== 0 || i.transito !== 0 || (i.faltante ?? 0) > 0;
     });
-  }, [itemsPeriodo, linea, buscar, editando, soloDiferencias, cantidades]);
+  }, [itemsPeriodo, buscar, editando, soloDiferencias, cantidades]);
 
   const totales = filas.reduce((a, i) => ({
     disponible: a.disponible + i.disponible,
@@ -147,6 +159,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     valor: a.valor + i.valor,
   }), { disponible: 0, reservado: 0, transito: 0, valor: 0 });
   const almacenActual = almacenes.find((a) => String(a.id) === almacenId);
+  const totalInventarios = almacenes.reduce((total, almacen) => total + (resumenAlmacenes[almacen.id] ?? 0), 0);
 
   function iniciarCierre() {
     setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(i.disponible)])));
@@ -246,9 +259,6 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
       <div className="segmented" aria-label="Almacén">
         {almacenes.map((a) => <button key={a.id} className={String(a.id) === almacenId ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => void cambiarAlmacen(String(a.id))}>{a.nombre}</button>)}
       </div>
-      <div className="segmented segmented--small" aria-label="Línea de inventario">
-        {([['todas', 'Todo'], ['carne', 'Carne'], ['desechables', 'Desechables']] as [Linea, string][]).map(([k, label]) => <button key={k} className={linea === k ? 'segmented-btn is-active' : 'segmented-btn'} onClick={() => setLinea(k)}>{label}</button>)}
-      </div>
     </div>
 
     {error && <p className="error-msg">{error}</p>}
@@ -260,6 +270,10 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
         <div><span>Existencia</span><strong>{totales.disponible.toLocaleString('es-MX')}</strong></div>
         <div><span>En reserva</span><strong>{totales.reservado.toLocaleString('es-MX')}</strong></div>
         <div><span>En tránsito / hold</span><strong>{totales.transito.toLocaleString('es-MX')}</strong></div>
+      </div>
+      <div className="metric-strip metric-strip--three inventory-total-strip">
+        {almacenes.map((almacen) => <div key={almacen.id}><span>{almacen.nombre}</span><strong>{resumenAlmacenes[almacen.id] == null ? '—' : usd(resumenAlmacenes[almacen.id])}</strong></div>)}
+        <div><span>Total inventarios</span><strong>{almacenes.length && Object.keys(resumenAlmacenes).length < almacenes.length ? '—' : usd(totalInventarios)}</strong></div>
       </div>
 
       <CollapsibleSection title={editando ? 'Captura física' : 'Productos'} count={filas.length} defaultOpen className="inventory-product-list">
@@ -277,7 +291,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
             <span data-label="Costo">{i.costo_promedio == null ? '—' : usd(i.costo_promedio)}{i.transito > 0 && i.costo_transito_promedio != null && <small>Hold {usd(i.costo_transito_promedio)}</small>}</span>
             <span data-label="Valor"><strong>{usd(editando ? fisico * (i.costo_promedio ?? 0) : i.valor)}</strong></span>
           </div>; })}
-          {!filas.length && <div className="empty-state"><strong>Sin resultados</strong><span>Cambia el almacén o la línea.</span></div>}
+          {!filas.length && <div className="empty-state"><strong>Sin resultados</strong><span>Cambia el almacén o la búsqueda.</span></div>}
         </div>
       </CollapsibleSection>
       {admin && <><div className="history-access-bar"><strong>Conteos físicos · semana {semana.numero}</strong><HistoryToggle active={mostrarHistorial} openLabel={`Consultar anteriores (${historialSemana.length})`} onToggle={() => setMostrarHistorial((actual) => !actual)} /></div>{mostrarHistorial && <section className="workspace-card inventory-history">{historialSemana.length ? <div className="record-list">{historialSemana.map((inventario) => <article className="record-row" key={inventario.id}><div className="record-main"><strong>{inventario.fecha}</strong><span>{inventario.ubicacion} · {inventario.ajustes} renglones</span>{inventario.motivo && <small>{inventario.motivo}</small>}</div><div className="record-total"><span className={`chip ${inventario.tipo === 'anterior' ? 'chip--warn' : 'chip--ok'}`}>{inventario.tipo === 'anterior' ? 'Anterior' : 'Trazable'}</span><button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void eliminarInventario(inventario)}>Eliminar</button></div></article>)}</div> : <div className="empty-state"><strong>Sin conteo físico · no bloquea el cierre</strong></div>}</section>}</>}

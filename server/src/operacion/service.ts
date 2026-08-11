@@ -2,6 +2,7 @@ import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { num, num0 } from '../lib/num.js';
+import { costoParaValuacionInventario } from '../inventario/valuacion.js';
 import { HttpError } from '../middleware/error.js';
 import { eliminarConteo, eliminarConteoEnTx } from '../conteos/service.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
@@ -126,7 +127,11 @@ export async function preciosVentaSemana(
           ubicacion: { tipo: 'bodega' },
           cantidad_disponible: { gt: 0 },
         },
-        select: { product_id: true, costo_promedio: true },
+        select: {
+          product_id: true,
+          costo_promedio: true,
+          producto: { select: { costo_promedio: true, ultimo_costo: true } },
+        },
       },
     },
   }) : null;
@@ -141,22 +146,25 @@ export async function preciosVentaSemana(
         product_id: { in: proteinas.map((p) => p.id) },
         ubicaciones: { tipo: 'bodega' },
         cantidad_disponible: { gt: 0 },
-        costo_promedio: { not: null },
       },
-      select: { product_id: true, costo_promedio: true },
+      select: {
+        product_id: true,
+        costo_promedio: true,
+        products: { select: { costo_promedio: true, ultimo_costo: true } },
+      },
     }),
   ]) : [null, []];
   const costoAnterior = new Map<string, number>();
   for (const inventario of semanaAnterior?.inventario_semanal ?? []) {
-    const costo = num(inventario.costo_promedio);
-    if (costo != null && !costoAnterior.has(inventario.product_id.toString())) {
+    const costo = costoParaValuacionInventario(inventario.costo_promedio, inventario.producto.costo_promedio, inventario.producto.ultimo_costo);
+    if (costo > 0 && !costoAnterior.has(inventario.product_id.toString())) {
       costoAnterior.set(inventario.product_id.toString(), costo);
     }
   }
   const costoInventarioVivo = new Map<string, number>();
   for (const existencia of existenciasBodega) {
-    const costo = num(existencia.costo_promedio);
-    if (costo != null && !costoInventarioVivo.has(existencia.product_id.toString())) {
+    const costo = costoParaValuacionInventario(existencia.costo_promedio, existencia.products.costo_promedio, existencia.products.ultimo_costo);
+    if (costo > 0 && !costoInventarioVivo.has(existencia.product_id.toString())) {
       costoInventarioVivo.set(existencia.product_id.toString(), costo);
     }
   }

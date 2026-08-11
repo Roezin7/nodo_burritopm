@@ -4,7 +4,7 @@ import path from 'node:path';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
-import { costoParaValuacionInventario } from './service.js';
+import { costoParaValuacionInventario } from '../inventario/valuacion.js';
 
 export type TipoExcel = 'weekly-order' | 'disposables' | 'production' | 'billing' | 'lbt' | 'aurora';
 
@@ -459,8 +459,9 @@ function llenarProduccion(wb: ExcelJS.Workbook, d: Datos) {
     const cajasFinales = Math.max(0, num0(ex?.cantidad_disponible));
     const pesoFinal = ex?.peso_total_lb != null ? num0(ex.peso_total_lb)
       : lotes.length ? lotes.reduce((a, l) => a + num0(l.peso_disponible_lb), 0) : cajasFinales * Number(producto.peso_caja_lb ?? 0);
+    const costoBase = costoParaValuacionInventario(ex?.costo_promedio, producto.costo_promedio, producto.ultimo_costo);
     const costoFinal = ex?.costo_total != null ? num0(ex.costo_total)
-      : lotes.length ? lotes.reduce((a, l) => a + num0(l.costo_disponible), 0) : cajasFinales * num0(ex?.costo_promedio);
+      : lotes.length ? lotes.reduce((a, l) => a + num0(l.costo_disponible), 0) : cajasFinales * costoBase;
     ws.getCell(totalRow, 13).value = cajasFinales;
     ws.getCell(totalRow, 15).value = r2(pesoFinal);
     ws.getCell(totalRow, 17).value = r2(costoFinal);
@@ -481,7 +482,8 @@ function llenarProduccion(wb: ExcelJS.Workbook, d: Datos) {
     ws.getCell(row, 37).value = vendido;
     const existencias = d.existencias.filter((e) => e.ubicacion_id === carniceria?.id && ids.has(e.product_id.toString()));
     const final = existencias.reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)), 0);
-    const valorFinal = existencias.reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio), 0);
+    const valorFinal = existencias.reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible))
+      * costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo), 0);
     const inicial = final + vendido - producido;
     const pesoCaja = Number(productos[0]?.peso_caja_lb ?? 0);
     const costoInicial = final > 0 ? valorFinal / final : Math.max(0, precioVentaGrupo(d, productos) - (productos.some((p) => p.tipo_operativo === 'proteina') ? MARKUP_PROTEINA : 0));

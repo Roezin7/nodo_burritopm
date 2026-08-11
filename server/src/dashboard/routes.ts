@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
+import { valorExistencia } from '../inventario/valuacion.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
 import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, semanaDeFecha } from '../cierre/service.js';
@@ -257,16 +258,26 @@ dashboardRouter.get(
     let desechables = 0;
     for (const e of existencias) {
       if (e.products.tipo_operativo === 'materia_prima') continue; // los lotes conservan el costo exacto y el estado fresco/congelado
-      const costoDisponible = num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0;
-      const costoTransito = num(e.costo_transito_promedio) ?? costoDisponible;
-      const valor = Math.max(0, num0(e.cantidad_disponible)) * costoDisponible
-        + Math.max(0, num0(e.cantidad_transito)) * costoTransito;
+      const valor = valorExistencia(
+        e.cantidad_disponible,
+        e.cantidad_transito,
+        e.costo_promedio,
+        e.costo_transito_promedio,
+        e.products.costo_promedio,
+        e.products.ultimo_costo,
+      );
       if (e.products.linea_operacion === 'carne') carneTerminada += valor;
       if (e.products.linea_operacion === 'desechables') desechables += valor;
     }
     const materiaTotalSnapshot = snapshot.filter((e) => e.producto.tipo_operativo === 'materia_prima')
-      .reduce((a, e) => a + Math.max(0, num0(e.cantidad_disponible)) * num0(e.costo_promedio)
-        + Math.max(0, num0(e.cantidad_transito)) * (num(e.costo_transito_promedio) ?? num0(e.costo_promedio)), 0);
+      .reduce((a, e) => a + valorExistencia(
+        e.cantidad_disponible,
+        e.cantidad_transito,
+        e.costo_promedio,
+        e.costo_transito_promedio,
+        e.producto.costo_promedio,
+        e.producto.ultimo_costo,
+      ), 0);
     const materiaCongelada = snapshot.length ? num0(semana?.valor_congelado) : lotes.filter((l) => l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
     const materiaFresca = snapshot.length ? Math.max(0, materiaTotalSnapshot - materiaCongelada) : lotes.filter((l) => !l.congelado).reduce((a, l) => a + num0(l.costo_disponible), 0);
     if (snapshot.length && semana) {
@@ -388,8 +399,14 @@ dashboardRouter.get(
       });
       let valor = 0;
       for (const e of existencias) {
-        const costo = num(e.costo_promedio) ?? num(e.products.ultimo_costo) ?? num(e.products.costo_promedio) ?? 0;
-        valor += Math.max(0, num0(e.cantidad_disponible)) * costo;
+        valor += valorExistencia(
+          e.cantidad_disponible,
+          e.cantidad_transito,
+          e.costo_promedio,
+          e.costo_transito_promedio,
+          e.products.costo_promedio,
+          e.products.ultimo_costo,
+        );
       }
 
       // Bajo mínimo aplica al inventario operativo de bodega; sucursales ya piden directo.

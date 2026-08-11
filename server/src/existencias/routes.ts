@@ -10,6 +10,7 @@ import { idempotencyKey } from '../lib/validation.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { randomUUID } from 'node:crypto';
 import { obtenerConciliacionSemanal, obtenerInventarioSemanalDesechables, rangoSemana } from '../operacion/conciliacion.js';
+import { costoParaValuacionInventario, valorExistencia } from '../inventario/valuacion.js';
 
 export const existenciasRouter = Router();
 
@@ -332,7 +333,17 @@ existenciasRouter.get(
     const ubicaciones = await prisma.ubicaciones.findMany({
       where: { negocio_id: negocioId, activo: true },
       orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
-      include: { existencias: { select: { cantidad_disponible: true, costo_promedio: true } } },
+      include: {
+        existencias: {
+          select: {
+            cantidad_disponible: true,
+            cantidad_transito: true,
+            costo_promedio: true,
+            costo_transito_promedio: true,
+            products: { select: { costo_promedio: true, ultimo_costo: true } },
+          },
+        },
+      },
     });
     const filas = ubicaciones.map((u) => {
       let valor = 0;
@@ -340,8 +351,14 @@ existenciasRouter.get(
       for (const e of u.existencias) {
         const disp = Math.max(0, num0(e.cantidad_disponible));
         if (disp > 0) skus++;
-        const costo = num(e.costo_promedio);
-        if (costo != null) valor += disp * costo;
+        valor += valorExistencia(
+          e.cantidad_disponible,
+          e.cantidad_transito,
+          e.costo_promedio,
+          e.costo_transito_promedio,
+          e.products.costo_promedio,
+          e.products.ultimo_costo,
+        );
       }
       return { id: Number(u.id), nombre: u.nombre, tipo: u.tipo, skus, valor: Math.round(valor * 100) / 100 };
     });
@@ -403,7 +420,7 @@ existenciasRouter.get(
       // debe congelarlos con los valores del snapshot.
       const componentesVivos = !usarSnapshot && semana?.estado === 'abierta';
       const transito = conciliacionHistorica && !componentesVivos ? 0 : Math.max(0, num0(e?.cantidad_transito));
-      const costo = num(e?.costo_promedio) ?? (usarSnapshot ? null : num(producto.ultimo_costo) ?? num(producto.costo_promedio));
+      const costo = costoParaValuacionInventario(e?.costo_promedio, producto.costo_promedio, producto.ultimo_costo);
       const costoTransito = num(e?.costo_transito_promedio) ?? costo;
       return {
         product_id: Number(producto.id),
@@ -422,7 +439,7 @@ existenciasRouter.get(
           : Math.max(0, -saldoReal),
         costo_promedio: costo,
         costo_transito_promedio: costoTransito,
-        valor: Math.round((disp * (costo ?? 0) + transito * (costoTransito ?? 0)) * 100) / 100,
+        valor: Math.round((disp * costo + transito * costoTransito) * 100) / 100,
       };
     });
     res.json({
