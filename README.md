@@ -24,6 +24,37 @@ El sistema deriva el resto: consolidación, documentos de despacho, movimientos 
 costos, facturas, cuentas por cobrar, conciliación y fotografías de cierre. El admin conserva
 control para corregir capturas mientras la semana sea editable.
 
+## Capacidades reales del sistema
+
+Este inventario corresponde a funcionalidades implementadas en el cliente, la API y el modelo
+de datos; no incluye ideas de roadmap. El sistema cubre actualmente:
+
+| Área | Capacidades disponibles |
+| --- | --- |
+| Acceso y seguridad | Inicio por usuario + PIN, JWT, roles, alcance por ubicación, revocación de sesiones, rate limit, CORS y CSP. |
+| Operación semanal | Selector domingo–sábado, compras, producción, pedidos, despacho, reparto opcional, recepción, conciliación y cierre/reapertura. |
+| Compras y proveedores | Facturas con varios renglones, cargos contables sin inventario, lotes de peso variable, vencimientos, pagos parciales/masivos y reversión. |
+| Producción y costeo | Recetas, consumos FIFO, batches, yield, desperdicio, subproductos, producción extraordinaria, costo semanal y precio fijo o con markup. |
+| Ventas | Captura por sucursal, cuadrícula semanal tipo Excel, pegado tabular, borradores locales, control de versión, confirmación masiva, historial e impresión. |
+| Distribución | Plantillas de ruta configurables, consolidación automática, carga por ruta/restaurante, paradas, entrega, faltantes, incidencias y auditoría de recepción. |
+| Inventario | Existencias por centro/producto, disponible/reservado/en tránsito, ledger, costo promedio, lotes FIFO, conteos, ajustes y stock objetivo. |
+| Cierre y finanzas | Vista previa, snapshot semanal, facturas por ubicación/línea, créditos de Lisle, CxC móvil de tres semanas, CxP y balance operativo. |
+| Documentos y datos | Facturas y hojas de despacho imprimibles, seis libros Excel 3Q, importación histórica idempotente, migraciones, seeds y backfills controlados. |
+| Administración | CRUD/configuración de usuarios, ubicaciones, empresas, productos, categorías, unidades, proveedores, recetas, stocks, rutas y opciones del flujo. |
+| PWA | Instalación, app shell con caché, actualización controlada, aviso offline, cola limitada de acciones idempotentes y Web Push opcional. |
+| Observabilidad operativa | Healthcheck con verificación de PostgreSQL, dashboard semanal, incidencias y auditoría de operaciones relevantes. |
+
+Límites actuales que también forman parte del alcance real:
+
+- No es una aplicación offline completa: cierres, pagos, compras, producción y eliminaciones
+  necesitan conexión.
+- No procesa pagos bancarios ni fiscales; administra estados, saldos y documentos internos.
+- La impresión genera vistas/documentos descargables, no envía trabajos directamente a una
+  impresora.
+- `ANTHROPIC_API_KEY` está reservado, pero no existe una capacidad de IA activa en el flujo.
+- La lógica de calendario, facturación, Excel, productos especiales y empresas contiene reglas
+  específicas de Burrito Parrilla Mexicana.
+
 ## Flujo semanal vigente
 
 ```text
@@ -196,20 +227,22 @@ admin puede agregar ubicaciones y reordenarlas sin límite.
 
 - Miércoles Sur — Pablo: Lombard, Lisle, Naperville II/Ogden, Naperville, Aurora, Batavia,
   West Chicago y Carol Stream.
-- Miércoles Norte — MH: Glendale Heights, Schaumburg, Rolling Meadows y Algonquin.
+- Miércoles Norte — MH: Glendale Heights, Schaumburg, Rolling Meadows, Algonquin, Crystal Lake y Lake Zurich.
 - Sábado Sur — Pablo: misma base del Sur.
-- Sábado Norte — MH: Norte más Tapatíos Streamwood.
+- Sábado Norte — MH: Glendale Heights, Schaumburg, Rolling Meadows, Algonquin, Crystal Lake y Lake Zurich.
+- Miércoles y sábado — Frankfurt: ruta propia de carne, conductor por asignar.
 
 ### LBT
 
-- Lunes y jueves — Pablo: Tapatíos Glen Ellyn, Lombard y Streamwood.
+- Lunes y jueves — Pablo: las cinco sucursales Tapatíos: Glen Ellyn, Lombard, Streamwood, Naperville y Bolingbrook.
+- Sábado — ruta Tapatíos independiente con las cinco sucursales.
 - La hoja de Tapatíos se consolida como una sola ruta.
 
 ### Desechables
 
-- Miércoles Norte — MH: Schaumburg y Rolling Meadows.
-- Miércoles Sur — Pablo: ruta Sur, Glendale Heights, Algonquin y ubicaciones LBT configuradas,
-  incluyendo Glen Ellyn, Streamwood y Lombard.
+- Miércoles — una sola ruta independiente de BPM, sin Pablo ni MH: todas las sucursales BPM,
+  incluyendo Crystal Lake, Frankfurt y Lake Zurich.
+- Taquería Aurora y las cinco sucursales Tapatíos no solicitan desechables el miércoles.
 
 Estas listas son valores iniciales del bootstrap; Configuración/Rutas es la fuente editable.
 
@@ -457,6 +490,74 @@ negocio
 ```
 
 Las cantidades usan `Decimal(12,3)` y costos/factores usan precisión decimal en PostgreSQL.
+
+## Reutilización del sistema
+
+### Calificación global: **72% reutilizable**
+
+El porcentaje estima cuánto del sistema puede aprovecharse para otra operación de abastecimiento,
+producción y distribución con varias sucursales. No significa que 72% de las líneas puedan
+copiarse sin cambios: combina portabilidad técnica, configuración disponible y acoplamiento a las
+reglas del negocio.
+
+| Criterio | Peso | Reutilización | Aporte |
+| --- | ---: | ---: | ---: |
+| Plataforma y despliegue | 20% | 90% | 18.0% |
+| Capacidades transversales | 25% | 84% | 21.0% |
+| Módulos operativos | 35% | 55% | 19.3% |
+| Configuración y modelo multiempresa | 20% | 70% | 14.0% |
+| **Total ponderado** | **100%** |  | **72.3% → 72%** |
+
+### Partes reutilizables
+
+**Alta reutilización (80–95%)**
+
+- Monorepo, build single-service, Docker, migraciones Prisma, healthcheck y configuración de
+  entorno.
+- Autenticación por PIN/JWT, middleware de roles y alcance por negocio/ubicación.
+- Shell PWA, instalación, caché, banners offline/actualización, borradores y Web Push.
+- Componentes comunes del cliente: modal, spinner, secciones colapsables, selector de ubicación,
+  selector semanal, toast y protección de cambios sin guardar.
+- Validación Zod, manejo de errores, serialización de `BigInt`, utilidades numéricas,
+  idempotencia y reintento de transacciones serializables.
+- Catálogos de productos, categorías, unidades, proveedores, ubicaciones, usuarios y stock
+  objetivo.
+
+**Reutilización media (55–79%)**
+
+- Ledger de existencias, costo promedio, disponible/reservado/en tránsito y movimientos
+  idempotentes.
+- Consumo FIFO y trazabilidad de lotes; requiere adaptar unidades y reglas de valuación.
+- Conteos físicos, ajustes, incidencias, rutas, paradas, despacho, recepción y faltantes.
+- Cuadrícula semanal, captura por sucursal, historial, control de versión e impresión.
+- Dashboard y cierre con snapshots; la infraestructura sirve, pero las métricas y reglas
+  financieras deben parametrizarse.
+- Importadores, seeds y backfills idempotentes como patrón; cada formato de origen requiere su
+  propio mapeo.
+
+**Baja reutilización directa (20–54%)**
+
+- Calendario domingo–sábado y cortes específicos de miércoles/sábado.
+- Markup fijo de `$15`, pesos normalizados, recetas, yield y tratamiento de Carnitas.
+- Sustitución de Al Pastor por empresa, créditos exclusivos de Lisle y ventana de CxC de tres
+  semanas.
+- Folios, agrupación de facturas por empresa/ubicación/línea y reglas BPM/AUR/LBT.
+- Las seis plantillas Excel 3Q, sus órdenes de columnas y las rutas precargadas.
+
+### Qué habría que extraer para convertirlo en producto base
+
+1. Mover calendarios, cortes, markup, unidades normalizadas, ciclo de cobranza y reglas de crédito
+   a políticas configurables por negocio.
+2. Sustituir condiciones por nombres/códigos de BPM, LBT, Aurora, Lisle y productos especiales
+   por reglas declarativas.
+3. Separar los adaptadores de Excel y documentos impresos del núcleo de pedidos, inventario y
+   facturación.
+4. Publicar los componentes transversales y servicios de dominio genéricos como paquetes internos,
+   y añadir pruebas de contrato por módulo.
+
+Con esas extracciones, la reutilización estimada subiría a **85–90%** para negocios del mismo tipo;
+para un giro sin inventario, producción por lotes o reparto, la base seguiría siendo útil, pero el
+porcentaje sería menor.
 
 ## Integridad y trazabilidad
 

@@ -102,7 +102,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const extras = itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(MAX_PRIMARIOS) : [];
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
-    : i.ruta === '/semana' ? pathname.startsWith('/semana') : pathname.startsWith(i.ruta);
+    : i.ruta === '/semana' ? pathname.startsWith('/semana') && !pathname.startsWith('/semana/cierre') : pathname.startsWith(i.ruta);
   const destino = (i: Item) => i.ruta.startsWith('/semana') ? rutaSemana(i.ruta) : i.ruta;
   const etiquetaItem = (i: Item) => {
     if (i.ruta === '/' && usuario?.rol !== 'admin') return 'Hoy';
