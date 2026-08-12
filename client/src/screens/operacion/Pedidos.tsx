@@ -21,9 +21,9 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   const toast = useToast();
   const admin = usuario?.rol === 'admin';
   const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
-  // La línea sigue llegando por URL para conservar enlaces existentes; la captura
-  // semanal ya no expone un selector adicional que distraiga del flujo principal.
-  const { linea } = useLineaOperacion('carne');
+  // La línea sigue llegando por URL para conservar enlaces existentes y mantenerla
+  // alineada con el flujo operativo de Entregas.
+  const { linea, cambiarLinea } = useLineaOperacion('carne');
   const [ubicacionId, setUbicacionId] = useState('');
   const [fecha, setFecha] = useState('');
   const [fechaManual, setFechaManual] = useState(false);
@@ -200,6 +200,14 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
     finally { setBusy(false); }
   }
 
+  function cambiarLineaPedido(siguiente: Linea) {
+    if (siguiente === linea) return;
+    cambiarLinea(siguiente);
+    setPasoIndividual('captura');
+    setFiltroProductos(siguiente === 'carne' ? 'principales' : 'todos');
+    setBuscar('');
+  }
+
   function cambiarCantidadIndividual(productId: number, valor: string) {
     setCantidades((actuales) => ({ ...actuales, [productId]: valor }));
   }
@@ -264,6 +272,10 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
         {admin && <div className="order-view-actions">
           <HistoryToggle active={vista === 'historial'} closeLabel="Volver a captura" onToggle={() => setVista(vista === 'historial' ? 'captura' : 'historial')} />
         </div>}
+        <div className="order-line-context"><span className="segmented-context-label">Línea</span><div className="segmented order-line-switch" role="group" aria-label="Línea de pedidos">
+          <button type="button" className={linea === 'carne' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('carne')}>Carne</button>
+          <button type="button" className={linea === 'desechables' ? 'tab tab--on' : 'tab'} onClick={() => cambiarLineaPedido('desechables')}>Desechables</button>
+        </div></div>
       </div>
       {error && <p className="error-msg">{error}</p>}
       {vista === 'captura' ? capturaSemanal ? <CapturaSemanalPedidos catalogo={catalogo} linea={linea} semana={semana} ubicaciones={ubicaciones} semanaCerrada={semanaCerrada} onActualizado={() => setRefrescoHistorial((n) => n + 1)} /> : <div className={`order-workspace order-workspace--guided order-workspace--${pasoIndividual}`}>
