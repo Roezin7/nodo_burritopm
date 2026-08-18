@@ -386,6 +386,12 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   if (iso(periodo.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
+  // Una semana histórica conciliada con Excel debe previsualizar su fotografía y
+  // sus facturas vigentes; el saldo vivo ya puede contener movimientos posteriores.
+  const usaResumenExcel = semana.anio === 2026 && semana.semana === 33 && Boolean(await prisma.importaciones_sistema.findUnique({
+    where: { negocio_id_clave: { negocio_id: negocioId, clave: 'cierre-semana-33-resumen-excel-v1' } },
+    select: { clave: true },
+  }));
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
@@ -415,11 +421,13 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     }];
   }).sort((a, b) => a.ubicacion.localeCompare(b.ubicacion, 'es') || a.linea.localeCompare(b.linea));
 
-  const [inventario, facturasAnteriores, comprasPendientes] = await Promise.all([
-    valuacionInventario(negocioId, prisma, new Map(alertaInventario.inventario.map((saldo) => [
-      `${saldo.ubicacion_id}:${saldo.product_id}`,
-      saldo.cantidad,
-    ]))),
+  const [inventario, facturasAnteriores, comprasPendientes, facturasImportadas] = await Promise.all([
+    usaResumenExcel
+      ? Promise.resolve({ valor_carne: num0(semana.valor_carne), valor_congelado: num0(semana.valor_congelado), valor_desechables: num0(semana.valor_desechables) })
+      : valuacionInventario(negocioId, prisma, new Map(alertaInventario.inventario.map((saldo) => [
+        `${saldo.ubicacion_id}:${saldo.product_id}`,
+        saldo.cantidad,
+      ]))),
     prisma.facturas.findMany({
       where: {
         negocio_id: negocioId,
@@ -440,15 +448,42 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
         pagos: { select: { monto: true } },
       },
     }),
+    usaResumenExcel
+      ? prisma.facturas.findMany({
+        where: { negocio_id: negocioId, semana_id: semana.id, estado: { not: 'anulada' } },
+        include: { empresa: true, ubicacion: true, lineas: true },
+        orderBy: [{ ubicacion_id: 'asc' }, { linea_operacion: 'asc' }],
+      })
+      : Promise.resolve([]),
   ]);
+  const facturasVista = usaResumenExcel
+    ? facturasImportadas.map((factura) => ({
+      numero: factura.numero,
+      ubicacion_id: factura.ubicacion_id.toString(),
+      empresa: factura.empresa.nombre,
+      ubicacion: factura.ubicacion.nombre,
+      linea: factura.linea_operacion,
+      vence_at: iso(factura.vence_at),
+      productos: factura.lineas.length,
+      unidades: r3(factura.lineas.reduce((suma, linea) => suma + num0(linea.cantidad), 0)),
+      total: num0(factura.total),
+      lineas: factura.lineas.map((linea) => ({
+        descripcion: linea.descripcion,
+        cantidad: num0(linea.cantidad),
+        precio: num0(linea.precio_unitario),
+        importe: num0(linea.importe),
+        ajuste: linea.descripcion.includes('Ajuste de conciliación'),
+      })),
+    }))
+    : facturas;
   const documentosAnteriores: DocumentoCarteraCliente[] = facturasAnteriores.map((factura) => ({
     id: factura.id.toString(), ubicacion_id: factura.ubicacion_id.toString(), semana_id: factura.semana_id.toString(),
     emitida_at: factura.emitida_at, total: num0(factura.total),
     pagado: 0,
   }));
   const porCobrarActual = r2([...distribuirCreditosCliente(documentosAnteriores).saldos.values()].reduce((total, saldo) => total + saldo, 0));
-  const ventaCarne = r2(facturas.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
-  const ventaDesechables = r2(facturas.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
+  const ventaCarne = r2(facturasVista.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
+  const ventaDesechables = r2(facturasVista.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
   const ventaTotal = r2(ventaCarne + ventaDesechables);
   const ajustesVista = ajustes.map((ajuste) => ({
     id: Number(ajuste.id),
@@ -460,7 +495,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   }));
   const totalAjustes = r2(ajustesVista.reduce((total, ajuste) => total + ajuste.monto, 0));
   const ventaBruta = r2(ventaTotal - totalAjustes);
-  const documentosProyectados: DocumentoCarteraCliente[] = facturas.map((factura, indice) => ({
+  const documentosProyectados: DocumentoCarteraCliente[] = facturasVista.map((factura, indice) => ({
     id: `previa:${indice}`, ubicacion_id: factura.ubicacion_id, semana_id: semana.id.toString(),
     emitida_at: semana.termina_at, total: factura.total, pagado: 0,
   }));
@@ -497,14 +532,14 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       bruta: ventaBruta,
       ajustes: totalAjustes,
       total: ventaTotal,
-      por_ubicacion: facturas.map((factura) => ({
+      por_ubicacion: facturasVista.map((factura) => ({
         ubicacion: factura.ubicacion,
         empresa: factura.empresa,
         linea: factura.linea,
         unidades: factura.unidades,
         total: factura.total,
       })),
-      detalle: facturas.flatMap((factura) => factura.lineas.map((linea) => ({
+      detalle: facturasVista.flatMap((factura) => factura.lineas.map((linea) => ({
         ubicacion: factura.ubicacion,
         empresa: factura.empresa,
         linea: factura.linea,
@@ -521,9 +556,9 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     },
     balance_estimado: r2(inventarioTotal + porCobrar - porPagar),
     ajustes: ajustesVista,
-    facturas,
-    cajas_perdidas: alertaInventario.cajas_perdidas,
-    productos_con_faltante: alertaInventario.saldos.length,
+    facturas: facturasVista,
+    cajas_perdidas: usaResumenExcel ? 0 : alertaInventario.cajas_perdidas,
+    productos_con_faltante: usaResumenExcel ? 0 : alertaInventario.saldos.length,
   };
 }
 
