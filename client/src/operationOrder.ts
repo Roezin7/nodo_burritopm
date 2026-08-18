@@ -37,13 +37,16 @@ export const FILAS_CARNE: readonly FilaOrden[] = [
   { nombre: 'TAPATIOS TACO M', skus: ['MEAT-TAPATIOS-TACO'] },
 ] as const;
 
-// El formato completo de Disposables contiene los 52 productos de la hoja semanal.
-// Se reutilizan los mismos SKU de los consumibles que también aparecen en carne;
-// nunca se crean productos duplicados en el catálogo.
-export const FILAS_DESECHABLES: readonly FilaOrden[] = Array.from({ length: 52 }, (_, i) => ({
-  nombre: '',
-  skus: [`BPM-${String(i + 1).padStart(4, '0')}`],
-}));
+// El formato de inventario de la semana 34 contiene 54 productos. Los SKU
+// BPM-0047..0052 ya existen en históricos y por eso se conservan; los dos
+// productos nuevos se muestran en la posición que ocupa el Excel mediante
+// BPM-0053 y BPM-0054, sin renumerar el catálogo anterior.
+export const FILAS_DESECHABLES: readonly FilaOrden[] = [
+  ...Array.from({ length: 46 }, (_, i) => ({ nombre: '', skus: [`BPM-${String(i + 1).padStart(4, '0')}`] })),
+  { nombre: '', skus: ['BPM-0053'] },
+  { nombre: '', skus: ['BPM-0054'] },
+  ...Array.from({ length: 6 }, (_, i) => ({ nombre: '', skus: [`BPM-${String(i + 47).padStart(4, '0')}`] })),
+] as const;
 
 export function filasOrden(linea: LineaOperacion, productos: ProductoOrdenable[]): FilaOrden[] {
   if (linea === 'carne') return [...FILAS_CARNE];

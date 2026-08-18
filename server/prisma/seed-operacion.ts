@@ -7,22 +7,31 @@ const prisma = new PrismaClient();
 // de archivos del equipo de desarrollo. Solo llena campos todavía no configurados.
 const desechables = [
   ['SABERT BASE THREE COMP', 54, 62.1], ['SABERT LIDS THREE COMP', 36.93, 42.47], ['DINNER NAPKIN', 29.95, 35.94],
-  ['TORTA - 8X6 32oz', 23, 27.6], ['CLEAR CUP 24oz', 38.95, 46.74], ['CLEAR CUP 12oz', 44.95, 53.94],
+  ['TORTA - 8X6 32oz', 26.06, 31.27], ['CLEAR CUP 24oz', 38.95, 46.74], ['CLEAR CUP 12oz', 44.95, 53.94],
   ['LIDS 16oz 24oz', 18.25, 21.9], ['CUP HOLDER', 29.95, 35.94], ['STRAWS WRAPPED BLACK', 22.95, 27.54],
   ['PORTION CUP 1.5oz', 21.99, 26.39], ['PORTION LID 2oz', 18.745, 22.49], ['KIT FORK & KNIFE HVY', 27.5, 33],
   ['FORK HD PLASTIC', 11.07, 13.28], ['SPOON PLASTIC', 13.03, 15.64], ['T-SHIRT BAG', 18.95, 22.74],
   ['2oz PORTION CUP', 22.95, 27.54], ['XL NITRILE GLOVES', 33.95, 40.74], ['MD VINYL GLOVES', 15.85, 19.02],
-  ['FOIL STD 12X1000', 21.95, 26.34], ['THERMAL PAPER ROLL 3 1/8"', 33.5, 40.2], ['DELI CONTAINER 32OZ CLEAR', 35.71, 42.85],
+  ['FOIL STD 12X1000', 22.41, 26.89], ['THERMAL PAPER ROLL 3 1/8"', 37.76, 45.31], ['DELI CONTAINER 32OZ CLEAR', 35.71, 42.85],
   ['WAX PAPER 10X10', 77.2, 96.5], ['BAGS #8 CRAFT PAPER', 13.8, 16.56], ['SOAP 4-1', 27.99, 33.59],
   ['OVEN & GRILL 4-1', 32.99, 39.59], ['BAGS TRASH', 23.05, 27.66], ['EVAPORATED MILK', 26.11, 31.33],
-  ['CONDENSED MILK', 42.24, 50.69], ['COCO LOPEZ', 75.69, 90.83], ['GARLIC SALT', 5, 6], ['BLUE TAPE', 30, 36],
+  ['CONDENSED MILK', 42.24, 50.69], ['COCO LOPEZ', 81.95, 98.34], ['GARLIC SALT', 5, 6], ['BLUE TAPE', 30, 36],
   ['MARKERS', 5, 6], ['CLEAR TAPE', 5, 6], ['TRAPOS AMARILLOS', 5, 6], ['ARBOL BLEND', 25, 30],
   ['RED SAUCE BLEND', 25, 30], ['GREEN SAUCE BLEND', 25, 30], ['HABANERO BLEND', 25, 30], ['MOLE BLEND', 25, 30],
   ['RANCHERO BLEND', 25, 30], ['POBLANO BLEND', 25, 30], ['CARNITAS BLEND', 25, 30], ['RICE BLEND', 35, 42],
   ['MANGO', 21.5, 25.8], ['CUCUMBER LEMON', 21.5, 25.8], ['JAMAICA', 21.5, 25.8],
   ['TAPATIOS THREE COMPARTMENT', 29.07, 34.88], ['TAPATIOS ONE COMPARTMENT', 29.07, 34.88],
   ['TAPATIOS SUIZO', 23.55, 28.26], ['FRIED ICE CREAM', 27.55, 33.06], ['CUPS 12 BLACK', 20.46, 24.55], ['RICE FLOUR', 20, 24],
+  // Se agregan al final para conservar BPM-0047..0052. El orden visible del
+  // inventario se corrige con ordenDesechables, sin cambiar SKU históricos.
+  ['CLASIC COKE', 137.54, 137.54], ['CO2 CYLINDER 20 LBS', 70.54, 84.65],
 ] as const;
+
+const ordenDesechables = new Map<string, number>([
+  ...Array.from({ length: 46 }, (_, i) => [`BPM-${String(i + 1).padStart(4, '0')}`, i + 1] as const),
+  ['BPM-0053', 47], ['BPM-0054', 48],
+  ...Array.from({ length: 6 }, (_, i) => [`BPM-${String(i + 47).padStart(4, '0')}`, i + 49] as const),
+]);
 
 const bpmActivas = ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'];
 const ubicacionesBpm = [
@@ -98,7 +107,7 @@ async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: b
         precio_venta_fijo: producto.precio_venta_fijo ?? venta,
         // 999 significa "sin ordenar". Una vez que el admin define una posición,
         // el bootstrap no vuelve a imponer el orden del archivo inicial.
-        orden_operativo: producto.orden_operativo === 999 ? indice + 1 : producto.orden_operativo,
+        orden_operativo: producto.orden_operativo === 999 ? (ordenDesechables.get(sku) ?? indice + 1) : producto.orden_operativo,
       },
     });
   }
