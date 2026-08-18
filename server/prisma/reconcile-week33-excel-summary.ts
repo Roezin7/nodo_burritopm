@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 const prisma = new PrismaClient();
 const EXCEL_PATH = process.env.BPM_INVENTORY_XLSX;
 const APPLY = process.env.APPLY_WEEK33_EXCEL_SUMMARY === '1';
-const KEY = 'cierre-semana-33-resumen-excel-v1';
+const KEY = 'cierre-semana-33-resumen-excel-v3';
 const negocioNombre = 'Burrito Parrilla Mexicana';
 
 function numberValue(value: ExcelJS.CellValue): number {
@@ -29,6 +29,8 @@ async function main() {
     carne: numberValue(sheet.getCell('CO3').value),
     congelado: numberValue(sheet.getCell('CO4').value),
     desechables: numberValue(sheet.getCell('CO5').value),
+    billing31: numberValue(sheet.getCell('CO6').value),
+    billing32: numberValue(sheet.getCell('CO7').value),
     billing: numberValue(sheet.getCell('CO8').value),
     inventarioCierre: numberValue(sheet.getCell('CO9').value),
     cuentasAbiertas: numberValue(sheet.getCell('CO17').value),
@@ -39,6 +41,8 @@ async function main() {
     congelado: rounded(source.congelado),
     desechables: rounded(source.desechables),
     billing: rounded(source.billing),
+    cuentasPorCobrar: rounded(source.billing31 + source.billing32 + source.billing),
+    cuentasPorPagar: rounded(Math.abs(source.cuentasAbiertas)),
   };
   console.log(`Excel Billing (33): carne $${source.carne.toFixed(3)} · desechables $${source.desechables.toFixed(3)} · billing $${source.billing.toFixed(3)}.`);
   console.log(`Excel cierre: inventario $${source.inventarioCierre.toFixed(3)} · abiertos $${source.cuentasAbiertas.toFixed(2)} · total $${source.total.toFixed(3)}.`);
@@ -65,13 +69,15 @@ async function main() {
     const cuentasPorCobrar = Number(semana.cuentas_por_cobrar);
     const cuentasPorPagar = Number(semana.cuentas_por_pagar);
     const inventarioTotal = rounded(esperado.carne + esperado.congelado + esperado.desechables);
-    const balance = rounded(inventarioTotal + cuentasPorCobrar - cuentasPorPagar);
+    const balance = rounded(source.total);
     await tx.semanas_operativas.update({
       where: { id: semana.id },
       data: {
         valor_carne: esperado.carne,
         valor_congelado: esperado.congelado,
         valor_desechables: esperado.desechables,
+        cuentas_por_cobrar: esperado.cuentasPorCobrar,
+        cuentas_por_pagar: esperado.cuentasPorPagar,
         balance_neto: balance,
       },
     });
@@ -85,6 +91,7 @@ async function main() {
           aplicado: { ...esperado, inventario_total: inventarioTotal, balance_neto: balance },
           facturas_lomba_anuladas: lombardInvoices.map((invoice) => invoice.id.toString()),
           criterio_billing: 'Billing (33)!CO8 = CO23; excluye LOMBA (columnas E:F).',
+          criterio_cartera: 'CO6 + CO7 + CO8 = cuentas por cobrar; -CO17 = cuentas por pagar.',
         },
       },
     });

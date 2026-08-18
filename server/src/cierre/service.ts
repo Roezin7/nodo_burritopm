@@ -388,8 +388,8 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
   // Una semana histórica conciliada con Excel debe previsualizar su fotografía y
   // sus facturas vigentes; el saldo vivo ya puede contener movimientos posteriores.
-  const usaResumenExcel = semana.anio === 2026 && semana.semana === 33 && Boolean(await prisma.importaciones_sistema.findUnique({
-    where: { negocio_id_clave: { negocio_id: negocioId, clave: 'cierre-semana-33-resumen-excel-v1' } },
+  const usaResumenExcel = semana.anio === 2026 && semana.semana === 33 && Boolean(await prisma.importaciones_sistema.findFirst({
+    where: { negocio_id: negocioId, clave: { in: ['cierre-semana-33-resumen-excel-v1', 'cierre-semana-33-resumen-excel-v2', 'cierre-semana-33-resumen-excel-v3'] } },
     select: { clave: true },
   }));
 
@@ -499,11 +499,15 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     id: `previa:${indice}`, ubicacion_id: factura.ubicacion_id, semana_id: semana.id.toString(),
     emitida_at: semana.termina_at, total: factura.total, pagado: 0,
   }));
-  const porCobrar = r2([...distribuirCreditosCliente([...documentosAnteriores, ...documentosProyectados]).saldos.values()]
-    .reduce((total, saldo) => total + saldo, 0));
-  const porPagar = r2(comprasPendientes.reduce((total, compra) => total + saldoCuentaPorPagar(
-    num0(compra.total), compra.pagos.map((pago) => num0(pago.monto)),
-  ), 0));
+  const porCobrar = usaResumenExcel
+    ? num0(semana.cuentas_por_cobrar)
+    : r2([...distribuirCreditosCliente([...documentosAnteriores, ...documentosProyectados]).saldos.values()]
+      .reduce((total, saldo) => total + saldo, 0));
+  const porPagar = usaResumenExcel
+    ? num0(semana.cuentas_por_pagar)
+    : r2(comprasPendientes.reduce((total, compra) => total + saldoCuentaPorPagar(
+      num0(compra.total), compra.pagos.map((pago) => num0(pago.monto)),
+    ), 0));
   const cuentasPorPagar = comprasPendientes.flatMap((compra) => {
     const pagado = r2(compra.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
     const saldo = saldoCuentaPorPagar(num0(compra.total), [pagado]);
@@ -554,7 +558,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       por_pagar_proveedor: porProveedor,
       documentos_por_pagar: cuentasPorPagar,
     },
-    balance_estimado: r2(inventarioTotal + porCobrar - porPagar),
+    balance_estimado: usaResumenExcel ? num0(semana.balance_neto) : r2(inventarioTotal + porCobrar - porPagar),
     ajustes: ajustesVista,
     facturas: facturasVista,
     cajas_perdidas: usaResumenExcel ? 0 : alertaInventario.cajas_perdidas,
