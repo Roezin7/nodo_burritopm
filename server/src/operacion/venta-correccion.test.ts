@@ -211,6 +211,20 @@ describe('corrección de una venta procesada', () => {
     expect(lineaRecapturada.distribucion_lineas[0]?.distribucion_id).toBe(distribucionId);
     expect(Number(lineaRecapturada.distribucion_lineas[0]?.cantidad_cargada)).toBe(6);
     expect(await prisma.distribuciones.count({ where: { negocio_id: negocioId } })).toBe(1);
+
+    const movimientosAntesDeRepetir = await prisma.movimientos_inventario.count({ where: { negocio_id: negocioId } });
+    const repetida = await guardarPedido(negocioId, usuarioId, {
+      ubicacion_id: Number(sucursalId),
+      linea: 'carne',
+      fecha_entrega: '2037-07-15',
+      actualizado_at: recapturada.actualizado_at,
+      lineas: [{ product_id: Number(productoId), cantidad: 6 }],
+    }, true);
+    expect(repetida.estado).toBe('despachado');
+    expect(await prisma.movimientos_inventario.count({ where: { negocio_id: negocioId } })).toBe(movimientosAntesDeRepetir);
+    expect(Number((await prisma.existencias.findUniqueOrThrow({
+      where: { ubicacion_id_product_id: { ubicacion_id: bodegaId, product_id: productoId } },
+    })).cantidad_transito)).toBe(6);
   });
 
   it('corrige una entrega de desechables y restaura/consume únicamente la diferencia FIFO', async () => {

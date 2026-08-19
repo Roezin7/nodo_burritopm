@@ -399,6 +399,33 @@ async function bodegaProductoEnTx(
 
 type LineaDistribuidaEditable = Prisma.distribucion_lineasGetPayload<{ include: { distribuciones: true } }>;
 
+/** Crea el vínculo faltante conservando la distribución/ruta ya existente. */
+async function crearLineaDistribuidaDesdeBase(
+  tx: Prisma.TransactionClient,
+  base: LineaDistribuidaEditable,
+  ubicacionId: bigint,
+  producto: { id: bigint; ultimo_costo: Prisma.Decimal | null; costo_promedio: Prisma.Decimal | null },
+  lineaPedidoId: bigint,
+) {
+  return tx.distribucion_lineas.create({
+    data: {
+      distribucion_id: base.distribucion_id,
+      ubicacion_destino_id: ubicacionId,
+      product_id: producto.id,
+      pedido_linea_id: lineaPedidoId,
+      cantidad_sugerida: 0,
+      cantidad_aprobada: base.cantidad_aprobada == null ? null : 0,
+      cantidad_preparada: base.cantidad_preparada == null ? null : 0,
+      cantidad_verificada: base.cantidad_verificada == null ? null : 0,
+      cantidad_cargada: base.cantidad_cargada == null ? null : 0,
+      cantidad_recibida: base.cantidad_recibida == null ? null : 0,
+      costo_unitario: producto.ultimo_costo ?? producto.costo_promedio,
+      costo_total: 0,
+    },
+    include: { distribuciones: true },
+  });
+}
+
 /** Aplica solamente la diferencia física de una venta ya consolidada. La distribución
  * conserva su estado y su ruta; cantidades, inventario, FIFO y costo facturable quedan
  * alineados con la corrección del admin. */
@@ -633,7 +660,16 @@ async function guardarPedidoEnTx(
     for (const lineaExistente of pedidoExistente?.lineas ?? []) {
       const entrada = nuevas.get(lineaExistente.product_id.toString());
       const cantidadNueva = r3(Math.max(0, entrada?.cantidad ?? 0));
-      const distribuida = lineaExistente.distribucion_lineas[0];
+      let distribuida = lineaExistente.distribucion_lineas[0];
+      if (!distribuida && consolidado && cantidadNueva > 0) {
+        // Una corrección anterior o una carga histórica puede haber dejado la
+        // línea del pedido sin vínculo. La venta no puede quedar guardada solo
+        // en pedidos: se reconstruye el vínculo en la misma transacción y
+        // después se aplica la diferencia física correspondiente.
+        const base = distribucionesBase[0] ?? distribucionBasePersistida;
+        if (!base) throw new HttpError(409, 'La venta procesada no conserva un despacho al cual vincular la línea');
+        distribuida = await crearLineaDistribuidaDesdeBase(tx, base, ubicacion.id, lineaExistente.producto, lineaExistente.id);
+      }
       if (distribuida) {
         await corregirLineaDistribuida(tx, {
           negocioId,
@@ -679,23 +715,7 @@ async function guardarPedidoEnTx(
         // línea y fecha exacta; así nunca se cruza con el despacho de otra semana.
         const base = distribucionesBase[0] ?? distribucionBasePersistida;
         if (!base) throw new HttpError(409, 'La venta procesada no conserva un despacho al cual agregar el producto');
-        const nuevaDistribuida = await tx.distribucion_lineas.create({
-          data: {
-            distribucion_id: base.distribucion_id,
-            ubicacion_destino_id: ubicacion.id,
-            product_id: producto.id,
-            pedido_linea_id: lineaPedido.id,
-            cantidad_sugerida: 0,
-            cantidad_aprobada: base.cantidad_aprobada == null ? null : 0,
-            cantidad_preparada: base.cantidad_preparada == null ? null : 0,
-            cantidad_verificada: base.cantidad_verificada == null ? null : 0,
-            cantidad_cargada: base.cantidad_cargada == null ? null : 0,
-            cantidad_recibida: base.cantidad_recibida == null ? null : 0,
-            costo_unitario: producto.ultimo_costo ?? producto.costo_promedio,
-            costo_total: 0,
-          },
-          include: { distribuciones: true },
-        });
+        const nuevaDistribuida = await crearLineaDistribuidaDesdeBase(tx, base, ubicacion.id, producto, lineaPedido.id);
         await corregirLineaDistribuida(tx, {
           negocioId,
           usuarioId,
