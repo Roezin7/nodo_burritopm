@@ -101,13 +101,16 @@ async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: b
     await prisma.products.update({
       where: { id: producto.id },
       data: {
-        categoria_id: producto.categoria_id ?? categoriaId,
-        linea_operacion: producto.linea_operacion ?? 'desechables', tipo_operativo: producto.tipo_operativo ?? 'desechable',
+        nombre,
+        sku,
+        categoria_id: categoriaId,
+        // El catálogo de inventario es la fuente de verdad. No conservamos una
+        // clasificación vieja (en particular BPM-0008/CUP HOLDER como carne),
+        // porque entonces desaparece de la captura y de Entregas de desechables.
+        linea_operacion: 'desechables', tipo_operativo: 'desechable',
         costo_promedio: producto.costo_promedio ?? costo, ultimo_costo: producto.ultimo_costo ?? costo,
         precio_venta_fijo: producto.precio_venta_fijo ?? venta,
-        // 999 significa "sin ordenar". Una vez que el admin define una posición,
-        // el bootstrap no vuelve a imponer el orden del archivo inicial.
-        orden_operativo: producto.orden_operativo === 999 ? (ordenDesechables.get(sku) ?? indice + 1) : producto.orden_operativo,
+        orden_operativo: ordenDesechables.get(sku) ?? indice + 1,
       },
     });
   }

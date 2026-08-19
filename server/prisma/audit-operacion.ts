@@ -141,6 +141,19 @@ async function main() {
     for (const [orden, skus] of porOrden) if (skus.length > 1 && orden < 999) agregar(hallazgos, 'media', 'orden_catalogo_duplicado', `${linea} orden ${orden}: ${skus.join(', ')}.`);
   }
 
+  // El Excel maestro fija CUP HOLDER como el octavo desechable. Se conserva
+  // como consumible especial de Tapatíos en la hoja de carne, pero su producto
+  // debe pertenecer al catálogo de desechables para aparecer en captura y Entregas.
+  const cupHolders = productos.filter((producto) => producto.sku === 'BPM-0008' || producto.nombre.trim().toUpperCase() === 'CUP HOLDER');
+  if (cupHolders.length !== 1) {
+    agregar(hallazgos, 'alta', 'cup_holder_catalogo', `Se esperó un solo CUP HOLDER/BPM-0008 y se encontraron ${cupHolders.length}.`);
+  } else {
+    const cupHolder = cupHolders[0]!;
+    if (cupHolder.sku !== 'BPM-0008' || cupHolder.linea_operacion !== 'desechables' || cupHolder.tipo_operativo !== 'desechable' || cupHolder.orden_operativo !== 8) {
+      agregar(hallazgos, 'alta', 'cup_holder_orden', `CUP HOLDER debe ser BPM-0008 · desechables · orden 8; actualmente es ${cupHolder.sku} · ${cupHolder.linea_operacion ?? 'sin línea'} · orden ${cupHolder.orden_operativo}.`);
+    }
+  }
+
   // Capturas diarias: la interfaz espera una sola sesión por ubicación y fecha.
   const conteosPorDia = new Map<string, typeof conteos>();
   for (const conteo of conteos) {
