@@ -4,7 +4,7 @@ import { num, num0 } from '../lib/num.js';
 import { valorExistencia } from '../inventario/valuacion.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
-import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, semanaDeFecha } from '../cierre/service.js';
+import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, semanaDeFecha, totalSaldoCartera } from '../cierre/service.js';
 import { preciosVentaSemana } from '../operacion/service.js';
 import { validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { Prisma } from '@prisma/client';
@@ -305,7 +305,7 @@ dashboardRouter.get(
     const carteraClientes = distribuirCreditosCliente(documentosCartera);
     const saldoFactura = (f: (typeof facturasPendientes)[number]) => carteraClientes.saldos.get(f.id.toString()) ?? 0;
     const facturasAbiertas = facturasPendientes.filter((f) => saldoFactura(f) > 0);
-    const porCobrarVivo = [...carteraClientes.saldos.values()].reduce((a, saldo) => a + saldo, 0);
+    const porCobrarVivo = totalSaldoCartera(documentosCartera);
     const porCobrar = snapshot.length && semana ? num0(semana.cuentas_por_cobrar) : porCobrarVivo;
     const saldosCompras = comprasPendientes.map((compra) => Math.max(0, r2(
       num0(compra.total) - compra.pagos.reduce((total, pago) => total + num0(pago.monto), 0),

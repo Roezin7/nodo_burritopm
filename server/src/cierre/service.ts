@@ -90,6 +90,12 @@ export function distribuirCreditosCliente(documentos: DocumentoCarteraCliente[])
   };
 }
 
+/** Total nominal de la ventana móvil, después de aplicar créditos por ubicación. */
+export function totalSaldoCartera(documentos: DocumentoCarteraCliente[]) {
+  return r2([...distribuirCreditosCliente(documentos).saldos.values()]
+    .reduce((total, saldo) => total + saldo, 0));
+}
+
 function saldosFacturas(facturas: {
   id: bigint;
   ubicacion_id: bigint;
@@ -479,7 +485,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     emitida_at: factura.emitida_at, total: num0(factura.total),
     pagado: 0,
   }));
-  const porCobrarActual = r2([...distribuirCreditosCliente(documentosAnteriores).saldos.values()].reduce((total, saldo) => total + saldo, 0));
+  const porCobrarActual = totalSaldoCartera(documentosAnteriores);
   const ventaCarne = r2(facturasVista.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
   const ventaDesechables = r2(facturasVista.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
   const ventaTotal = r2(ventaCarne + ventaDesechables);
@@ -499,8 +505,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
   }));
   const porCobrar = usaResumenExcel
     ? num0(semana.cuentas_por_cobrar)
-    : r2([...distribuirCreditosCliente([...documentosAnteriores, ...documentosProyectados]).saldos.values()]
-      .reduce((total, saldo) => total + saldo, 0));
+    : totalSaldoCartera([...documentosAnteriores, ...documentosProyectados]);
   const porPagar = usaResumenExcel
     ? num0(semana.cuentas_por_pagar)
     : r2(comprasPendientes.reduce((total, compra) => total + saldoCuentaPorPagar(
@@ -815,7 +820,7 @@ export async function listarCierres(negocioId: bigint) {
 export async function listarCartera(negocioId: bigint) {
   const periodoActual = semanaDeFecha(fecha(await hoyNegocio(negocioId)));
   const inicioCiclo = inicioVentanaCuentasPorCobrar(periodoActual.domingo);
-  const [facturas, compras, ajustes] = await Promise.all([
+  const [facturas, compras, ajustes, pedidosActuales] = await Promise.all([
     prisma.facturas.findMany({
       where: { negocio_id: negocioId, estado: { in: ['emitida', 'pagada'] } },
       include: {
@@ -846,10 +851,53 @@ export async function listarCartera(negocioId: bigint) {
       },
       orderBy: [{ semana: { inicia_at: 'desc' } }, { id: 'desc' }],
     }),
+    prisma.pedidos_operativos.count({
+      where: {
+        negocio_id: negocioId,
+        fecha_entrega: { gte: periodoActual.domingo, lte: periodoActual.sabado },
+        estado: { notIn: ['borrador', 'cancelado'] },
+      },
+    }),
   ]);
 
   const facturasCiclo = facturas.filter((factura) => estaEnCicloTresSemanas(factura.semana.inicia_at, factura.semana.termina_at, inicioCiclo, periodoActual.sabado));
   const cartera = saldosFacturas(facturasCiclo, undefined, true);
+  const tieneFacturaActual = facturasCiclo.some((factura) =>
+    factura.semana.anio === periodoActual.anio && factura.semana.semana === periodoActual.semana);
+  let documentosProyectados: DocumentoCarteraCliente[] = [];
+  let proyeccionPendienteProduccion = false;
+  if (!tieneFacturaActual && pedidosActuales > 0) {
+    try {
+      const { grupos } = await prepararFacturacion(negocioId, periodoActual.domingo, periodoActual.sabado);
+      documentosProyectados = [...grupos.values()].flatMap((grupo, indice) => {
+        const lineas = [...grupo.items.values()].filter((item) => item.cantidad > 0);
+        if (!lineas.length) return [];
+        return [{
+          id: `proyectado:${periodoActual.anio}:${periodoActual.semana}:${indice}`,
+          ubicacion_id: grupo.ubicacion.id.toString(),
+          semana_id: `semana:${periodoActual.anio}:${periodoActual.semana}`,
+          emitida_at: periodoActual.sabado,
+          total: r2(lineas.reduce((total, item) => total + item.cantidad * item.precio, 0)),
+          pagado: 0,
+        }];
+      });
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 409 && error.message.startsWith('Falta registrar producción semanal')) {
+        proyeccionPendienteProduccion = true;
+      } else {
+        throw error;
+      }
+    }
+  }
+  const documentosFacturasCiclo: DocumentoCarteraCliente[] = facturasCiclo.map((factura) => ({
+    id: factura.id.toString(),
+    ubicacion_id: factura.ubicacion_id.toString(),
+    semana_id: factura.semana_id.toString(),
+    emitida_at: factura.emitida_at,
+    total: num0(factura.total),
+    pagado: 0,
+  }));
+  const carteraTresSemanas = distribuirCreditosCliente([...documentosFacturasCiclo, ...documentosProyectados]);
   const emitidas = facturas.filter((f) => num0(f.total) >= 0).map((f) => {
     const pagado = r2(f.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
     const enCiclo = estaEnCicloTresSemanas(f.semana.inicia_at, f.semana.termina_at, inicioCiclo, periodoActual.sabado);
@@ -920,13 +968,16 @@ export async function listarCartera(negocioId: bigint) {
 
   return {
     resumen: {
-      por_cobrar: r2(pendientesEmitidas.reduce((total, f) => total + f.saldo, 0)),
+      por_cobrar: totalSaldoCartera([...documentosFacturasCiclo, ...documentosProyectados]),
+      por_cobrar_proyectado: r2(documentosProyectados.reduce((total, documento) => total + documento.total, 0)),
+      documentos_proyectados: documentosProyectados.length,
+      proyeccion_pendiente_produccion: proyeccionPendienteProduccion,
       vencido_cobrar: r2(pendientesEmitidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
       facturas_por_cobrar: pendientesEmitidas.length,
       por_pagar: r2(pendientesRecibidas.reduce((total, f) => total + f.saldo, 0)),
       vencido_pagar: r2(pendientesRecibidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
       facturas_por_pagar: pendientesRecibidas.length,
-      credito_lisle_disponible: cartera.creditoDisponible,
+      credito_lisle_disponible: carteraTresSemanas.creditoDisponible,
     },
     emitidas,
     recibidas,

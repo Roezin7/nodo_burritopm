@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claveFacturaPorRestaurante, costoParaValuacionInventario, distribuirCreditosCliente, estaEnCicloTresSemanas, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal } from './service.js';
+import { claveFacturaPorRestaurante, costoParaValuacionInventario, distribuirCreditosCliente, estaEnCicloTresSemanas, inicioVentanaCuentasPorCobrar, numeroFactura, saldoCuentaPorPagar, saldoParaCierreSemanal, totalSaldoCartera } from './service.js';
 
 describe('folios de cierre semanal', () => {
   it('no colisiona sucursales cuyos códigos comparten los primeros cinco caracteres', () => {
@@ -53,6 +53,14 @@ describe('créditos por ubicación', () => {
 });
 
 describe('ventana móvil de cuentas por cobrar', () => {
+  it('suma la semana actual proyectada junto con las dos anteriores', () => {
+    expect(totalSaldoCartera([
+      { id: '32', ubicacion_id: 'lombard', semana_id: '32', emitida_at: new Date('2026-08-08T00:00:00.000Z'), total: 100, pagado: 0 },
+      { id: '33', ubicacion_id: 'lombard', semana_id: '33', emitida_at: new Date('2026-08-15T00:00:00.000Z'), total: 200, pagado: 0 },
+      { id: '34', ubicacion_id: 'lombard', semana_id: '34', emitida_at: new Date('2026-08-22T00:00:00.000Z'), total: 50, pagado: 0 },
+    ])).toBe(350);
+  });
+
   it('incluye la semana del cierre y exactamente las dos anteriores', () => {
     expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-12T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-06-28');
     expect(inicioVentanaCuentasPorCobrar(new Date('2026-07-19T00:00:00.000Z')).toISOString().slice(0, 10)).toBe('2026-07-05');

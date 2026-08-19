@@ -50,6 +50,9 @@ interface FacturaRecibida {
 interface Cartera {
   resumen: {
     por_cobrar: number;
+    por_cobrar_proyectado: number;
+    documentos_proyectados: number;
+    proyeccion_pendiente_produccion: boolean;
     vencido_cobrar: number;
     facturas_por_cobrar: number;
     por_pagar: number;
@@ -254,7 +257,7 @@ export default function Facturacion() {
     </details>}
 
     <section className="billing-kpis" aria-label="Resumen de cartera">
-      <div><span>Por cobrar · ciclo 3 semanas</span><strong>{usd(datos.resumen.por_cobrar)}</strong><small>Semana actual + las 2 anteriores</small></div>
+      <div><span>Por cobrar · ciclo 3 semanas</span><strong>{usd(datos.resumen.por_cobrar)}</strong><small>{datos.resumen.proyeccion_pendiente_produccion ? 'Proyección pendiente: registrar producción semanal' : datos.resumen.documentos_proyectados > 0 ? `Incluye proyección actual: ${usd(datos.resumen.por_cobrar_proyectado)}` : 'Semana actual + las 2 anteriores'}</small></div>
       <div className={datos.resumen.vencido_cobrar > 0 ? 'is-overdue' : ''}><span>Con fecha vencida</span><strong>{usd(datos.resumen.vencido_cobrar)}</strong><small>Informativo dentro de la ventana</small></div>
       <div><span>Total por pagar</span><strong>{usd(datos.resumen.por_pagar)}</strong><small>Incluye {usd(datos.resumen.vencido_pagar)} ya vencidos</small></div>
       <div className={datos.resumen.vencido_pagar > 0 ? 'is-overdue' : ''}><span>De ese total, vencido</span><strong>{usd(datos.resumen.vencido_pagar)}</strong><small>No se suma otra vez · proveedores</small></div>
@@ -262,7 +265,7 @@ export default function Facturacion() {
 
     <details className="billing-help">
       <summary>Cómo funciona la cartera</summary>
-      <p>Las facturas emitidas forman parte del balance durante su semana y las dos siguientes. Después quedan fuera de esa ventana; esto no registra un cobro ni un movimiento bancario. Los pagos a proveedores sí se confirman manualmente y los créditos de producción reducen exclusivamente la cuenta de Lisle.</p>
+      <p>Las facturas emitidas forman parte del balance durante su semana y las dos siguientes. Si la semana actual sigue abierta, sus pedidos confirmados se muestran como proyección y se reemplazan por la factura al cerrar. Después quedan fuera de esa ventana; esto no registra un cobro ni un movimiento bancario. Los pagos a proveedores sí se confirman manualmente y los créditos de producción reducen exclusivamente la cuenta de Lisle.</p>
     </details>
 
     <CollapsibleSection className="lisle-credit-panel" title="Créditos de Lisle" count={datos.creditos.filter((credito) => credito.estado === 'abierto').length} summary={datos.resumen.credito_lisle_disponible > 0 ? `${usd(datos.resumen.credito_lisle_disponible)} disponible` : 'Saldo a favor por producción'}>
