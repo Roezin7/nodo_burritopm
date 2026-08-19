@@ -130,6 +130,13 @@ operacionRouter.get('/conciliacion', soloAdmin, asyncHandler(async (req, res) =>
   res.json(await conciliacion.obtenerConciliacionSemanal(req.auth!.negocioId, q.desde, q.hasta, q.ubicacion_id ? BigInt(q.ubicacion_id) : undefined));
 }));
 
+/** Integridad pedido → despacho → movimiento, para auditar antes del cierre. */
+operacionRouter.get('/conciliacion/integridad', soloAdmin, asyncHandler(async (req, res) => {
+  const q = z.object({ desde: fecha, hasta: fecha })
+    .refine((v) => v.desde <= v.hasta, { message: 'El rango de fechas no es válido' }).parse(req.query);
+  res.json(await conciliacion.auditarPedidosVsDistribuciones(req.auth!.negocioId, q.desde, q.hasta));
+}));
+
 /** Fija una fotografía inicial reconstruida sin alterar el inventario vivo. */
 operacionRouter.post('/conciliacion/inicializar', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({ desde: fecha, ubicacion_id: id.optional() }).parse(req.body);

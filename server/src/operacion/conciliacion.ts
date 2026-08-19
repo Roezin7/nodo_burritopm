@@ -394,6 +394,11 @@ export async function fijarInventarioInicialSemanal(negocioId: bigint, usuarioId
 }
 
 export async function validarConciliacionParaCierre(negocioId: bigint, desde: string, hasta: string) {
+  const integridad = await auditarPedidosVsDistribuciones(negocioId, desde, hasta);
+  if (!integridad.ok) {
+    const detalle = integridad.errores.slice(0, 3).map((error) => error.detalle).join(' · ');
+    throw new HttpError(409, `No se puede cerrar: hay ${integridad.errores.length} inconsistencia(s) entre pedidos y despachos. ${detalle}`);
+  }
   const [pedidosCarne, producciones, produccionesExtraordinarias] = await Promise.all([
     prisma.pedidos_operativos.count({
       where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) }, estado: { notIn: ['borrador', 'cancelado'] } },
@@ -426,6 +431,171 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
   // exclusivamente apertura + compras + producción − despachos del periodo seleccionado.
   // Los movimientos de semanas posteriores nunca alteran esta conciliación.
   return alertaNegativos;
+}
+
+type ErrorIntegridadPedidos = {
+  tipo: 'pedido_sin_despacho' | 'pedido_con_despachos_duplicados' | 'vinculo_pedido_incorrecto' | 'salida_sin_movimiento' | 'movimiento_sin_salida';
+  detalle: string;
+  pedido_id?: number;
+  pedido_linea_id?: number;
+  distribucion_id?: number;
+  distribucion_linea_id?: number;
+};
+
+/**
+ * Verifica la cadena única pedido → distribución → movimiento físico.
+ *
+ * La conciliación contable usa las salidas cargadas, no vuelve a restar el pedido;
+ * esta auditoría garantiza que cada renglón confirmado tenga exactamente un vínculo
+ * y que cada salida cargada tenga exactamente un movimiento idempotente. Así los
+ * consumibles embebidos en pedidos de carne y los pedidos puros de desechables siguen
+ * la misma regla para todos los restaurantes.
+ */
+export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: string, hasta: string) {
+  const inicio = fecha(desde);
+  const fin = fecha(hasta);
+  const errores: ErrorIntegridadPedidos[] = [];
+  const pedidosLineas = await prisma.pedido_operativo_lineas.findMany({
+    where: {
+      pedido: {
+        negocio_id: negocioId,
+        fecha_entrega: { gte: inicio, lte: fin },
+        estado: { notIn: ['borrador', 'cancelado'] },
+      },
+    },
+    select: {
+      id: true,
+      pedido_id: true,
+      product_id: true,
+      cantidad: true,
+      pedido: { select: { fecha_entrega: true, linea_operacion: true, estado: true, ubicacion_id: true, ubicacion: { select: { nombre: true } } } },
+      distribucion_lineas: {
+        select: {
+          id: true,
+          distribucion_id: true,
+          product_id: true,
+          ubicacion_destino_id: true,
+          cantidad_cargada: true,
+          distribuciones: { select: { negocio_id: true, fecha_entrega: true, estado: true } },
+        },
+      },
+    },
+  });
+
+  for (const linea of pedidosLineas) {
+    const activos = linea.distribucion_lineas.filter((d) => d.distribuciones.estado !== 'cancelada');
+    if (!activos.length && num0(linea.cantidad) > 0) {
+      errores.push({
+        tipo: 'pedido_sin_despacho',
+        pedido_id: Number(linea.pedido_id),
+        pedido_linea_id: Number(linea.id),
+        detalle: `${linea.pedido.ubicacion.nombre}: ${linea.pedido.linea_operacion} sin despacho para ${iso(linea.pedido.fecha_entrega)}.`,
+      });
+      continue;
+    }
+    if (activos.length > 1) {
+      errores.push({
+        tipo: 'pedido_con_despachos_duplicados',
+        pedido_id: Number(linea.pedido_id),
+        pedido_linea_id: Number(linea.id),
+        detalle: `El renglón ${linea.id.toString()} está vinculado a ${activos.length} despachos activos.`,
+      });
+    }
+    for (const distribucion of activos) {
+      const correcto = distribucion.product_id === linea.product_id
+        && distribucion.ubicacion_destino_id === linea.pedido.ubicacion_id
+        && distribucion.distribuciones.negocio_id === negocioId
+        && distribucion.distribuciones.fecha_entrega?.getTime() === linea.pedido.fecha_entrega.getTime();
+      if (!correcto) {
+        errores.push({
+          tipo: 'vinculo_pedido_incorrecto',
+          pedido_id: Number(linea.pedido_id),
+          pedido_linea_id: Number(linea.id),
+          distribucion_id: Number(distribucion.distribucion_id),
+          distribucion_linea_id: Number(distribucion.id),
+          detalle: `El renglón ${linea.id.toString()} apunta a un destino, producto o fecha distinta del pedido.`,
+        });
+      }
+    }
+  }
+
+  const distribuciones = await prisma.distribuciones.findMany({
+    where: { negocio_id: negocioId, fecha_entrega: { gte: inicio, lte: fin }, estado: { not: 'cancelada' } },
+    select: { id: true },
+  });
+  const distribucionIds = distribuciones.map((d) => d.id);
+  const lineasCargadas = distribucionIds.length ? await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: { in: distribucionIds }, cantidad_cargada: { gt: 0 } },
+    select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true },
+  }) : [];
+  const llaves = lineasCargadas.map((linea) => `carga:${linea.id.toString()}`);
+  const movimientos = llaves.length ? await prisma.movimientos_inventario.findMany({
+    where: { negocio_id: negocioId, idempotency_key: { in: llaves } },
+    select: { id: true, product_id: true, cantidad: true, ubicacion_destino_id: true, idempotency_key: true },
+  }) : [];
+  const movimientosCorrectivos = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
+    where: { negocio_id: negocioId, documento_tipo: 'correccion_distribucion', documento_id: { in: distribucionIds } },
+    select: { product_id: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
+  }) : [];
+  const movimientoPorLlave = new Map(movimientos.map((movimiento) => [movimiento.idempotency_key, movimiento]));
+  for (const linea of lineasCargadas) {
+    const movimiento = movimientoPorLlave.get(`carga:${linea.id.toString()}`);
+    const cantidad = num0(linea.cantidad_cargada);
+    const movimientoCorrectivo = movimientosCorrectivos.some((correccion) => correccion.product_id === linea.product_id
+      && Math.abs(num0(correccion.cantidad) - cantidad) <= 0.0001
+      && correccion.ubicacion_destino_id === linea.ubicacion_destino_id);
+    if (!movimiento) {
+      if (!movimientoCorrectivo) errores.push({
+        tipo: 'salida_sin_movimiento',
+        distribucion_id: Number(linea.distribucion_id),
+        distribucion_linea_id: Number(linea.id),
+        detalle: `La salida cargada ${linea.id.toString()} no tiene movimiento físico registrado.`,
+      });
+      continue;
+    }
+    if (movimiento.product_id !== linea.product_id || Math.abs(num0(movimiento.cantidad) - cantidad) > 0.0001) {
+      errores.push({
+        tipo: 'vinculo_pedido_incorrecto',
+        distribucion_id: Number(linea.distribucion_id),
+        distribucion_linea_id: Number(linea.id),
+        detalle: `El movimiento de la salida ${linea.id.toString()} no coincide en producto o cantidad.`,
+      });
+    }
+  }
+
+  const lineasTodas = distribucionIds.length ? await prisma.distribucion_lineas.findMany({
+    where: { distribucion_id: { in: distribucionIds } },
+    select: { id: true, cantidad_cargada: true },
+  }) : [];
+  const lineaPorId = new Map(lineasTodas.map((linea) => [linea.id.toString(), linea]));
+  const movimientosDistribucion = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
+    where: { negocio_id: negocioId, documento_tipo: 'distribucion', documento_id: { in: distribucionIds }, idempotency_key: { startsWith: 'carga:' } },
+    select: { id: true, documento_id: true, idempotency_key: true, product_id: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
+  }) : [];
+  for (const movimiento of movimientosDistribucion) {
+    const idLinea = movimiento.idempotency_key.slice('carga:'.length);
+    const linea = lineaPorId.get(idLinea);
+    const revertido = movimientosCorrectivos.some((correccion) => correccion.product_id === movimiento.product_id
+      && Math.abs(num0(correccion.cantidad) - num0(movimiento.cantidad)) <= 0.0001
+      && correccion.ubicacion_origen_id === movimiento.ubicacion_destino_id
+      && correccion.ubicacion_destino_id === movimiento.ubicacion_origen_id);
+    if ((!linea || num0(linea.cantidad_cargada) <= 0) && !revertido) {
+      errores.push({
+        tipo: 'movimiento_sin_salida',
+        distribucion_id: movimiento.documento_id ? Number(movimiento.documento_id) : undefined,
+        detalle: `El movimiento ${movimiento.id.toString()} no corresponde a una salida cargada vigente.`,
+      });
+    }
+  }
+
+  return {
+    ok: errores.length === 0,
+    periodo: { desde, hasta },
+    pedidos_lineas: pedidosLineas.length,
+    distribuciones: distribucionIds.length,
+    salidas_cargadas: lineasCargadas.length,
+    errores,
+  };
 }
 
 /** Repara pedidos que dicen estar preparados pero ya no tienen ninguna línea vinculada. */
