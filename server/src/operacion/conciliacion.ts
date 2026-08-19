@@ -284,7 +284,12 @@ export async function obtenerInventarioSemanalDesechables(
     }),
     prisma.distribuciones.findMany({
       where: {
-        negocio_id: negocioId, linea_operacion: 'desechables',
+        // Los consumibles de Tapatíos viajan embebidos en el pedido/ruta de
+        // carne de lunes, jueves y sábado. La bodega de salida depende del
+        // producto, no de la línea de la distribución; por eso aquí debemos
+        // leer todas las distribuciones y filtrar sus líneas por producto.
+        // Así cada línea física se resta una sola vez, aunque viaje junto con carne.
+        negocio_id: negocioId,
         fecha_entrega: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
       },
       include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cantidad_cargada: true } } },
