@@ -89,10 +89,10 @@ export default function Shell({ children }: { children: ReactNode }) {
     return true;
   });
 
-  // El administrador entra a una sola área Operación; sus pasos viven dentro de ella.
-  // Las rutas directas se conservan para marcadores y enlaces existentes.
+  // El administrador entra a Operación para la captura diaria y conserva accesos
+  // directos para las áreas de control; las rutas existentes siguen funcionando.
   const itemsNavegacion = usuario?.rol === 'admin'
-    ? [items.find((i) => i.ruta === '/')!, OPERACION_ADMIN, items.find((i) => i.ruta === '/semana/cierre')!, items.find((i) => i.ruta === '/facturacion')!, items.find((i) => i.ruta === '/incidencias')!, CONFIGURACION_ADMIN]
+    ? [items.find((i) => i.ruta === '/')!, OPERACION_ADMIN, items.find((i) => i.ruta === '/semana/inventario')!, items.find((i) => i.ruta === '/semana/cierre')!, items.find((i) => i.ruta === '/facturacion')!, items.find((i) => i.ruta === '/incidencias')!, CONFIGURACION_ADMIN]
     : items;
 
   // "Más" siempre visible en móvil: además del overflow, ahí viven Tema y Cerrar sesión
@@ -102,7 +102,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   const extras = itemsMoviles.length > MAX_PRIMARIOS ? itemsMoviles.slice(MAX_PRIMARIOS) : [];
   const itemActivo = (i: Item) => i.ruta === '/'
     ? pathname === '/'
-    : i.ruta === '/semana' ? pathname.startsWith('/semana') && !pathname.startsWith('/semana/cierre') : pathname.startsWith(i.ruta);
+    : i.ruta === '/semana' ? pathname.startsWith('/semana') && !pathname.startsWith('/semana/cierre') && !pathname.startsWith('/semana/inventario') : pathname.startsWith(i.ruta);
   const destino = (i: Item) => i.ruta.startsWith('/semana') ? rutaSemana(i.ruta) : i.ruta;
   const etiquetaItem = (i: Item) => {
     if (i.ruta === '/' && usuario?.rol !== 'admin') return 'Hoy';

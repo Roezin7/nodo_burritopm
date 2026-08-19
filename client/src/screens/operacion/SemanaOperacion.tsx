@@ -60,7 +60,7 @@ function CadenciaSemanal({ actual, semana, rutaSemana }: { actual: AreaAdmin; se
         <nav aria-label="Regularización del sábado">
           <NavLink to={rutaSemana('/semana/compras')} className={actual === 'compras' ? 'is-active' : ''}>Compras</NavLink>
           <NavLink to={rutaSemana('/semana/produccion')} className={actual === 'produccion' ? 'is-active' : ''}>Producción</NavLink>
-          <NavLink to={rutaSemana('/semana/inventario')} className={actual === 'inventario' ? 'is-active' : ''}>Conciliación</NavLink>
+          <NavLink to={rutaSemana('/semana/inventario')} className={actual === 'inventario' ? 'is-active' : ''}>Inventario</NavLink>
           <NavLink to={rutaSemana('/semana/cierre')} className={actual === 'cierre' ? 'is-active' : ''}>Cierre</NavLink>
         </nav>
       </div>
