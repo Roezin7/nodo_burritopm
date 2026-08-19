@@ -32,6 +32,16 @@ interface Cierre {
   facturas: Factura[];
 }
 interface Factura { id: number; numero: string; version: number; empresa: string; ubicacion: string; linea: string; emitida_at: string; vence_at: string; estado: string; total: number; pagado: number; lineas: { descripcion: string; cantidad: number; precio: number; importe: number }[] }
+interface PanoramaSemanaEnCurso {
+  inventario: {
+    total: number;
+    materia_prima_fresca: number;
+    materia_prima_congelada: number;
+    carne_terminada: number;
+    desechables: number;
+  };
+  cartera: { por_cobrar: number; por_pagar: number; balance_neto: number };
+}
 interface VistaPreviaCierre {
   semana: { anio: number; numero: number; inicia_at: string; termina_at: string };
   generado_at: string;
@@ -728,19 +738,29 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   const dialog = useDialog();
   const [factura, setFactura] = useState<Factura | null>(null);
   const [vistaPrevia, setVistaPrevia] = useState<VistaPreviaCierre | null>(null);
+  const [panoramaEnCurso, setPanoramaEnCurso] = useState<PanoramaSemanaEnCurso | null | undefined>(undefined);
   const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   const [balanceVivo, setBalanceVivo] = useState<number | null>(null);
-  useEffect(() => { setFactura(null); setVistaPrevia(null); setBalanceVivo(null); }, [semana.inicio, semana.fin]);
+  const semanaEnCurso = semana.fin > hoy() && cierreSeleccionado?.estado !== 'cerrada';
+  useEffect(() => { setFactura(null); setVistaPrevia(null); setBalanceVivo(null); setPanoramaEnCurso(undefined); }, [semana.inicio, semana.fin]);
+  useEffect(() => {
+    if (!semanaEnCurso) return;
+    let activo = true;
+    void api<PanoramaSemanaEnCurso>(`/dashboard/general?semana=${semana.inicio}`)
+      .then((resultado) => { if (activo) setPanoramaEnCurso(resultado); })
+      .catch(() => { if (activo) setPanoramaEnCurso(null); });
+    return () => { activo = false; };
+  }, [semana.inicio, semanaEnCurso]);
   // Las semanas abiertas deben mostrar el mismo balance vivo que la vista previa,
   // no el snapshot histórico guardado al iniciar la semana.
   useEffect(() => {
-    if (!cierreSeleccionado || cierreSeleccionado.estado === 'cerrada' || semana.fin > hoy()) return;
+    if (!cierreSeleccionado || cierreSeleccionado.estado === 'cerrada' || semanaEnCurso) return;
     let activo = true;
     void api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } })
       .then((resultado) => { if (activo) setBalanceVivo(resultado.balance_estimado); })
       .catch(() => { /* la vista previa manual mostrará el error */ });
     return () => { activo = false; };
-  }, [cierreSeleccionado?.id, cierreSeleccionado?.estado, semana.fin]);
+  }, [cierreSeleccionado?.id, cierreSeleccionado?.estado, semana.fin, semanaEnCurso]);
   async function revisarCierre() { setBusy(true); setError(''); try { const resultado = await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } }); setVistaPrevia(resultado); setBalanceVivo(resultado.balance_estimado); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la vista previa del cierre.'); } finally { setBusy(false); } }
   async function pagarProveedor(proveedor: string, documentos: VistaPreviaCierre['cartera']['documentos_por_pagar']) {
     const total = documentos.reduce((suma, documento) => suma + documento.saldo, 0);
@@ -776,12 +796,21 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     finally { setBusy(false); }
   }
   const libros = [['weekly-order', 'Weekly Order'], ['disposables', 'Disposables'], ['production', 'Production'], ['billing', 'Billing'], ['lbt', 'LBT'], ['aurora', 'Aurora']] as const;
+  const datosTarjeta = semanaEnCurso
+    ? panoramaEnCurso ? {
+      valor_carne: panoramaEnCurso.inventario.materia_prima_fresca + panoramaEnCurso.inventario.carne_terminada,
+      valor_congelado: panoramaEnCurso.inventario.materia_prima_congelada,
+      valor_desechables: panoramaEnCurso.inventario.desechables,
+      cuentas_por_cobrar: panoramaEnCurso.cartera.por_cobrar,
+      cuentas_por_pagar: panoramaEnCurso.cartera.por_pagar,
+    } : null
+    : cierreSeleccionado;
   return <div className="operation-stack">
     <ConciliacionSemanal semana={semana} busy={busy} setBusy={setBusy} setError={setError} />
     <section className="close-week-card"><div><span className="eyebrow">Semana {semana.numero}</span><h2>Revisar y cerrar</h2><p>{semana.inicio} al {semana.fin} · consulta el resultado antes de generar facturas.</p></div><div className="close-week-action"><button className="btn btn-primary" disabled={busy || semana.fin > hoy() || cierreSeleccionado?.estado === 'cerrada'} onClick={() => void revisarCierre()}>{busy ? 'Calculando…' : cierreSeleccionado?.estado === 'cerrada' ? 'Semana cerrada' : semana.fin > hoy() ? 'Semana en curso' : 'Vista previa del cierre'}</button></div></section>
 
-    <div className="week-list">{cierreSeleccionado ? [cierreSeleccionado].map((s) => <section className="week-card" key={s.id}><header><div><span className={`status-dot status-dot--${s.estado}`} /> <strong>Semana {s.semana} · {s.anio}</strong><p>{s.inicia_at} al {s.termina_at}</p></div><div className="week-balance"><span>{s.estado === 'cerrada' ? 'Balance' : 'Balance actual · vista previa'}</span><strong>{s.estado === 'cerrada' ? usd(s.balance_neto) : balanceVivo == null ? 'Calculando…' : usd(balanceVivo)}</strong></div></header>
-      <div className="metric-strip metric-strip--five"><div><span>Carne</span><strong>{usd(s.valor_carne)}</strong></div><div><span>Congelado</span><strong>{usd(s.valor_congelado)}</strong></div><div><span>Desechables</span><strong>{usd(s.valor_desechables)}</strong></div><div><span>Por cobrar · 3 semanas</span><strong>{usd(s.cuentas_por_cobrar)}</strong></div><div><span>Por pagar</span><strong>{usd(s.cuentas_por_pagar)}</strong></div></div>
+    <div className="week-list">{cierreSeleccionado ? [cierreSeleccionado].map((s) => <section className="week-card" key={s.id}><header><div><span className={`status-dot status-dot--${s.estado}`} /> <strong>Semana {s.semana} · {s.anio}</strong><p>{s.inicia_at} al {s.termina_at}</p></div><div className="week-balance"><span>{semanaEnCurso ? 'Semana en curso' : s.estado === 'cerrada' ? 'Balance' : 'Balance actual · vista previa'}</span><strong>{semanaEnCurso ? panoramaEnCurso ? usd(panoramaEnCurso.cartera.balance_neto) : panoramaEnCurso === undefined ? 'Cargando…' : 'No disponible' : s.estado === 'cerrada' ? usd(s.balance_neto) : balanceVivo == null ? 'Calculando…' : usd(balanceVivo)}</strong></div></header>
+      <div className="metric-strip metric-strip--five"><div><span>Carne</span><strong>{datosTarjeta ? usd(datosTarjeta.valor_carne) : '—'}</strong></div><div><span>Congelado</span><strong>{datosTarjeta ? usd(datosTarjeta.valor_congelado) : '—'}</strong></div><div><span>Desechables</span><strong>{datosTarjeta ? usd(datosTarjeta.valor_desechables) : '—'}</strong></div><div><span>Por cobrar · 3 semanas</span><strong>{datosTarjeta ? usd(datosTarjeta.cuentas_por_cobrar) : '—'}</strong></div><div><span>Por pagar</span><strong>{datosTarjeta ? usd(datosTarjeta.cuentas_por_pagar) : '—'}</strong></div></div>
       <div className="week-toolbar"><div className="export-menu">{libros.map(([tipo, label]) => <button className="export-chip" key={tipo} onClick={() => void descargar(s.id, tipo)}>{label}<small>.xlsx</small></button>)}</div>{s.estado === 'cerrada' && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void reabrir(s.id)}>Reabrir semana</button>}</div>
       <CollapsibleSection title="Facturas" count={s.facturas.length}><div className="invoice-list"><div className="invoice-row invoice-row--head"><span>Factura</span><span>Empresa / ubicación</span><span>Vencimiento</span><span>Estado</span><span>Total</span><span /></div>{s.facturas.map((f) => <div className="invoice-row" key={f.id}><button className="invoice-number" onClick={() => setFactura(f)}>{f.numero}<small>v{f.version} · {f.linea}</small></button><span data-label="Ubicación"><strong>{f.ubicacion}</strong><small>{f.empresa}</small></span><span data-label="Vence">{f.vence_at}</span><span data-label="Estado"><span className="chip chip--info">Ciclo automático</span></span><span data-label="Total"><strong>{usd(f.total)}</strong></span><span /></div>)}</div></CollapsibleSection>
     </section>) : <div className="empty-state workspace-card"><strong>Semana {semana.numero} todavía abierta</strong><span>Al cerrarla se generarán facturas, balances y libros Excel de este periodo.</span></div>}</div>
