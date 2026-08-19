@@ -111,6 +111,9 @@ describe('corrección de una venta procesada', () => {
 
   afterAll(async () => {
     await prisma.auditoria_operativa.deleteMany({ where: { negocio_id: negocioId } });
+    // Las correcciones de pedidos generan eventos de notificación dentro de la
+    // misma transacción; sus entregas hijas se eliminan por cascade.
+    await prisma.notificacion_eventos.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.distribucion_lineas.deleteMany({ where: { distribuciones: { negocio_id: negocioId } } });
     await prisma.distribuciones.deleteMany({ where: { negocio_id: negocioId } });
