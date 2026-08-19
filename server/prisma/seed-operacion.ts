@@ -44,6 +44,7 @@ const nuevas = [
   ['Taquería Aurora', 'AUROR', true], ['Burlington', 'BURLI', true],
   ['Tapatíos Glen Ellyn', 'TGE', true], ['Tapatíos Lombard', 'TLO', true], ['Tapatíos Streamwood', 'TST', true],
   ['Tapatíos Naperville', 'TNA', true], ['Tapatíos Bolingbrook', 'TBO', true],
+  ['Burritos Tapatíos Downers Grove', 'TDOW', true],
 ] as const;
 
 const carne = [
@@ -79,9 +80,9 @@ const rutas: { codigo: string; nombre: string; linea: LineaOperacion; dia: numbe
   { codigo: 'CAR-NOR-SAB', nombre: 'Carne Norte · sábado', linea: 'carne', dia: 6, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'] },
   { codigo: 'CAR-FRA-MIE', nombre: 'Carne Frankfurt · miércoles', linea: 'carne', dia: 3, conductor: 'POR ASIGNAR', paradas: ['FRANK'] },
   { codigo: 'CAR-FRA-SAB', nombre: 'Carne Frankfurt · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['FRANK'] },
-  { codigo: 'TAP-LUN', nombre: 'Tapatíos · lunes', linea: 'carne', dia: 1, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO'] },
-  { codigo: 'TAP-JUE', nombre: 'Tapatíos · jueves', linea: 'carne', dia: 4, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO'] },
-  { codigo: 'TAP-SAB', nombre: 'Tapatíos · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO'] },
+  { codigo: 'TAP-LUN', nombre: 'Tapatíos · lunes', linea: 'carne', dia: 1, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO', 'TDOW'] },
+  { codigo: 'TAP-JUE', nombre: 'Tapatíos · jueves', linea: 'carne', dia: 4, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO', 'TDOW'] },
+  { codigo: 'TAP-SAB', nombre: 'Tapatíos · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO', 'TDOW'] },
   { codigo: 'DES-BPM-MIE', nombre: 'Desechables BPM · miércoles', linea: 'desechables', dia: 3, conductor: 'POR ASIGNAR', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'] },
 ];
 
@@ -152,7 +153,7 @@ async function main() {
 
   // Mismo orden horizontal que Weekly Order/Billing. Los proyectos inactivos conservan
   // su posición para que al abrirlos no cambie el libro ni la captura semanal.
-  const ordenUbicaciones = ['LOMBA', 'NAPER', 'CAROL', 'LISLE', 'GLEND', 'WESTC', 'BATAV', 'ALGON', 'NAPER2', 'ROLLI', 'SCHAU', 'CRYST', 'LAKEZ', 'FRANK', 'PLAIN', 'AUROR', 'BURLI', 'TGE', 'TST', 'TLO', 'TNA', 'TBO'];
+  const ordenUbicaciones = ['LOMBA', 'NAPER', 'CAROL', 'LISLE', 'GLEND', 'WESTC', 'BATAV', 'ALGON', 'NAPER2', 'ROLLI', 'SCHAU', 'CRYST', 'LAKEZ', 'FRANK', 'PLAIN', 'AUROR', 'BURLI', 'TGE', 'TST', 'TLO', 'TNA', 'TBO', 'TDOW'];
   for (const [indice, codigo] of ordenUbicaciones.entries()) {
     await prisma.ubicaciones.updateMany({ where: { negocio_id: org.id, codigo, orden_operativo: 999 }, data: { orden_operativo: indice + 1 } });
   }
