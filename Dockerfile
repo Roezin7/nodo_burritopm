@@ -18,6 +18,9 @@ RUN npm ci --no-audit --no-fund
 
 # 2) Código y build: prisma generate + (client -> server/public, server -> server/dist)
 COPY . .
+# Identifica la imagen desplegada aunque Coolify no exponga el SHA del commit al runtime.
+# Cambia cuando cambia el contexto copiado; se conserva durante reinicios de esa imagen.
+RUN node -e "require('fs').writeFileSync('server/release-id', new Date().toISOString())"
 RUN npm run prisma:generate -w server && npm run build
 
 # El entorno de ejecución es producción (no afecta a las capas de instalación de arriba).

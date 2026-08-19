@@ -14,6 +14,8 @@ const schema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional().default(''),
   VAPID_PRIVATE_KEY: z.string().optional().default(''),
   VAPID_SUBJECT: z.string().optional().default('mailto:avisos@burritoparrilla.com'),
+  // Identificador inmutable del deploy. Se usa para deduplicar el aviso de actualización.
+  APP_RELEASE_ID: z.string().trim().optional().default(''),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -660,6 +660,11 @@ de configuración realizados por el admin.
 - `SEED_REPARTO_PIN`: PIN inicial del usuario de bodega/reparto cuando el bootstrap lo necesite.
 - `ALLOWED_ORIGINS`: dominios permitidos separados por coma; vacío significa mismo origen.
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`: Web Push opcional.
+- `APP_RELEASE_ID`: identificador único del deploy (idealmente el SHA del commit). Cada valor
+  nuevo genera un aviso Web Push a los usuarios activos: “Hay una actualización en la app”. Si
+  no se configura, la imagen Docker genera un identificador estable por build. También se
+  detectan automáticamente `RENDER_GIT_COMMIT`, `SOURCE_VERSION`, `GIT_COMMIT_SHA`,
+  `COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `RAILWAY_GIT_COMMIT_SHA` y `HEROKU_SLUG_COMMIT`.
 - `PORT`: normalmente inyectado por Coolify; valor por defecto `3100`.
 - `NODE_ENV=production`: fijado por la imagen.
 - `ANTHROPIC_API_KEY`: reservado para capacidades posteriores; no es necesario para la operación

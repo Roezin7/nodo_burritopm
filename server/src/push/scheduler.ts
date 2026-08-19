@@ -2,6 +2,7 @@ import { prisma } from '../db.js';
 import { autoCerrarTransitoVencido } from '../distribuciones/service.js';
 import { avisarAdminRezagados, enviarAUsuarios, pushHabilitado, usuariosDeUbicacion } from './service.js';
 import { procesarNotificaciones } from './order-notifications.js';
+import { registrarAvisoDeploy } from './release-notifications.js';
 
 // Hora del negocio a partir de la cual se manda el aviso "hoy toca pedido" a sucursales.
 const HORA_AVISO = 8;
@@ -117,6 +118,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 /** Arranca el chequeo periódico: avisos de pedido (si hay push) + auto-cierre de tránsito. */
 export function iniciarAvisos() {
   if (timer) return;
+  void registrarAvisoDeploy().catch((error) => console.error('Error registrando aviso de deploy', error));
   void tick();
   void tickNotificaciones();
   timer = setInterval(() => void tick(), CADA_MS);
