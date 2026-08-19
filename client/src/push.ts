@@ -18,6 +18,18 @@ export function permisoConcedido(): boolean {
   return pushSoportado() && Notification.permission === 'granted';
 }
 
+/** Re-registra una suscripción existente después de reinstalar, actualizar o limpiar la base. */
+export async function sincronizarAvisosExistentes(): Promise<boolean> {
+  if (!permisoConcedido()) return false;
+  const { habilitado } = await api<{ habilitado: boolean; clave: string }>('/push/clave', { auth: false });
+  if (!habilitado) return false;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return false;
+  await api('/push/suscribir', { method: 'POST', body: sub.toJSON() });
+  return true;
+}
+
 function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');

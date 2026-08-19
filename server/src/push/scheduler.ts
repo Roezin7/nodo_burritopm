@@ -1,12 +1,14 @@
 import { prisma } from '../db.js';
 import { autoCerrarTransitoVencido } from '../distribuciones/service.js';
 import { avisarAdminRezagados, enviarAUsuarios, pushHabilitado, usuariosDeUbicacion } from './service.js';
+import { procesarNotificaciones } from './order-notifications.js';
 
 // Hora del negocio a partir de la cual se manda el aviso "hoy toca pedido" a sucursales.
 const HORA_AVISO = 8;
 // Hora a partir de la cual, si aún faltan sucursales por cerrar, se avisa al admin.
 const HORA_REZAGADOS = 11;
 const CADA_MS = 15 * 60 * 1000; // revisa cada 15 min
+const CADA_NOTIFICACIONES_MS = 15 * 1000; // cambios de pedidos: respuesta rápida sin bloquear el guardado
 
 const fechaISOEnTz = (d: Date, tz: string) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
@@ -106,12 +108,18 @@ async function tick() {
   await tickAutoCierre().catch((error) => console.error('Error ejecutando auto-cierre', error));
 }
 
+async function tickNotificaciones() {
+  await procesarNotificaciones().catch((error) => console.error('Error procesando notificaciones de pedidos', error));
+}
+
 let timer: ReturnType<typeof setInterval> | null = null;
 
 /** Arranca el chequeo periódico: avisos de pedido (si hay push) + auto-cierre de tránsito. */
 export function iniciarAvisos() {
   if (timer) return;
   void tick();
+  void tickNotificaciones();
   timer = setInterval(() => void tick(), CADA_MS);
-  console.log('🔔 Scheduler activo (avisos de pedido + auto-cierre de tránsito).');
+  setInterval(() => void tickNotificaciones(), CADA_NOTIFICACIONES_MS);
+  console.log('🔔 Scheduler activo (avisos de pedido + cambios Web Push + auto-cierre de tránsito).');
 }

@@ -106,6 +106,7 @@ model negocios {
   ajustes_facturacion ajustes_facturacion[]
   facturas            facturas[]
   recetas_produccion  recetas_produccion[]
+  notificacion_eventos notificacion_eventos[]
 }
 
 model usuarios {
@@ -122,6 +123,7 @@ model usuarios {
   negocios            negocios   @relation(fields: [negocio_id], references: [id])
 
   ubicaciones_asignadas usuario_ubicaciones[]
+  notificaciones       notificacion_entregas[]
 
   @@index([negocio_id])
 }
@@ -1054,6 +1056,50 @@ model auditoria_operativa {
 
   @@index([negocio_id, creado_at])
   @@index([entidad, entidad_id])
+}
+
+// Eventos de negocio que deben llegar a un dispositivo sin bloquear la operación.
+// El evento se escribe dentro de la transacción del pedido; las entregas se procesan
+// después con reintentos para no perder avisos por una caída momentánea de Web Push.
+model notificacion_eventos {
+  id          BigInt   @id @default(autoincrement())
+  negocio_id  BigInt
+  tipo        String
+  entidad     String
+  entidad_id  BigInt?
+  actor_id    BigInt?
+  dedupe_key  String
+  titulo      String
+  cuerpo      String
+  url         String?
+  datos       Json
+  creado_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  negocio     negocios              @relation(fields: [negocio_id], references: [id])
+  entregas    notificacion_entregas[]
+
+  @@unique([negocio_id, dedupe_key])
+  @@index([negocio_id, creado_at])
+}
+
+model notificacion_entregas {
+  id             BigInt   @id @default(autoincrement())
+  evento_id      BigInt
+  usuario_id     BigInt
+  canal          String   @default("web_push")
+  estado         String   @default("pendiente")
+  intentos       Int      @default(0)
+  disponible_at  DateTime @default(now()) @db.Timestamptz(6)
+  enviado_at     DateTime? @db.Timestamptz(6)
+  ultimo_error   String?
+  creado_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  evento         notificacion_eventos @relation(fields: [evento_id], references: [id], onDelete: Cascade)
+  usuario        usuarios              @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@unique([evento_id, usuario_id, canal])
+  @@index([estado, disponible_at])
+  @@index([usuario_id, creado_at])
 }
 
 model facturas {

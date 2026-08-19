@@ -14,6 +14,12 @@ export interface AvisoPush {
   url?: string;
 }
 
+export interface ResultadoPushUsuario {
+  suscripciones: number;
+  enviadas: number;
+  fallidas: number;
+}
+
 /** Guarda (o actualiza) la suscripción de un dispositivo para un usuario. */
 export async function guardarSuscripcion(
   negocioId: bigint,
@@ -33,23 +39,36 @@ export async function borrarSuscripcion(endpoint: string, usuarioId?: bigint) {
   await prisma.push_subscriptions.deleteMany({ where: { endpoint, ...(usuarioId != null ? { usuario_id: usuarioId } : {}) } });
 }
 
-/** Envía un aviso a todos los dispositivos de una lista de usuarios. Best-effort. */
-export async function enviarAUsuarios(usuarioIds: bigint[], aviso: AvisoPush) {
-  if (!pushHabilitado || usuarioIds.length === 0) return;
-  const subs = await prisma.push_subscriptions.findMany({ where: { usuario_id: { in: usuarioIds } } });
-  if (subs.length === 0) return;
+/** Envía un aviso a todos los dispositivos de un usuario y devuelve el resultado para la cola. */
+export async function enviarPushAUsuario(usuarioId: bigint, aviso: AvisoPush): Promise<ResultadoPushUsuario> {
+  if (!pushHabilitado) return { suscripciones: 0, enviadas: 0, fallidas: 0 };
+  const subs = await prisma.push_subscriptions.findMany({ where: { usuario_id: usuarioId } });
+  if (subs.length === 0) return { suscripciones: 0, enviadas: 0, fallidas: 0 };
   const payload = JSON.stringify(aviso);
-  await Promise.all(
+  const resultados = await Promise.all(
     subs.map(async (s) => {
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
+        return 'enviada' as const;
       } catch (e: unknown) {
         // 404/410 = suscripción muerta → la limpiamos.
         const code = (e as { statusCode?: number }).statusCode;
         if (code === 404 || code === 410) await borrarSuscripcion(s.endpoint);
+        return 'fallida' as const;
       }
     }),
   );
+  return {
+    suscripciones: subs.length,
+    enviadas: resultados.filter((resultado) => resultado === 'enviada').length,
+    fallidas: resultados.filter((resultado) => resultado === 'fallida').length,
+  };
+}
+
+/** Envía un aviso a todos los dispositivos de una lista de usuarios. Best-effort. */
+export async function enviarAUsuarios(usuarioIds: bigint[], aviso: AvisoPush) {
+  if (!pushHabilitado || usuarioIds.length === 0) return;
+  await Promise.all(usuarioIds.map((usuarioId) => enviarPushAUsuario(usuarioId, aviso)));
 }
 
 /** Admins activos del negocio (para avisos de supervisión). */

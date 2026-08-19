@@ -16,6 +16,7 @@ import {
   type LoteFifoCalculable,
 } from '../inventario/fifo.js';
 import { esErrorPrisma, transaccionSerializable } from '../lib/transaccion.js';
+import { registrarCambioPedidoEnTx } from '../push/order-notifications.js';
 
 export { calcularConsumoFifo, type LoteFifoCalculable } from '../inventario/fifo.js';
 
@@ -601,6 +602,15 @@ async function guardarPedidoEnTx(
 
     const nuevas = new Map(input.lineas.map((linea) => [String(linea.product_id), linea]));
     const existentes = new Map((pedidoExistente?.lineas ?? []).map((linea) => [linea.product_id.toString(), linea]));
+    const detallesAnteriores = (pedidoExistente?.lineas ?? []).map((linea) => ({
+      product_id: Number(linea.product_id), nombre: linea.producto.nombre, cantidad: num0(linea.cantidad), notas: linea.notas,
+    }));
+    const detallesNuevos = positivas.map((entrada) => ({
+      product_id: entrada.product_id,
+      nombre: porId.get(String(entrada.product_id))!.nombre,
+      cantidad: r3(entrada.cantidad),
+      notas: entrada.notas ?? null,
+    }));
     const distribucionesBase = (pedidoExistente?.lineas ?? [])
       .flatMap((linea) => linea.distribucion_lineas)
       .sort((a, b) => Number(b.distribucion_id - a.distribucion_id));
@@ -697,6 +707,24 @@ async function guardarPedidoEnTx(
           sello,
         });
       }
+    }
+
+    const pedidoPuedeNotificar = debeConfirmar || Boolean(pedidoExistente && !['borrador', 'cancelado'].includes(pedidoExistente.estado));
+    if (pedidoPuedeNotificar) {
+      await registrarCambioPedidoEnTx({
+        tx,
+        negocioId,
+        usuarioId,
+        pedido,
+        ubicacion: { id: ubicacion.id, nombre: ubicacion.nombre },
+        linea: input.linea,
+        fechaEntrega: input.fecha_entrega,
+        estadoAnterior: pedidoExistente?.estado ?? null,
+        notasAnteriores: pedidoExistente?.notas,
+        notasNuevas: input.notas,
+        anterior: detallesAnteriores,
+        nuevo: detallesNuevos,
+      });
     }
 
     if (consolidado) {
@@ -1052,13 +1080,38 @@ export async function confirmarPedidosEnRango(
   const rango = { gte: fecha(desde), lte: fecha(hasta) };
   const borradores = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: rango, estado: 'borrador' },
-    select: { id: true, lineas: { select: { id: true }, take: 1 } },
+    include: {
+      ubicacion: { select: { id: true, nombre: true } },
+      lineas: { include: { producto: { select: { id: true, nombre: true } } } },
+    },
   });
   const conPedido = borradores.filter((p) => p.lineas.length > 0).map((p) => p.id);
   if (conPedido.length) {
-    await prisma.pedidos_operativos.updateMany({
-      where: { id: { in: conPedido }, estado: 'borrador' },
-      data: { estado: 'confirmado', confirmado_at: new Date() },
+    await prisma.$transaction(async (tx) => {
+      for (const borrador of borradores.filter((pedido) => conPedido.includes(pedido.id))) {
+        const pedido = await tx.pedidos_operativos.update({
+          where: { id: borrador.id },
+          data: { estado: 'confirmado', confirmado_at: new Date() },
+        });
+        await registrarCambioPedidoEnTx({
+          tx,
+          negocioId,
+          usuarioId,
+          pedido,
+          ubicacion: borrador.ubicacion,
+          linea,
+          fechaEntrega: iso(borrador.fecha_entrega),
+          estadoAnterior: 'borrador',
+          notasAnteriores: borrador.notas,
+          notasNuevas: borrador.notas,
+          anterior: borrador.lineas.map((lineaPedido) => ({
+            product_id: Number(lineaPedido.product_id), nombre: lineaPedido.producto.nombre, cantidad: num0(lineaPedido.cantidad), notas: lineaPedido.notas,
+          })),
+          nuevo: borrador.lineas.map((lineaPedido) => ({
+            product_id: Number(lineaPedido.product_id), nombre: lineaPedido.producto.nombre, cantidad: num0(lineaPedido.cantidad), notas: lineaPedido.notas,
+          })),
+        });
+      }
     });
   }
 

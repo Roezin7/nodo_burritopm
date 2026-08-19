@@ -439,10 +439,17 @@ sin respaldo y autorización explícita.
 - Cola offline limitada a operaciones idempotentes de campo; compras, producción, cierres,
   pagos y eliminaciones exigen conexión y confirmación del servidor.
 - Banner de actualización después de un deploy; el usuario decide cuándo recargar.
-- Web Push opcional para recordatorios de inventario y sucursales rezagadas.
+- Web Push opcional para recordatorios, cambios de pedidos confirmados, correcciones posteriores
+  al despacho y sucursales rezagadas. Los cambios se registran en una cola durable y se reintentan
+  sin bloquear el guardado.
 
 En iPhone/iPad, los avisos requieren HTTPS y la PWA instalada desde **Compartir → Agregar a
 inicio**.
+
+Para activar avisos en iPhone: abre la aplicación desde el icono instalado en la pantalla de
+inicio, entra al Resumen, pulsa **Activar avisos** y acepta el permiso de notificaciones. El botón
+envía una prueba; después los administradores recibirán avisos cuando un pedido confirmado cambie
+o cuando se corrija un pedido ya procesado.
 
 ## Arquitectura
 
