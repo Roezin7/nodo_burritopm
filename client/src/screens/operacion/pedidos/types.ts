@@ -4,7 +4,7 @@ export type Linea = 'carne' | 'desechables';
 
 export interface Catalogo {
   ubicaciones: { id: number; nombre: string; codigo: string; tipo: string; empresa: { id: number; nombre: string; codigo: string } | null; entrega_en: { id: number; nombre: string } | null }[];
-  productos: { id: number; sku: string; nombre: string; linea: Linea; tipo: string; unidad: string; precio: number | null; precio_pendiente: boolean; peso_caja_lb: number | null }[];
+  productos: { id: number; sku: string; nombre: string; linea: Linea; orden: number; tipo: string; unidad: string; precio: number | null; precio_pendiente: boolean; peso_caja_lb: number | null }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: Linea; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
   calendario_pedidos: { ubicacion_id: number; linea: Linea; dia_semana: number; rutas: { id: number; nombre: string; codigo: string; conductor: string }[] }[];
   semanas: { id: number; anio: number; semana: number; inicia_at: string; termina_at: string; estado: string }[];

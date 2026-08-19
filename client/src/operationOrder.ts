@@ -6,6 +6,8 @@ export interface ProductoOrdenable {
   nombre: string;
   linea: LineaOperacion;
   tipo: string;
+  /** Orden maestro proveniente del catálogo/Excel. */
+  orden?: number;
 }
 
 export interface FilaOrden {
@@ -50,7 +52,12 @@ export const FILAS_DESECHABLES: readonly FilaOrden[] = [
 
 export function filasOrden(linea: LineaOperacion, productos: ProductoOrdenable[]): FilaOrden[] {
   if (linea === 'carne') return [...FILAS_CARNE];
+  const catalogo = productos
+    .filter((p) => p.linea === 'desechables' && p.tipo !== 'materia_prima')
+    .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999) || a.nombre.localeCompare(b.nombre, 'es') || a.sku.localeCompare(b.sku));
+  if (catalogo.length) return catalogo.map((p) => ({ nombre: p.nombre.toUpperCase(), skus: [p.sku] }));
   const porSku = new Map(productos.map((p) => [p.sku, p]));
+  // Compatibilidad con catálogos antiguos que todavía no exponen productos/orden.
   return FILAS_DESECHABLES.map((f) => ({ ...f, nombre: porSku.get(f.skus[0])?.nombre.toUpperCase() ?? f.skus[0] }));
 }
 
@@ -69,6 +76,11 @@ export function nombreEnVenta(sku: string, nombre: string, linea: LineaOperacion
 }
 
 export function productosParaPedido<T extends ProductoOrdenable>(productos: T[], linea: LineaOperacion, empresaCodigo?: string): T[] {
+  if (linea === 'desechables') {
+    return productos
+      .filter((p) => p.linea === 'desechables' && p.tipo !== 'materia_prima')
+      .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999) || a.nombre.localeCompare(b.nombre, 'es') || a.sku.localeCompare(b.sku));
+  }
   const porSku = new Map(productos.map((p) => [p.sku, p]));
   const filas = filasOrden(linea, productos);
   const resultado: T[] = [];

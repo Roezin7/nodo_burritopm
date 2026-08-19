@@ -622,6 +622,14 @@ Las pruebas cubren FIFO, ledger, transacciones serializables, producción/costos
 ventas, conciliación, rutas, plantillas Excel, folios, créditos de Lisle y ciclo de cuentas por
 cobrar.
 
+Antes de un cierre o una corrección histórica puede ejecutarse la auditoría de solo lectura:
+
+```bash
+DATABASE_URL="..." npm run audit:operacion -w server
+```
+
+Consulta [docs/AUDITORIA_OPERATIVA.md](docs/AUDITORIA_OPERATIVA.md) para interpretar las alertas.
+
 ## Despliegue en Coolify
 
 El `Dockerfile` produce una imagen Node 22 que compila cliente y servidor. En cada arranque:

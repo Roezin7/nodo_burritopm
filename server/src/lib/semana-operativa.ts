@@ -3,6 +3,22 @@ import { HttpError } from '../middleware/error.js';
 
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
+/** Fecha calendario del negocio, no la fecha del servidor ni la del navegador. */
+export function fechaISOEnZona(d: Date, zonaHoraria: string) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: zonaHoraria,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+/** La fecha operativa debe venir de la configuración del negocio. */
+export async function hoyNegocio(negocioId: bigint) {
+  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { zona_horaria: true } });
+  return fechaISOEnZona(new Date(), negocio?.zona_horaria ?? 'America/Chicago');
+}
+
 /**
  * Protege la contabilidad histórica. Una semana cerrada solo puede modificarse después de
  * reabrirla desde Cierre; de lo contrario compras, producción e inventario dejan de coincidir

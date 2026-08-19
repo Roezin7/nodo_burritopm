@@ -10,6 +10,7 @@ import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/servi
 import { aplicarMovimiento } from '../ledger/service.js';
 import { avisarAdminFaltantesInventario } from '../push/service.js';
 import { costoParaValuacionInventario, valorExistencia } from '../inventario/valuacion.js';
+import { hoyNegocio } from '../lib/semana-operativa.js';
 
 // Compatibilidad para consumidores existentes; la implementación vive en el
 // módulo común de valuación para que cierre, inventario, dashboard y exports
@@ -21,9 +22,6 @@ const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
-const hoyChicago = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(new Date());
 
 /**
  * Separa la pérdida histórica del saldo que abrirá la semana siguiente.
@@ -383,7 +381,7 @@ async function sincronizarVentasParaCierre(negocioId: bigint, usuarioId: bigint,
 /** Calcula el resultado del cierre sin crear facturas, incidencias ni fotografías de cierre. */
 export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fechaCierre: string) {
   const periodo = semanaDeFecha(fecha(fechaCierre));
-  if (iso(periodo.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
+  if (iso(periodo.sabado) > await hoyNegocio(negocioId)) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
   // Una semana histórica conciliada con Excel debe previsualizar su fotografía y
@@ -568,7 +566,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
 
 export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCierre: string) {
   const periodoSolicitado = semanaDeFecha(fecha(fechaCierre));
-  if (iso(periodoSolicitado.sabado) > hoyChicago()) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
+  if (iso(periodoSolicitado.sabado) > await hoyNegocio(negocioId)) throw new HttpError(409, 'No se puede cerrar una semana que todavía no termina');
   const semana = await asegurarSemana(negocioId, fechaCierre);
   if (semana.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
 
@@ -815,7 +813,7 @@ export async function listarCierres(negocioId: bigint) {
 
 /** Cartera completa para Control: facturas emitidas y facturas recibidas de proveedores. */
 export async function listarCartera(negocioId: bigint) {
-  const periodoActual = semanaDeFecha(fecha(hoyChicago()));
+  const periodoActual = semanaDeFecha(fecha(await hoyNegocio(negocioId)));
   const inicioCiclo = inicioVentanaCuentasPorCobrar(periodoActual.domingo);
   const [facturas, compras, ajustes] = await Promise.all([
     prisma.facturas.findMany({
@@ -903,7 +901,7 @@ export async function listarCartera(negocioId: bigint) {
   }});
   const pendientesEmitidas = emitidas.filter((f) => f.en_ciclo && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
-  const hoy = hoyChicago();
+  const hoy = await hoyNegocio(negocioId);
   const referencias = new Map<string, number>();
   for (const factura of pendientesRecibidas) if (factura.referencia?.trim()) {
     const clave = `${factura.proveedor}:${factura.referencia.trim().toLowerCase()}`;
@@ -1012,7 +1010,7 @@ export async function eliminarCreditoLisle(negocioId: bigint, ajusteId: bigint, 
 }
 
 export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuarioId: bigint, fechaPago: string) {
-  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
+  if (fechaPago > await hoyNegocio(negocioId)) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
   const saldo = await transaccionSerializable(async (tx) => {
     const f = await tx.facturas.findFirst({ where: { id: facturaId, negocio_id: negocioId, estado: 'emitida', total: { gte: 0 } } });
     if (!f) throw new HttpError(404, 'Factura pendiente no encontrada');
@@ -1038,7 +1036,7 @@ export async function pagarCompra(negocioId: bigint, compraId: bigint, usuarioId
     });
     if (!c) throw new HttpError(404, 'Compra pendiente no encontrada');
     if (fechaPago < iso(c.fecha)) throw new HttpError(400, 'La fecha de pago no puede ser anterior a la compra');
-    if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
+    if (fechaPago > await hoyNegocio(negocioId)) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
     const pagado = r2(c.pagos.reduce((total, pago) => total + num0(pago.monto), 0));
     const saldo = Math.max(0, r2(num0(c.total) - pagado));
     if (saldo <= 0) throw new HttpError(409, 'La compra ya está pagada. Recarga la cartera.');
@@ -1065,7 +1063,7 @@ export async function pagarCompra(negocioId: bigint, compraId: bigint, usuarioId
 }
 
 export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[], usuarioId: bigint, fechaPago: string) {
-  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
+  if (fechaPago > await hoyNegocio(negocioId)) throw new HttpError(400, 'La fecha de cobro no puede estar en el futuro');
   const resultado = await transaccionSerializable(async (tx) => {
     const facturas = await tx.facturas.findMany({
       where: { id: { in: facturaIds }, negocio_id: negocioId, estado: 'emitida', total: { gte: 0 } },
@@ -1092,7 +1090,7 @@ export async function pagarFacturasLote(negocioId: bigint, facturaIds: bigint[],
 }
 
 export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], usuarioId: bigint, fechaPago: string) {
-  if (fechaPago > hoyChicago()) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
+  if (fechaPago > await hoyNegocio(negocioId)) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
   const resultado = await transaccionSerializable(async (tx) => {
     const compras = await tx.compras.findMany({
       where: { id: { in: compraIds }, negocio_id: negocioId, estado: { not: 'cancelada' } },

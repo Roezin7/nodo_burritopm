@@ -22,6 +22,7 @@
     "reconcile:week33:summary": "tsx prisma/reconcile-week33-excel-summary.ts",
     "backfill:meat-supplies": "tsx prisma/backfill-meat-order-supplies.ts",
     "backfill:weekly-snapshots": "tsx prisma/backfill-weekly-snapshots.ts",
+    "audit:operacion": "tsx prisma/audit-operacion.ts",
     "reset:week29:meat": "tsx prisma/reset-week29-meat.ts",
     "test": "vitest run src"
   },
