@@ -8,6 +8,7 @@ import { prisma } from '../db.js';
 import * as conciliacion from './conciliacion.js';
 import { confirmarRecepcionesSinFaltantesEnRango, eliminarDistribucion } from '../distribuciones/service.js';
 import { asegurarSemanaEditable } from '../lib/semana-operativa.js';
+import { registrarAvisoAdminsBestEffort } from '../push/business-notifications.js';
 
 export const operacionRouter = Router();
 const linea = z.enum(['carne', 'desechables']);
@@ -150,7 +151,14 @@ operacionRouter.post('/compras', soloAdmin, asyncHandler(async (req, res) => {
     idempotency_key: idempotencyKey.optional(),
     lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
-  res.status(201).json(await svc.registrarCompra(req.auth!.negocioId, req.auth!.usuarioId, b));
+  const resultado = await svc.registrarCompra(req.auth!.negocioId, req.auth!.usuarioId, b);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'compra_registrada', entidad: 'compra', entidadId: resultado.id, actorId: req.auth!.usuarioId,
+    dedupeKey: `compra:${resultado.id}:registrada`, titulo: 'Compra registrada 📦',
+    cuerpo: `Se registró una compra por ${resultado.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}.`,
+    url: '/semana/compras', datos: { compra_id: resultado.id, total: resultado.total, fecha: b.fecha },
+  });
+  res.status(201).json(resultado);
 }));
 
 /** Corrige una compra pendiente mientras sus lotes todavía estén íntegros. */
@@ -160,12 +168,28 @@ operacionRouter.patch('/compras/:id', soloAdmin, asyncHandler(async (req, res) =
     total_factura: z.coerce.number().nonnegative().nullable().optional(),
     lineas: z.array(z.object({ product_id: id, cajas: z.coerce.number().positive(), peso_total_lb: z.coerce.number().nonnegative().default(0), costo_total: z.coerce.number().nonnegative(), congelado: z.boolean().optional() })).min(1),
   }).parse(req.body);
-  res.json(await svc.editarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, b));
+  const compraId = BigInt(id.parse(req.params.id));
+  const resultado = await svc.editarCompra(req.auth!.negocioId, compraId, req.auth!.usuarioId, b);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'compra_modificada', entidad: 'compra', entidadId: compraId, actorId: req.auth!.usuarioId,
+    dedupeKey: `compra:${compraId}:modificada:${Date.now()}`, titulo: 'Compra modificada ✏️',
+    cuerpo: `Se modificó la compra por ${resultado.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}.`,
+    url: '/semana/compras', datos: { compra_id: Number(compraId), total: resultado.total, fecha: b.fecha },
+  });
+  res.json(resultado);
 }));
 
 /** Revierte una compra mientras su inventario/lote todavía no haya sido utilizado. */
 operacionRouter.delete('/compras/:id', soloAdmin, asyncHandler(async (req, res) => {
-  res.json(await svc.eliminarCompra(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+  const compraId = BigInt(id.parse(req.params.id));
+  const resultado = await svc.eliminarCompra(req.auth!.negocioId, compraId, req.auth!.usuarioId);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'compra_eliminada', entidad: 'compra', entidadId: compraId, actorId: req.auth!.usuarioId,
+    dedupeKey: `compra:${compraId}:eliminada`, titulo: 'Compra eliminada 🗑️',
+    cuerpo: `Se revirtió una compra por ${resultado.total_revertido.toLocaleString('en-US', { minimumFractionDigits: 2 })}.`,
+    url: '/semana/compras', datos: { compra_id: Number(compraId), total_revertido: resultado.total_revertido },
+  });
+  res.json(resultado);
 }));
 
 /** Captura directa del inventario físico final, en el mismo orden del libro semanal. */
@@ -176,7 +200,15 @@ operacionRouter.put('/inventario-final', soloAdmin, asyncHandler(async (req, res
     motivo: z.string().trim().max(500).nullable().optional(),
     lineas: z.array(z.object({ product_id: id, cantidad: z.coerce.number().nonnegative() })).min(1),
   }).parse(req.body);
-  res.json(await svc.guardarInventarioFinal(req.auth!.negocioId, req.auth!.usuarioId, b));
+  const resultado = await svc.guardarInventarioFinal(req.auth!.negocioId, req.auth!.usuarioId, b);
+  const advertencia = resultado.advertencias?.length ? ` Hay ${resultado.advertencias.length} observación${resultado.advertencias.length === 1 ? '' : 'es'}.` : '';
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'conteo_inventario_guardado', entidad: 'conteo', entidadId: resultado.inventario_id, actorId: req.auth!.usuarioId,
+    dedupeKey: `conteo:${resultado.inventario_id}:guardado`, titulo: 'Conteo de inventario guardado ✅',
+    cuerpo: `Se guardó el conteo del ${b.fecha} con ${resultado.ajustes} ajuste${resultado.ajustes === 1 ? '' : 's'}.${advertencia}`,
+    url: `/semana/inventario?semana=${b.fecha}`, datos: { conteo_id: resultado.inventario_id, ubicacion_id: b.ubicacion_id, fecha: b.fecha, ajustes: resultado.ajustes, advertencias: resultado.advertencias ?? [] },
+  });
+  res.json(resultado);
 }));
 
 /** Historial de inventarios finales, incluidos los ajustes creados por la versión anterior. */
@@ -188,7 +220,13 @@ operacionRouter.get('/inventarios-finales', soloAdmin, asyncHandler(async (req, 
 /** Revierte y elimina una captura completa sin dejar saldos negativos. */
 operacionRouter.delete('/inventarios-finales/:token', soloAdmin, asyncHandler(async (req, res) => {
   const token = z.string().regex(/^(conteo|legacy)-\d+$/).parse(req.params.token);
-  res.json(await svc.eliminarInventarioFinal(req.auth!.negocioId, token, req.auth!.usuarioId));
+  const resultado = await svc.eliminarInventarioFinal(req.auth!.negocioId, token, req.auth!.usuarioId);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'conteo_inventario_revertido', entidad: 'conteo', entidadId: Number(token.split('-')[1]), actorId: req.auth!.usuarioId,
+    dedupeKey: `conteo:${token}:revertido`, titulo: 'Conteo de inventario revertido ↩️',
+    cuerpo: `Se revirtió el conteo ${token}.`, url: '/semana/inventario', datos: { token, resultado },
+  });
+  res.json(resultado);
 }));
 
 const produccionSchema = z.object({
@@ -199,13 +237,27 @@ const produccionSchema = z.object({
 
 operacionRouter.post('/produccion', soloAdmin, asyncHandler(async (req, res) => {
   const b = produccionSchema.parse(req.body);
-  res.status(201).json(await svc.registrarProduccion(req.auth!.negocioId, req.auth!.usuarioId, b));
+  const resultado = await svc.registrarProduccion(req.auth!.negocioId, req.auth!.usuarioId, b);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'produccion_registrada', entidad: 'produccion', entidadId: resultado.id, actorId: req.auth!.usuarioId,
+    dedupeKey: `produccion:${resultado.id}:registrada`, titulo: 'Producción registrada 🏭',
+    cuerpo: `Se registró producción del ${b.fecha} con ${b.salidas.length} salida${b.salidas.length === 1 ? '' : 's'}.`,
+    url: `/semana/produccion?semana=${b.fecha}`, datos: { produccion_id: resultado.id, fecha: b.fecha, salidas: b.salidas.length },
+  });
+  res.status(201).json(resultado);
 }));
 
 /** Corrige un batch completo y recalcula FIFO, costos, yield y existencias. */
 operacionRouter.patch('/produccion/:id', soloAdmin, asyncHandler(async (req, res) => {
   const b = produccionSchema.parse(req.body);
-  res.json(await svc.editarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId, b));
+  const produccionId = BigInt(id.parse(req.params.id));
+  const resultado = await svc.editarProduccion(req.auth!.negocioId, produccionId, req.auth!.usuarioId, b);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'produccion_modificada', entidad: 'produccion', entidadId: produccionId, actorId: req.auth!.usuarioId,
+    dedupeKey: `produccion:${produccionId}:modificada:${Date.now()}`, titulo: 'Producción modificada ✏️',
+    cuerpo: `Se corrigió producción del ${b.fecha}.`, url: `/semana/produccion?semana=${b.fecha}`, datos: { produccion_id: Number(produccionId), fecha: b.fecha },
+  });
+  res.json(resultado);
 }));
 
 /** Captura varios productos del mismo día sin guardar batches incompletos. */
@@ -213,7 +265,14 @@ operacionRouter.post('/produccion/lote', soloAdmin, asyncHandler(async (req, res
   const b = z.object({ producciones: z.array(produccionSchema).min(1).max(12) })
     .refine((v) => new Set(v.producciones.map((p) => p.fecha)).size === 1, { message: 'Todas las producciones deben corresponder al mismo día' })
     .parse(req.body);
-  res.status(201).json(await svc.registrarProducciones(req.auth!.negocioId, req.auth!.usuarioId, b.producciones));
+  const resultado = await svc.registrarProducciones(req.auth!.negocioId, req.auth!.usuarioId, b.producciones);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'produccion_lote_registrada', entidad: 'produccion', entidadId: resultado.producciones[0]?.id ?? null, actorId: req.auth!.usuarioId,
+    dedupeKey: `produccion-lote:${resultado.producciones.map((p) => p.id).join('-')}:registrado`, titulo: 'Producción registrada 🏭',
+    cuerpo: `Se registraron ${resultado.producciones.length} producciones del ${b.producciones[0]!.fecha}.`,
+    url: `/semana/produccion?semana=${b.producciones[0]!.fecha}`, datos: { producciones: resultado.producciones.map((p) => p.id), fecha: b.producciones[0]!.fecha },
+  });
+  res.status(201).json(resultado);
 }));
 
 const produccionExtraordinariaSchema = z.object({
@@ -227,16 +286,36 @@ const produccionExtraordinariaSchema = z.object({
 /** Producto terminado de precio fijo, sin materia prima, costo ni yield contable. */
 operacionRouter.post('/produccion-extraordinaria', soloAdmin, asyncHandler(async (req, res) => {
   const b = produccionExtraordinariaSchema.parse(req.body);
-  res.status(201).json(await svc.registrarProduccionExtraordinaria(req.auth!.negocioId, req.auth!.usuarioId, b));
+  const resultado = await svc.registrarProduccionExtraordinaria(req.auth!.negocioId, req.auth!.usuarioId, b);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'produccion_extraordinaria_registrada', entidad: 'produccion_extraordinaria', entidadId: resultado.id, actorId: req.auth!.usuarioId,
+    dedupeKey: `produccion-extraordinaria:${resultado.id}:registrada`, titulo: 'Producción extraordinaria registrada 🏭',
+    cuerpo: `Se registró producción extraordinaria del ${b.fecha}.`, url: `/semana/produccion?semana=${b.fecha}`, datos: { produccion_id: resultado.id, fecha: b.fecha },
+  });
+  res.status(201).json(resultado);
 }));
 
 operacionRouter.delete('/produccion-extraordinaria/:id', soloAdmin, asyncHandler(async (req, res) => {
-  res.json(await svc.eliminarProduccionExtraordinaria(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+  const produccionId = BigInt(id.parse(req.params.id));
+  const resultado = await svc.eliminarProduccionExtraordinaria(req.auth!.negocioId, produccionId, req.auth!.usuarioId);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'produccion_extraordinaria_eliminada', entidad: 'produccion_extraordinaria', entidadId: produccionId, actorId: req.auth!.usuarioId,
+    dedupeKey: `produccion-extraordinaria:${produccionId}:eliminada`, titulo: 'Producción extraordinaria eliminada 🗑️',
+    cuerpo: `Se revirtió la producción extraordinaria #${produccionId}.`, url: '/semana/produccion', datos: { produccion_id: Number(produccionId), resultado },
+  });
+  res.json(resultado);
 }));
 
 /** Elimina un batch incorrecto y revierte materia prima, salidas y movimientos. */
 operacionRouter.delete('/produccion/:id', soloAdmin, asyncHandler(async (req, res) => {
-  res.json(await svc.eliminarProduccion(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+  const produccionId = BigInt(id.parse(req.params.id));
+  const resultado = await svc.eliminarProduccion(req.auth!.negocioId, produccionId, req.auth!.usuarioId);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'produccion_eliminada', entidad: 'produccion', entidadId: produccionId, actorId: req.auth!.usuarioId,
+    dedupeKey: `produccion:${produccionId}:eliminada`, titulo: 'Producción eliminada 🗑️',
+    cuerpo: `Se revirtió la producción #${produccionId}.`, url: '/semana/produccion', datos: { produccion_id: Number(produccionId), resultado },
+  });
+  res.json(resultado);
 }));
 
 operacionRouter.patch('/lotes/:id', soloAdmin, asyncHandler(async (req, res) => {

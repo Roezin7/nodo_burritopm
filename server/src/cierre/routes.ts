@@ -4,6 +4,7 @@ import { requireAuth, soloAdmin } from '../auth/middleware.js';
 import { asyncHandler } from '../middleware/error.js';
 import * as svc from './service.js';
 import { generarExcel } from './excel.js';
+import { registrarAvisoAdminsBestEffort } from '../push/business-notifications.js';
 
 export const cierreRouter = Router();
 const id = z.coerce.number().int().positive();
@@ -38,11 +39,28 @@ cierreRouter.post('/vista-previa', asyncHandler(async (req, res) => {
 
 cierreRouter.post('/cerrar', asyncHandler(async (req, res) => {
   const { fecha_cierre } = z.object({ fecha_cierre: fecha }).parse(req.body);
-  res.status(201).json(await svc.cerrarSemana(req.auth!.negocioId, req.auth!.usuarioId, fecha_cierre));
+  const resultado = await svc.cerrarSemana(req.auth!.negocioId, req.auth!.usuarioId, fecha_cierre);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'semana_cerrada', entidad: 'semana', entidadId: resultado.semana_id, actorId: req.auth!.usuarioId,
+    dedupeKey: `semana:${resultado.semana_id}:cerrada`, titulo: 'Semana cerrada ✅',
+    cuerpo: resultado.productos_con_faltante > 0
+      ? `La semana ${resultado.semana} quedó cerrada con ${resultado.productos_con_faltante} producto${resultado.productos_con_faltante === 1 ? '' : 's'} con faltante.`
+      : `La semana ${resultado.semana} quedó cerrada correctamente.`,
+    url: `/semana/cierre?semana=${fecha_cierre}`, datos: { semana_id: resultado.semana_id, semana: resultado.semana, anio: resultado.anio, facturas: resultado.facturas, cajas_perdidas: resultado.cajas_perdidas, productos_con_faltante: resultado.productos_con_faltante },
+  });
+  res.status(201).json(resultado);
 }));
 
 cierreRouter.post('/:id/reabrir', asyncHandler(async (req, res) => {
-  res.json(await svc.reabrirSemana(req.auth!.negocioId, BigInt(id.parse(req.params.id)), req.auth!.usuarioId));
+  const semanaId = BigInt(id.parse(req.params.id));
+  const resultado = await svc.reabrirSemana(req.auth!.negocioId, semanaId, req.auth!.usuarioId);
+  await registrarAvisoAdminsBestEffort(req.auth!.negocioId, {
+    tipo: 'semana_reabierta', entidad: 'semana', entidadId: semanaId, actorId: req.auth!.usuarioId,
+    dedupeKey: `semana:${semanaId}:reabierta:${Date.now()}`, titulo: 'Semana reabierta ↩️',
+    cuerpo: 'La semana fue reabierta para corregir operación, inventario o facturación.', url: '/semana/cierre',
+    datos: { semana_id: Number(semanaId), inventarios_finales_revertidos: resultado.inventarios_finales_revertidos },
+  });
+  res.json(resultado);
 }));
 
 cierreRouter.get('/facturas/:id', asyncHandler(async (req, res) => {
