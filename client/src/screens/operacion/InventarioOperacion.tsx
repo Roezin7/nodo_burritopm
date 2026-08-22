@@ -37,7 +37,7 @@ interface Stock {
   items: Existencia[];
   valor_total: number;
   cajas_perdidas?: number;
-  fuente?: 'actual' | 'cierre_semanal' | 'conciliacion_semanal';
+  fuente?: 'actual' | 'cierre_semanal' | 'conciliacion_semanal' | 'conteo_fisico_semanal';
   semana_estado?: string | null;
 }
 interface InventarioGuardado {
@@ -263,7 +263,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
 
     {error && <p className="error-msg">{error}</p>}
     {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} cajas perdidas.</strong> Se mostrarán en 0 y no bloquearán el cierre.</p>}
-    {!semana.actual && <p className="context-note">{stock?.fuente === 'cierre_semanal' ? <>Vista del cierre contable de la semana {semana.numero}.</> : capturaSemana ? <>Conteo físico del {capturaSemana.fecha}; valuado al costo vigente.</> : stock?.fuente === 'conciliacion_semanal' ? <>Saldo teórico aislado de la semana {semana.numero}; no incluye movimientos posteriores.</> : <>Sin cierre histórico; se muestra el saldo actual.</>}</p>}
+    {!semana.actual && <p className="context-note">{stock?.fuente === 'cierre_semanal' ? <>Vista del cierre contable de la semana {semana.numero}.</> : stock?.fuente === 'conteo_fisico_semanal' || capturaSemana ? <>Conteo físico del {capturaSemana?.fecha ?? semana.fin}; valuado al costo vigente.</> : stock?.fuente === 'conciliacion_semanal' ? <>Saldo teórico aislado de la semana {semana.numero}; no incluye movimientos posteriores.</> : <>Sin cierre histórico; se muestra el saldo actual.</>}</p>}
     {!stock && !error ? <Spinner label="Cargando inventario…" /> : stock && <>
       <div className="metric-strip metric-strip--four">
         <div><span>Valor</span><strong>{usd(totales.valor)}</strong></div>
