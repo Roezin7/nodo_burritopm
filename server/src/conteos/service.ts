@@ -281,6 +281,21 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
     where: { conteo_id: conteoId },
     include: { lote: { select: { product_id: true } } },
   });
+  // Un ajuste de conteo positivo crea una capa FIFO propia y se guarda aquí con
+  // cantidades/costo negativos: al revertirlo se retira esa capa. Si la capa ya
+  // fue consumida por producción o despacho, no se permite borrar el conteo y
+  // dejar el FIFO roto.
+  for (const ajuste of ajustesLote) {
+    if (num0(ajuste.cajas) >= 0) continue;
+    const uso = await tx.lotes_materia_prima.findUnique({
+      where: { id: ajuste.lote_id },
+      select: { cajas_disponibles: true, consumos: { select: { lote_id: true }, take: 1 }, salidas_inventario: { select: { lote_id: true }, take: 1 } },
+    });
+    if (!uso) throw new HttpError(409, 'No se encontró la capa FIFO creada por el conteo.');
+    if (uso.consumos.length || uso.salidas_inventario.length) {
+      throw new HttpError(409, 'No se puede reemplazar este conteo: la diferencia física ya fue utilizada en producción o despacho.');
+    }
+  }
   // Neto firmado que el conteo aplicó a existencias por producto (+ sumó, − restó).
   const neto = new Map<string, number>();
   for (const m of movs) {
@@ -311,6 +326,11 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
         costo_disponible: { increment: ajuste.costo },
       },
     });
+    if (num0(ajuste.cajas) < 0) {
+      await tx.lotes_materia_prima.deleteMany({
+        where: { id: ajuste.lote_id, cajas_disponibles: { lte: 0 }, cajas_iniciales: { gt: 0 }, consumos: { none: {} }, salidas_inventario: { none: {} } },
+      });
+    }
   }
   // Restaurar las cantidades del conteo también debe restaurar el costo exacto
   // de las capas FIFO visibles en bodega.

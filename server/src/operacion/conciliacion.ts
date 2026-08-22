@@ -78,6 +78,9 @@ export function calcularFilaConciliacion(f: FilaConciliacionCalculable) {
   return {
     entradas1: r3(entradas1), consumos1: r3(consumos1), saldoMiercoles,
     entradas2: r3(entradas2), consumos2: r3(consumos2), teoricoFinal,
+    // El teórico explica la operación; el último conteo físico fija el saldo
+    // operativo que se debe mostrar y arrastrar a la siguiente semana.
+    saldoOperativoFinal: f.fisicoFinal == null ? teoricoFinal : r3(f.fisicoFinal),
     diferenciaFinal: f.fisicoFinal == null ? null : r3(f.fisicoFinal - teoricoFinal),
   };
 }
@@ -243,7 +246,7 @@ export async function obtenerInventarioSemanalDesechables(
     select: { id: true, sku: true, nombre: true },
   });
   const ids = productos.map((p) => p.id);
-  const [conteoInicial, conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos] = await Promise.all([
+  const [conteoInicial, conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos, conteoFinal] = await Promise.all([
     prisma.conteos.findFirst({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio,
@@ -302,6 +305,14 @@ export async function obtenerInventarioSemanalDesechables(
       },
       select: { product_id: true, cantidad: true, documento_tipo: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
     }),
+    prisma.conteos.findFirst({
+      where: {
+        negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fecha(hasta) },
+        notas: { startsWith: 'inventario_final_operativo' },
+      },
+      include: { lineas: { where: { product_id: { in: ids } } } },
+      orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+    }),
   ]);
 
   const aperturaInicial = new Map(conteoInicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
@@ -321,6 +332,7 @@ export async function obtenerInventarioSemanalDesechables(
 
   const entradas = new Map<string, number>();
   const salidas = new Map<string, number>();
+  const fisicoFinal = new Map(conteoFinal?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const sumar = (mapa: Map<string, number>, productId: bigint, cantidad: number) => {
     const key = productId.toString();
     mapa.set(key, r3((mapa.get(key) ?? 0) + cantidad));
@@ -352,6 +364,10 @@ export async function obtenerInventarioSemanalDesechables(
         entradas: comprasCantidad,
         salidas: despachosCantidad,
         teoricoFinal: calcularSaldoSemanal(inicial, comprasCantidad, despachosCantidad),
+        fisico_final: fisicoFinal.has(key) ? fisicoFinal.get(key)! : null,
+        saldoOperativoFinal: fisicoFinal.has(key)
+          ? fisicoFinal.get(key)!
+          : calcularSaldoSemanal(inicial, comprasCantidad, despachosCantidad),
       };
     }),
   };
@@ -409,13 +425,13 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
   const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
   if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
   const saldos = reporte.filas
-    .filter((fila) => fila.teoricoFinal < -0.0001)
+    .filter((fila) => (fila.saldoOperativoFinal ?? fila.teoricoFinal) < -0.0001)
     .map((fila) => ({
       product_id: fila.product_id,
       ubicacion_id: reporte.ubicacion.id,
       producto: fila.nombre,
       ubicacion: reporte.ubicacion.nombre,
-      cantidad: r3(Math.abs(fila.teoricoFinal)),
+      cantidad: r3(Math.abs(fila.saldoOperativoFinal ?? fila.teoricoFinal)),
     }));
   const alertaNegativos = {
     cajas_perdidas: r3(saldos.reduce((total, saldo) => total + saldo.cantidad, 0)),
@@ -423,7 +439,7 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
     inventario: reporte.filas.map((fila) => ({
       product_id: fila.product_id,
       ubicacion_id: reporte.ubicacion.id,
-      cantidad: r3(fila.teoricoFinal),
+      cantidad: r3(fila.saldoOperativoFinal ?? fila.teoricoFinal),
     })),
   };
   if (!pedidosCarne && !producciones && !produccionesExtraordinarias) return alertaNegativos;
@@ -534,7 +550,11 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
     select: { id: true, product_id: true, cantidad: true, ubicacion_destino_id: true, idempotency_key: true },
   }) : [];
   const movimientosCorrectivos = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
-    where: { negocio_id: negocioId, documento_tipo: 'correccion_distribucion', documento_id: { in: distribucionIds } },
+    // Una modificación posterior a la carga puede quedar registrada como
+    // correccion_venta en vez de correccion_distribucion. Sigue siendo el
+    // movimiento físico que respalda la línea si coincide en producto,
+    // cantidad, origen y destino.
+    where: { negocio_id: negocioId, documento_tipo: { in: ['correccion_distribucion', 'correccion_venta'] }, fecha: { gte: inicio, lt: sumarDias(fin, 1) } },
     select: { product_id: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
   }) : [];
   const movimientoPorLlave = new Map(movimientos.map((movimiento) => [movimiento.idempotency_key, movimiento]));

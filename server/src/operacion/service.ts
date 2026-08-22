@@ -1804,28 +1804,10 @@ export async function guardarInventarioFinal(
     }
   }
   if (ubicacion.codigo === 'CARN') await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
-  const existenciasPrevias = await prisma.existencias.findMany({
-    where: { ubicacion_id: ubicacionId, product_id: { in: ids } },
-    select: { product_id: true, cantidad_disponible: true },
-  });
-  const cantidadPrevia = new Map(existenciasPrevias.map((e) => [e.product_id.toString(), num0(e.cantidad_disponible)]));
-  // En Carnicería el conteo pertenece al corte de la semana seleccionada. Se compara
-  // contra su conciliación, no contra el saldo vivo que ya puede incluir otra semana.
-  const rangoCaptura = rangoSemana(input.fecha);
-  const conciliacion = ubicacion.codigo === 'CARN'
-    ? await obtenerConciliacionSemanal(negocioId, rangoCaptura.desde, rangoCaptura.hasta, ubicacionId)
-    : ubicacion.codigo === 'BOD'
-      ? await obtenerInventarioSemanalDesechables(negocioId, rangoCaptura.desde, rangoCaptura.hasta, ubicacionId)
-      : null;
-  const cantidadTeorica = new Map(conciliacion?.filas.map((f) => [String(f.product_id), f.teoricoFinal]) ?? []);
-  const baseDe = (productId: number) => conciliacion
-    ? (cantidadTeorica.get(String(productId)) ?? 0)
-    : (cantidadPrevia.get(String(productId)) ?? 0);
   // El conteo físico es evidencia y debe conservarse aunque exista una diferencia.
   // Antes la validación del motivo abortaba toda la transacción y el usuario perdía
   // la captura. La observación sigue siendo opcional; los ajustes quedan auditados
   // por el movimiento que los origina.
-  const advertencias = new Set<string>();
   const conteoExistente = await prisma.conteos.findFirst({
     where: {
       negocio_id: negocioId,
@@ -1864,7 +1846,14 @@ export async function guardarInventarioFinal(
     for (const l of input.lineas) {
       const productId = BigInt(l.product_id);
       const producto = productos.find((p) => p.id === productId)!;
-      const deltaConteo = r3(l.cantidad - baseDe(l.product_id));
+      // La comparación de un conteo se hace contra existencias vivas después de
+      // retirar, si aplica, el conteo anterior. Así una fotografía posterior no
+      // vuelve a restar producción/pedidos que ya están en el ledger.
+      const existenciaBase = await tx.existencias.findUnique({
+        where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } },
+        select: { cantidad_disponible: true, costo_promedio: true },
+      });
+      const deltaConteo = r3(l.cantidad - num0(existenciaBase?.cantidad_disponible));
       let costoLotes: number | null = null;
 
       const manejaLote = producto.tipo_operativo === 'materia_prima' || producto.linea_operacion === 'desechables';
@@ -1877,10 +1866,23 @@ export async function guardarInventarioFinal(
         const costoDisponible = lotes.reduce((a, lote) => a + num0(lote.costo_disponible), 0);
         costoLotes = cajasLotes > 0 ? r4(costoDisponible / cajasLotes) : null;
         if (deltaConteo > 0.0001) {
-          // No inventamos una entrada FIFO por una diferencia positiva. La foto
-          // se conserva y se deja una alerta para que se documente la compra o
-          // recepción faltante por separado.
-          advertencias.add(`${producto.nombre}: el físico supera el saldo FIFO en ${deltaConteo} unidades; no se ajustó el ledger.`);
+          // Una diferencia física positiva también es inventario real. Se crea
+          // una capa FIFO fechada en el conteo para que la siguiente producción
+          // o salida consuma exactamente lo que se contó.
+          const costo = costoLotes ?? num(existenciaBase?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
+          if (costo == null) throw new HttpError(409, `${producto.nombre}: falta costo para crear la capa FIFO del conteo.`);
+          const pesoCaja = producto.tipo_operativo === 'materia_prima' ? num0(producto.peso_caja_lb) : 0;
+          const lote = await tx.lotes_materia_prima.create({
+            data: {
+              negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: productId,
+              fecha: fecha(input.fecha), congelado: false,
+              cajas_iniciales: deltaConteo, cajas_disponibles: deltaConteo,
+              peso_inicial_lb: r3(deltaConteo * pesoCaja), peso_disponible_lb: r3(deltaConteo * pesoCaja),
+              costo_inicial: r2(deltaConteo * costo), costo_disponible: r2(deltaConteo * costo),
+            },
+          });
+          await tx.conteo_ajustes_lote.create({ data: { conteo_id: registro.id, lote_id: lote.id, cajas: r3(-deltaConteo), peso_lb: r3(-deltaConteo * pesoCaja), costo: r2(-deltaConteo * costo) } });
+          costoLotes = costo;
         } else if (Math.abs(deltaConteo) > cajasLotes + 0.0001) {
           throw new HttpError(409, `${producto.nombre}: no quedan suficientes unidades FIFO para aplicar retroactivamente la diferencia de ${deltaConteo}.`);
         } else {
@@ -1910,10 +1912,10 @@ export async function guardarInventarioFinal(
         }
       }
 
-      const actual = await tx.existencias.findUnique({ where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } } });
-      // Aplicar únicamente la diferencia detectada en esa semana conserva intactos
-      // todos los movimientos posteriores que ya forman parte del saldo vivo.
-      const delta = (manejaLote && deltaConteo > 0.0001) ? 0 : deltaConteo;
+      const actual = existenciaBase;
+      // El delta se aplica contra el saldo vivo. Las capas FIFO ya fueron
+      // consumidas/creadas arriba y el movimiento mantiene existencias alineadas.
+      const delta = deltaConteo;
       if (Math.abs(delta) >= 0.0001) {
         const costo = costoLotes ?? num(actual?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
         await aplicarMovimiento(tx, {
@@ -1936,7 +1938,7 @@ export async function guardarInventarioFinal(
     }
     return registro;
   });
-  return { ok: true, ajustes, inventario_id: Number(conteo.id), advertencias: [...advertencias] };
+  return { ok: true, ajustes, inventario_id: Number(conteo.id), advertencias: [] };
 }
 
 const claveInventarioLegacy = (key: string) => {

@@ -393,7 +393,7 @@ existenciasRouter.get(
       ? await obtenerInventarioSemanalDesechables(req.auth!.negocioId, rango.desde, rango.hasta, ubicacionId)
       : null;
     const conciliacionHistorica = conciliacion ?? conciliacionDesechables;
-    const teoricoPorProducto = new Map(conciliacionHistorica?.filas.map((f) => [String(f.product_id), f.teoricoFinal]) ?? []);
+    const saldoOperativoPorProducto = new Map(conciliacionHistorica?.filas.map((f) => [String(f.product_id), f.saldoOperativoFinal ?? f.teoricoFinal]) ?? []);
     const snapshotIds = snapshot.map((e) => e.product_id);
     const [productos, filas] = await Promise.all([
       prisma.products.findMany({
@@ -412,7 +412,7 @@ existenciasRouter.get(
     const items = productos.map((producto) => {
       const e = porProducto.get(producto.id.toString());
       const saldoReal = conciliacionHistorica
-        ? (teoricoPorProducto.get(producto.id.toString()) ?? 0)
+        ? (saldoOperativoPorProducto.get(producto.id.toString()) ?? 0)
         : num0(e?.cantidad_disponible);
       const disp = Math.max(0, saldoReal);
       // En una semana abierta la conciliación aísla el disponible, pero reserva y hold
@@ -446,7 +446,9 @@ existenciasRouter.get(
       items,
       valor_total: Math.round(items.reduce((a, i) => a + i.valor, 0) * 100) / 100,
       cajas_perdidas: Math.round(items.reduce((a, i) => a + i.faltante, 0) * 1000) / 1000,
-      fuente: usarSnapshot ? 'cierre_semanal' : conciliacionHistorica ? 'conciliacion_semanal' : 'actual',
+      fuente: usarSnapshot ? 'cierre_semanal' : conciliacionHistorica
+        ? (conciliacionHistorica.filas.some((f) => f.fisico_final != null) ? 'conteo_fisico_semanal' : 'conciliacion_semanal')
+        : 'actual',
       semana_estado: semana?.estado ?? null,
     });
   }),

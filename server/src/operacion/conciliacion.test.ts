@@ -42,6 +42,7 @@ describe('conciliación semanal de inventario', () => {
     });
     expect(r.saldoMiercoles).toBe(25);
     expect(r.teoricoFinal).toBe(12);
+    expect(r.saldoOperativoFinal).toBe(11);
     expect(r.diferenciaFinal).toBe(-1);
   });
 
@@ -95,5 +96,16 @@ describe('conciliación semanal de inventario', () => {
     expect(calcularFilaConciliacion({ ...base, actual: 15 }).teoricoFinal).toBe(15);
     // La semana siguiente ya consumió 12 cajas y el saldo vivo bajó a 3.
     expect(calcularFilaConciliacion({ ...base, actual: 3 }).teoricoFinal).toBe(15);
+  });
+
+  it('usa el teórico cuando todavía no existe conteo físico', () => {
+    const r = calcularFilaConciliacion({
+      inicial: 8, actual: 0, fisicoFinal: null,
+      compras1: 0, compras2: 0, produccionEntrada1: 6, produccionEntrada2: 0,
+      produccionSalida1: 0, produccionSalida2: 0, salidas1: 0, salidas2: 0,
+      pedidos1: 0, pedidos2: 0,
+    });
+    expect(r.teoricoFinal).toBe(2);
+    expect(r.saldoOperativoFinal).toBe(2);
   });
 });
