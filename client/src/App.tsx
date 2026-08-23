@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth, type Rol } from './auth';
 import { ToastProvider } from './toast';
 import SplashIntro from './brand/SplashIntro';
@@ -39,18 +39,65 @@ try {
   void cargarLogin();
 }
 
-class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean }> {
+const ASSET_RECOVERY_KEY = 'bpm-asset-recovery-attempted';
+
+function esFalloDeAsset(error: unknown) {
+  const mensaje = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /ChunkLoadError|Loading chunk|dynamically imported module|Importing a module script failed|CSS chunk/i.test(mensaje);
+}
+
+function limpiarAssetsYRecargar() {
+  try {
+    if (sessionStorage.getItem(ASSET_RECOVERY_KEY) === '1') return false;
+    sessionStorage.setItem(ASSET_RECOVERY_KEY, '1');
+  } catch { return false; }
+
+  const limpiar = async () => {
+    try {
+      const registros = await navigator.serviceWorker?.getRegistrations() ?? [];
+      await Promise.all(registros.map((registro) => registro.unregister()));
+      if ('caches' in window) {
+        const nombres = await caches.keys();
+        await Promise.all(nombres.map((nombre) => caches.delete(nombre)));
+      }
+    } catch { /* una recarga normal todavía puede recuperar el app-shell */ }
+    window.location.reload();
+  };
+  void limpiar();
+  return true;
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean; error: Error | null }> {
+  state = { fallo: false, error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) { return { fallo: true, error }; }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Error no controlado en la aplicación', error, info.componentStack);
+    if (esFalloDeAsset(error)) limpiarAssetsYRecargar();
+  }
+
+  render() {
+    if (!this.state.fallo) return this.props.children;
+    const asset = esFalloDeAsset(this.state.error);
+    return <div className="app-error-fallback" role="alert"><div><span className="eyebrow">Burrito Parrilla</span><h1>No se pudo mostrar esta pantalla</h1><p>{asset ? 'La aplicación se actualizó. Estamos limpiando la versión anterior para continuar.' : 'Tus datos no se modificaron. Recarga la aplicación para continuar.'}</p><button className="btn btn-primary" onClick={() => { if (!limpiarAssetsYRecargar()) window.location.reload(); }}>{asset ? 'Actualizar aplicación' : 'Recargar aplicación'}</button></div></div>;
+  }
+}
+
+/** Un error de una ruta no debe dejar sin menú ni acceso al resto de la aplicación. */
+class ScreenErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean }> {
   state = { fallo: false };
 
   static getDerivedStateFromError() { return { fallo: true }; }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Error no controlado en la aplicación', error, info.componentStack);
+    console.error('Error al mostrar una pantalla', error, info.componentStack);
+    if (esFalloDeAsset(error)) limpiarAssetsYRecargar();
   }
 
   render() {
     if (!this.state.fallo) return this.props.children;
-    return <div className="app-error-fallback" role="alert"><div><span className="eyebrow">Burrito Parrilla</span><h1>No se pudo mostrar esta pantalla</h1><p>Tus datos no se modificaron. Recarga la aplicación para continuar.</p><button className="btn btn-primary" onClick={() => window.location.reload()}>Recargar aplicación</button></div></div>;
+    return <section className="workspace-card" role="alert"><div className="empty-state"><strong>No se pudo cargar esta sección</strong><span>Tus datos no se modificaron. Intenta abrirla de nuevo o vuelve al inicio.</span><div className="button-row"><button className="btn btn-secondary" onClick={() => this.setState({ fallo: false })}>Reintentar</button><button className="btn btn-primary" onClick={() => { window.location.assign('/'); }}>Ir al inicio</button></div></div></section>;
   }
 }
 
@@ -63,6 +110,7 @@ function SoloRol({ children, roles }: { children: JSX.Element; roles: Rol[] }) {
 function AppBody() {
   const { usuario, cargando, recienEntro, consumirRecienEntro } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   usePageTitle(usuario);
 
   // Tras un login explícito, siempre al Inicio.
@@ -85,6 +133,7 @@ function AppBody() {
   return (
     <Suspense fallback={<div className="app-shell"><Spinner label="Preparando menú…" /></div>}>
       <Shell>
+      <ScreenErrorBoundary key={pathname}>
       <Suspense fallback={<div className="route-skeleton" role="status" aria-label="Cargando pantalla"><span /><span /><span /></div>}>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -107,6 +156,7 @@ function AppBody() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+      </ScreenErrorBoundary>
       </Shell>
     </Suspense>
   );
@@ -125,6 +175,14 @@ function debeMostrarSplash() {
 export default function App() {
   const [splash, setSplash] = useState(debeMostrarSplash);
   const [serviciosListos, setServiciosListos] = useState(false);
+  useEffect(() => {
+    // La marca sobrevive una sola recarga para evitar un loop si el deploy todavía
+    // está propagándose; se libera después de que la app tuvo tiempo de estabilizarse.
+    const id = globalThis.setTimeout(() => {
+      try { sessionStorage.removeItem(ASSET_RECOVERY_KEY); } catch { /* almacenamiento bloqueado */ }
+    }, 10_000);
+    return () => globalThis.clearTimeout(id);
+  }, []);
   useEffect(() => {
     const mostrar = () => setServiciosListos(true);
     if ('requestIdleCallback' in window) {
