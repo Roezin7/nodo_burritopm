@@ -738,11 +738,12 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   const dialog = useDialog();
   const [factura, setFactura] = useState<Factura | null>(null);
   const [vistaPrevia, setVistaPrevia] = useState<VistaPreviaCierre | null>(null);
+  const [resumenVivo, setResumenVivo] = useState<VistaPreviaCierre | null>(null);
   const [panoramaEnCurso, setPanoramaEnCurso] = useState<PanoramaSemanaEnCurso | null | undefined>(undefined);
   const cierreSeleccionado = cierres.find((s) => s.anio === semana.anio && s.semana === semana.numero);
   const [balanceVivo, setBalanceVivo] = useState<number | null>(null);
   const semanaEnCurso = semana.fin > hoy() && cierreSeleccionado?.estado !== 'cerrada';
-  useEffect(() => { setFactura(null); setVistaPrevia(null); setBalanceVivo(null); setPanoramaEnCurso(undefined); }, [semana.inicio, semana.fin]);
+  useEffect(() => { setFactura(null); setVistaPrevia(null); setResumenVivo(null); setBalanceVivo(null); setPanoramaEnCurso(undefined); }, [semana.inicio, semana.fin]);
   useEffect(() => {
     if (!semanaEnCurso) return;
     let activo = true;
@@ -757,11 +758,11 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
     if (!cierreSeleccionado || cierreSeleccionado.estado === 'cerrada' || semanaEnCurso) return;
     let activo = true;
     void api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } })
-      .then((resultado) => { if (activo) setBalanceVivo(resultado.balance_estimado); })
+      .then((resultado) => { if (activo) { setResumenVivo(resultado); setBalanceVivo(resultado.balance_estimado); } })
       .catch(() => { /* la vista previa manual mostrará el error */ });
     return () => { activo = false; };
   }, [cierreSeleccionado?.id, cierreSeleccionado?.estado, semana.fin, semanaEnCurso]);
-  async function revisarCierre() { setBusy(true); setError(''); try { const resultado = await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } }); setVistaPrevia(resultado); setBalanceVivo(resultado.balance_estimado); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la vista previa del cierre.'); } finally { setBusy(false); } }
+  async function revisarCierre() { setBusy(true); setError(''); try { const resultado = await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } }); setVistaPrevia(resultado); setResumenVivo(resultado); setBalanceVivo(resultado.balance_estimado); } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la vista previa del cierre.'); } finally { setBusy(false); } }
   async function pagarProveedor(proveedor: string, documentos: VistaPreviaCierre['cartera']['documentos_por_pagar']) {
     const total = documentos.reduce((suma, documento) => suma + documento.saldo, 0);
     if (!await dialog.confirm({
@@ -774,7 +775,7 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
       if (documentos.length === 1) await api(`/cierre/compras/${documentos[0]!.id}/pagar`, { method: 'POST', body: { fecha_pago: hoy(), monto: documentos[0]!.saldo } });
       else await api('/cierre/compras/pagar-lote', { method: 'POST', body: { ids: documentos.map((documento) => documento.id), fecha_pago: hoy() } });
       const resultado = await api<VistaPreviaCierre>('/cierre/vista-previa', { method: 'POST', body: { fecha_cierre: semana.fin } });
-      setVistaPrevia(resultado); setBalanceVivo(resultado.balance_estimado);
+      setVistaPrevia(resultado); setResumenVivo(resultado); setBalanceVivo(resultado.balance_estimado);
       await onDone();
       toast.ok(`Pago a ${proveedor} registrado.`);
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'); }
@@ -804,7 +805,13 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
       cuentas_por_cobrar: panoramaEnCurso.cartera.por_cobrar,
       cuentas_por_pagar: panoramaEnCurso.cartera.por_pagar,
     } : null
-    : cierreSeleccionado;
+    : resumenVivo ? {
+      valor_carne: resumenVivo.inventario.valor_carne,
+      valor_congelado: resumenVivo.inventario.valor_congelado,
+      valor_desechables: resumenVivo.inventario.valor_desechables,
+      cuentas_por_cobrar: resumenVivo.cartera.por_cobrar_al_cierre,
+      cuentas_por_pagar: resumenVivo.cartera.por_pagar,
+    } : cierreSeleccionado;
   return <div className="operation-stack">
     <ConciliacionSemanal semana={semana} busy={busy} setBusy={setBusy} setError={setError} />
     <section className="close-week-card"><div><span className="eyebrow">Semana {semana.numero}</span><h2>Revisar y cerrar</h2><p>{semana.inicio} al {semana.fin} · consulta el resultado antes de generar facturas.</p></div><div className="close-week-action"><button className="btn btn-primary" disabled={busy || semana.fin > hoy() || cierreSeleccionado?.estado === 'cerrada'} onClick={() => void revisarCierre()}>{busy ? 'Calculando…' : cierreSeleccionado?.estado === 'cerrada' ? 'Semana cerrada' : semana.fin > hoy() ? 'Semana en curso' : 'Vista previa del cierre'}</button></div></section>
