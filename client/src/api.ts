@@ -1,4 +1,5 @@
 // Cliente HTTP mínimo para la API. Guarda el JWT en localStorage.
+import { encolar } from './offline';
 
 const TOKEN_KEY = 'bpm_token';
 const CACHE_GET_MS = 15_000;
@@ -71,9 +72,8 @@ export async function api<T = unknown>(
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
     } catch (e) {
-      // La implementación de IndexedDB se descarga únicamente si la red realmente falla.
+      // Solo se usa cuando una mutación de campo realmente falla por red.
       if (esMutacion && admiteColaOffline(method, path)) {
-        const { encolar } = await import('./offline');
         await encolar({ method, path, body, token });
         return { queued: true } as T;
       }

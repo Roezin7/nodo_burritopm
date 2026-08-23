@@ -137,10 +137,11 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const itemsPeriodo = useMemo(() => {
     if (!capturaSemana?.lineas || !stock || stock.fuente === 'cierre_semanal') return stock?.items ?? [];
     const cantidadesCapturadas = new Map(capturaSemana.lineas.map((l) => [l.product_id, l.cantidad]));
-    return stock.items.map((i) => {
-      const disponible = cantidadesCapturadas.get(i.product_id) ?? 0;
-      return { ...i, disponible, reservada: 0, transito: 0, valor: i.costo_promedio == null ? 0 : disponible * i.costo_promedio };
-    });
+      return stock.items.map((i) => {
+        const disponible = cantidadesCapturadas.get(i.product_id) ?? 0;
+        const valor = i.costo_promedio == null ? 0 : Math.round((disponible * i.costo_promedio + Number.EPSILON) * 100) / 100;
+        return { ...i, disponible, reservada: 0, transito: 0, valor };
+      });
   }, [stock, capturaSemana]);
 
   const filas = useMemo(() => {

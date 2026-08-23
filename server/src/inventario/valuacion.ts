@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { num, num0 } from '../lib/num.js';
 
+const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
 /**
  * Cost used to value an inventory row.
  *
@@ -29,4 +31,16 @@ export function valorExistencia(
   const costoHold = num(costoTransito) ?? costo;
   return Math.max(0, num0(cantidadDisponible)) * costo
     + Math.max(0, num0(cantidadTransito)) * costoHold;
+}
+
+/** Valor contable de una línea; los totales suman líneas redondeadas a centavos. */
+export function valorExistenciaRedondeado(
+  cantidadDisponible: number | Prisma.Decimal | null | undefined,
+  cantidadTransito: number | Prisma.Decimal | null | undefined,
+  costoExistencia: number | Prisma.Decimal | null | undefined,
+  costoTransito: number | Prisma.Decimal | null | undefined,
+  costoProducto: number | Prisma.Decimal | null | undefined,
+  ultimoCosto: number | Prisma.Decimal | null | undefined,
+) {
+  return r2(valorExistencia(cantidadDisponible, cantidadTransito, costoExistencia, costoTransito, costoProducto, ultimoCosto));
 }

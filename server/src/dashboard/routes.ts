@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
-import { valorExistencia } from '../inventario/valuacion.js';
+import { valorExistenciaRedondeado } from '../inventario/valuacion.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, soloAdmin } from '../auth/middleware.js';
 import { distribuirCreditosCliente, inicioVentanaCuentasPorCobrar, semanaDeFecha, totalSaldoCartera } from '../cierre/service.js';
@@ -258,7 +258,7 @@ dashboardRouter.get(
     let desechables = 0;
     for (const e of existencias) {
       if (e.products.tipo_operativo === 'materia_prima') continue; // los lotes conservan el costo exacto y el estado fresco/congelado
-      const valor = valorExistencia(
+      const valor = valorExistenciaRedondeado(
         e.cantidad_disponible,
         e.cantidad_transito,
         e.costo_promedio,
@@ -270,7 +270,7 @@ dashboardRouter.get(
       if (e.products.linea_operacion === 'desechables') desechables += valor;
     }
     const materiaTotalSnapshot = snapshot.filter((e) => e.producto.tipo_operativo === 'materia_prima')
-      .reduce((a, e) => a + valorExistencia(
+      .reduce((a, e) => a + valorExistenciaRedondeado(
         e.cantidad_disponible,
         e.cantidad_transito,
         e.costo_promedio,
@@ -399,7 +399,7 @@ dashboardRouter.get(
       });
       let valor = 0;
       for (const e of existencias) {
-        valor += valorExistencia(
+        valor += valorExistenciaRedondeado(
           e.cantidad_disponible,
           e.cantidad_transito,
           e.costo_promedio,

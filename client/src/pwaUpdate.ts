@@ -1,5 +1,4 @@
 import { registerSW } from 'virtual:pwa-register';
-import { hayCambiosSinGuardar } from './use-unsaved';
 
 type Escuchador = (disponible: boolean) => void;
 
@@ -12,21 +11,15 @@ function publicar(valor: boolean) {
   escuchadores.forEach((f) => f(valor));
 }
 
-function aplicarSiEsSeguro() {
-  if (hayCambiosSinGuardar()) {
-    publicar(true);
-    return;
-  }
-  publicar(false);
-  void aplicar?.(true);
-}
-
-/** Registra el service worker y activa de inmediato una versión nueva si no hay capturas abiertas. */
+/** Registra el service worker y avisa; la activación queda a cargo del usuario. */
 export function iniciarActualizacionPWA() {
   aplicar = registerSW({
     immediate: true,
     onNeedRefresh() {
-      aplicarSiEsSeguro();
+      // Activar mientras se está navegando puede mezclar el app-shell nuevo con una
+      // pantalla vieja. El banner deja que el usuario termine la captura y actualice
+      // en un punto controlado.
+      publicar(true);
     },
     onRegisteredSW(_url, registration) {
       if (!registration) return;

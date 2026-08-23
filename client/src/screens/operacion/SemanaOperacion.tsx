@@ -1,15 +1,11 @@
 import { Navigate, NavLink, useParams } from 'react-router-dom';
-import { lazy } from 'react';
 import { useAuth, type Rol } from '../../auth';
 import WeekPicker from '../../components/WeekPicker';
 import { useSemanaGlobal } from '../../semana-context';
-
-// La operación semanal es grande. Cada área se descarga solo al abrirla para que capturar
-// pedidos no cargue módulos administrativos innecesarios.
-const Pedidos = lazy(() => import('./Pedidos'));
-const Entregas = lazy(() => import('./Entregas'));
-const OperacionAdmin = lazy(() => import('./OperacionAdmin'));
-const InventarioOperacion = lazy(() => import('./InventarioOperacion'));
+import Pedidos from './Pedidos';
+import Entregas from './Entregas';
+import OperacionAdmin from './OperacionAdmin';
+import InventarioOperacion from './InventarioOperacion';
 
 const operacionDiaria = [
   { clave: 'ventas', label: 'Pedidos' },

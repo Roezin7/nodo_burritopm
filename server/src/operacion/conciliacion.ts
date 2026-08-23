@@ -342,7 +342,11 @@ export async function obtenerInventarioSemanalDesechables(
   const fechaConteo = aperturaConDatos(aperturaConteo) ? conteoAnterior!.fecha : null;
   const fechaSnapshot = aperturaConDatos(aperturaSnapshot) ? semanaAnterior!.termina_at : null;
   const usarInicial = aperturaConDatos(aperturaInicial);
-  const usarConteo = !usarInicial && Boolean(fechaConteo && (!fechaSnapshot || fechaConteo > fechaSnapshot));
+  // El conteo físico del sábado y el snapshot contable se generan el mismo día.
+  // En ese caso el físico sigue siendo la evidencia operativa más reciente; usar
+  // `>` hacía que se heredara el snapshot anterior aunque ambos fueran del mismo
+  // sábado.
+  const usarConteo = !usarInicial && Boolean(fechaConteo && (!fechaSnapshot || fechaConteo >= fechaSnapshot));
   const apertura = usarInicial ? aperturaInicial : usarConteo ? aperturaConteo : aperturaConDatos(aperturaSnapshot) ? aperturaSnapshot : null;
   if (!aperturaConDatos(apertura)) {
     throw new HttpError(
@@ -397,11 +401,71 @@ export async function obtenerInventarioSemanalDesechables(
 /** Congela el saldo de apertura reconstruido antes de la primera captura retroactiva. No mueve inventario. */
 export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuarioId: bigint, fechaOperacion: string, ubicacionId: bigint) {
   const rango = rangoSemana(fechaOperacion);
+  const ubicacion = await prisma.ubicaciones.findFirst({
+    where: { id: ubicacionId, negocio_id: negocioId, tipo: 'bodega', activo: true },
+    select: { id: true, codigo: true },
+  });
+  if (!ubicacion || !['CARN', 'BOD'].includes(ubicacion.codigo)) {
+    throw new HttpError(400, 'La apertura semanal solo puede fijarse para Carnicería o Bodega Adison');
+  }
   const existente = await prisma.conteos.findFirst({
     where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), notas: { startsWith: 'inventario_inicial_operativo' } },
     select: { id: true },
   });
   if (existente) return { id: Number(existente.id), creado: false };
+
+  // Desechables no tienen producción: la apertura de la semana debe salir del
+  // cierre/conteo físico de la semana anterior, nunca del saldo vivo posterior.
+  // Antes sólo se inicializaba CARN, por lo que BOD comenzaba sin conteo inicial
+  // y la conciliación terminaba heredando una fotografía vieja o incompleta.
+  if (ubicacion.codigo === 'BOD') {
+    const inicioAnterior = sumarDias(fecha(rango.desde), -7);
+    const finAnterior = sumarDias(fecha(rango.desde), -1);
+    const reporte = await obtenerInventarioSemanalDesechables(
+      negocioId,
+      iso(inicioAnterior),
+      iso(finAnterior),
+      ubicacionId,
+    );
+    const ids = reporte.filas.map((fila) => BigInt(fila.product_id));
+    const productos = await prisma.products.findMany({
+      where: { negocio_id: negocioId, id: { in: ids } },
+      select: { id: true, unidad_distribucion_id: true },
+    });
+    const unidadDe = new Map(productos.map((producto) => [producto.id.toString(), producto.unidad_distribucion_id]));
+    const conteo = await transaccionSerializable(async (tx) => {
+      const ya = await tx.conteos.findFirst({
+        where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), notas: { startsWith: 'inventario_inicial_operativo' } },
+        select: { id: true },
+      });
+      if (ya) return ya;
+      const c = await tx.conteos.create({
+        data: {
+          negocio_id: negocioId,
+          ubicacion_id: ubicacionId,
+          fecha: fecha(rango.desde),
+          estado: 'cerrado',
+          creado_por: usuarioId,
+          cerrado_por: usuarioId,
+          cerrado_at: new Date(),
+          notas: `inventario_inicial_operativo:${rango.desde}:heredado-desechables`,
+        },
+      });
+      if (reporte.filas.length) await tx.conteo_lineas.createMany({
+        data: reporte.filas.map((fila) => ({
+          conteo_id: c.id,
+          product_id: BigInt(fila.product_id),
+          unidad_id: unidadDe.get(String(fila.product_id))!,
+          qty: normalizarSaldoApertura(fila.saldoOperativoFinal ?? fila.teoricoFinal),
+          factor: 1,
+          contado: true,
+        })),
+      });
+      return c;
+    });
+    return { id: Number(conteo.id), creado: true };
+  }
+
   const reporte = await obtenerConciliacionSemanal(negocioId, rango.desde, rango.hasta, ubicacionId);
   const productos = await prisma.products.findMany({
     where: { negocio_id: negocioId, id: { in: reporte.filas.map((f) => BigInt(f.product_id)) } },

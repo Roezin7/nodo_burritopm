@@ -8,7 +8,7 @@ import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
 import { aplicarMovimiento } from '../ledger/service.js';
 import { avisarAdminFaltantesInventario } from '../push/service.js';
-import { costoParaValuacionInventario, valorExistencia } from '../inventario/valuacion.js';
+import { costoParaValuacionInventario, valorExistenciaRedondeado } from '../inventario/valuacion.js';
 import { hoyNegocio } from '../lib/semana-operativa.js';
 
 // Compatibilidad para consumidores existentes; la implementación vive en el
@@ -264,7 +264,7 @@ async function valuacionInventario(
   for (const e of existencias) {
     const cantidad = cantidadesAisladas.get(`${e.ubicacion_id}:${e.product_id}`)
       ?? num0(e.cantidad_disponible);
-    const valor = valorExistencia(cantidad, e.cantidad_transito, e.costo_promedio,
+    const valor = valorExistenciaRedondeado(cantidad, e.cantidad_transito, e.costo_promedio,
       e.costo_transito_promedio, e.products.costo_promedio, e.products.ultimo_costo);
     if (e.products.linea_operacion === 'desechables') desechables += valor;
     else if (e.products.linea_operacion === 'carne' && e.products.tipo_operativo !== 'materia_prima') terminada += valor;
@@ -743,7 +743,10 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
   }
   const pagadas = await prisma.facturas.count({ where: { semana_id: s.id, estado: 'pagada' } });
   if (pagadas) throw new HttpError(409, 'No se puede reabrir una semana con facturas pagadas');
-  const carniceria = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocioId, codigo: 'CARN', activo: true }, select: { id: true } });
+  const bodegasOperativas = await prisma.ubicaciones.findMany({
+    where: { negocio_id: negocioId, codigo: { in: ['CARN', 'BOD'] }, tipo: 'bodega', activo: true },
+    select: { id: true },
+  });
   const pedidos = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, fecha_entrega: { gte: s.inicia_at, lte: s.termina_at }, estado: 'cerrado' },
     select: { id: true },
@@ -813,7 +816,12 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
   // La apertura se fija después de quitar el arrastre técnico. El conteo físico
   // conservado queda fuera de la reconstrucción hacia atrás y sigue siendo la
   // referencia para esta semana.
-  if (carniceria) await asegurarInventarioInicialSemanal(negocioId, usuarioId, iso(s.inicia_at), carniceria.id);
+  for (const bodega of bodegasOperativas) {
+    await asegurarInventarioInicialSemanal(negocioId, usuarioId, iso(s.inicia_at), bodega.id);
+  }
+  // La semana queda abierta y debe dejar de mostrar la fotografía contable anterior.
+  // Recalcular aquí evita que Inventario/Cierre lean valores obsoletos después de reabrir.
+  await calcularBalance(negocioId, semanaId, s.termina_at, prisma, true);
   return {
     ok: true,
     inventarios_finales_revertidos: 0,

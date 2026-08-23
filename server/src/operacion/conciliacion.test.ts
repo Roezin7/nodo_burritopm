@@ -75,6 +75,9 @@ describe('conciliación semanal de inventario', () => {
   it('prefiere el conteo físico de la semana anterior al snapshot más antiguo', () => {
     expect(prefiereConteoFisicoAnterior(new Date('2026-08-08T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z'))).toBe(true);
     expect(prefiereConteoFisicoAnterior(new Date('2026-07-31T00:00:00.000Z'), new Date('2026-08-01T00:00:00.000Z'))).toBe(false);
+    // El snapshot y el conteo final suelen compartir el sábado como fecha de
+    // corte; el conteo físico debe ganar también en igualdad de fechas.
+    expect(prefiereConteoFisicoAnterior(new Date('2026-08-08T00:00:00.000Z'), new Date('2026-08-08T00:00:00.000Z'))).toBe(true);
   });
 
   it('aísla el saldo semanal aunque el inventario vivo ya tenga movimientos posteriores', () => {

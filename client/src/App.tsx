@@ -3,69 +3,24 @@ import { AuthProvider, useAuth, type Rol } from './auth';
 import { ToastProvider } from './toast';
 import SplashIntro from './brand/SplashIntro';
 import Spinner from './components/Spinner';
-import { Component, Suspense, lazy, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
+import { Component, Suspense, useState, useEffect, type ErrorInfo, type JSX, type ReactNode } from 'react';
 import { SemanaProvider } from './semana-context';
 import { DialogProvider } from './dialog';
 import { usePageTitle } from './page-title';
+import { esFalloDeAsset, limpiarAssetsYRecargar } from './assetRecovery';
+import Login from './screens/Login';
+import Home from './screens/Home';
+import Shell from './Shell';
+import UpdateBanner from './UpdateBanner';
+import ConteosInventario from './screens/inventario/Inventario';
+import Incidencias from './screens/incidencias/Incidencias';
+import Configuracion from './screens/config/Configuracion';
+import OperacionAdmin from './screens/operacion/OperacionAdmin';
+import SemanaOperacion from './screens/operacion/SemanaOperacion';
+import Facturacion from './screens/Facturacion';
 
-// Cada área grande se descarga solo cuando el rol la necesita. Además de acelerar el arranque,
-// esto evita que el teléfono evalúe la consola administrativa para capturar un pedido sencillo.
-const cargarLogin = () => import('./screens/Login');
-const cargarHome = () => import('./screens/Home');
-const cargarShell = () => import('./Shell');
-const cargarSemana = () => import('./screens/operacion/SemanaOperacion');
-const Login = lazy(cargarLogin);
-const Home = lazy(cargarHome);
-const Shell = lazy(cargarShell);
-const UpdateBanner = lazy(() => import('./UpdateBanner'));
-const ConteosInventario = lazy(() => import('./screens/inventario/Inventario'));
-const Incidencias = lazy(() => import('./screens/incidencias/Incidencias'));
-const Configuracion = lazy(() => import('./screens/config/Configuracion'));
-const OperacionAdmin = lazy(() => import('./screens/operacion/OperacionAdmin'));
-const SemanaOperacion = lazy(cargarSemana);
-const Facturacion = lazy(() => import('./screens/Facturacion'));
-
-// Comienza en paralelo el único camino que probablemente se mostrará. Evita una cascada
-// base → autenticación → menú → pantalla, sin descargar rutas que el usuario no abrió.
-try {
-  if (localStorage.getItem('bpm_token')) {
-    void cargarShell();
-    if (window.location.pathname.startsWith('/semana')) void cargarSemana();
-    else if (window.location.pathname === '/') void cargarHome();
-  } else {
-    void cargarLogin();
-  }
-} catch {
-  void cargarLogin();
-}
-
-const ASSET_RECOVERY_KEY = 'bpm-asset-recovery-attempted';
-
-function esFalloDeAsset(error: unknown) {
-  const mensaje = error instanceof Error ? `${error.name} ${error.message}` : String(error);
-  return /ChunkLoadError|Loading chunk|dynamically imported module|Importing a module script failed|CSS chunk/i.test(mensaje);
-}
-
-function limpiarAssetsYRecargar() {
-  try {
-    if (sessionStorage.getItem(ASSET_RECOVERY_KEY) === '1') return false;
-    sessionStorage.setItem(ASSET_RECOVERY_KEY, '1');
-  } catch { return false; }
-
-  const limpiar = async () => {
-    try {
-      const registros = await navigator.serviceWorker?.getRegistrations() ?? [];
-      await Promise.all(registros.map((registro) => registro.unregister()));
-      if ('caches' in window) {
-        const nombres = await caches.keys();
-        await Promise.all(nombres.map((nombre) => caches.delete(nombre)));
-      }
-    } catch { /* una recarga normal todavía puede recuperar el app-shell */ }
-    window.location.reload();
-  };
-  void limpiar();
-  return true;
-}
+// Las pantallas críticas se incluyen en el app-shell. Así una pestaña que estaba abierta durante
+// un deploy no depende de chunks antiguos que el siguiente contenedor ya no tenga publicados.
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { fallo: boolean; error: Error | null }> {
   state = { fallo: false, error: null as Error | null };
@@ -175,14 +130,6 @@ function debeMostrarSplash() {
 export default function App() {
   const [splash, setSplash] = useState(debeMostrarSplash);
   const [serviciosListos, setServiciosListos] = useState(false);
-  useEffect(() => {
-    // La marca sobrevive una sola recarga para evitar un loop si el deploy todavía
-    // está propagándose; se libera después de que la app tuvo tiempo de estabilizarse.
-    const id = globalThis.setTimeout(() => {
-      try { sessionStorage.removeItem(ASSET_RECOVERY_KEY); } catch { /* almacenamiento bloqueado */ }
-    }, 10_000);
-    return () => globalThis.clearTimeout(id);
-  }, []);
   useEffect(() => {
     const mostrar = () => setServiciosListos(true);
     if ('requestIdleCallback' in window) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { costoParaValuacionInventario, valorExistencia } from './valuacion.js';
+import { costoParaValuacionInventario, valorExistencia, valorExistenciaRedondeado } from './valuacion.js';
 
 describe('valuación uniforme de inventario', () => {
   it('prioriza el costo guardado en la existencia', () => {
@@ -16,5 +16,9 @@ describe('valuación uniforme de inventario', () => {
 
   it('incluye disponible y tránsito con sus respectivos costos', () => {
     expect(valorExistencia(10, 2, null, 9, 12, 14)).toBe(138);
+  });
+
+  it('redondea cada línea antes de sumar totales contables', () => {
+    expect(valorExistenciaRedondeado(190, 0, 440.1102, null, null, null)).toBe(83620.94);
   });
 });

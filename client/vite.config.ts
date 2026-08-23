@@ -21,18 +21,11 @@ export default defineConfig({
       injectManifest: {
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globIgnores: ['og-image.png'],
-        // La instalación inicial conserva acceso, menú e inicio sin descargar de fondo todas
-        // las áreas administrativas. Los chunks de cada operación se guardan al visitarlos.
+        // La interfaz crítica se empaqueta en un solo bundle para que una pestaña abierta
+        // durante un deploy no solicite chunks de pantalla que el contenedor nuevo retiró.
         globPatterns: [
           '**/*.{html,webmanifest,css,woff2,png,svg}',
           'assets/index-*.js',
-          'assets/Login-*.js',
-          'assets/Shell-*.js',
-          'assets/Home-*.js',
-          'assets/BurritoLockup-*.js',
-          'assets/offline-*.js',
-          'assets/UpdateBanner-*.js',
-          'assets/pwaUpdate-*.js',
           'assets/workbox-window*.js',
         ],
       },

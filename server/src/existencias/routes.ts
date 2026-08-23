@@ -10,7 +10,7 @@ import { idempotencyKey } from '../lib/validation.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { randomUUID } from 'node:crypto';
 import { obtenerConciliacionSemanal, obtenerInventarioSemanalDesechables, rangoSemana } from '../operacion/conciliacion.js';
-import { costoParaValuacionInventario, valorExistencia } from '../inventario/valuacion.js';
+import { costoParaValuacionInventario, valorExistenciaRedondeado } from '../inventario/valuacion.js';
 
 export const existenciasRouter = Router();
 
@@ -351,7 +351,7 @@ existenciasRouter.get(
       for (const e of u.existencias) {
         const disp = Math.max(0, num0(e.cantidad_disponible));
         if (disp > 0) skus++;
-        valor += valorExistencia(
+        valor += valorExistenciaRedondeado(
           e.cantidad_disponible,
           e.cantidad_transito,
           e.costo_promedio,

@@ -1416,7 +1416,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     if (p.linea_operacion === 'carne' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${p.nombre} debe recibirse en Carnicería`);
     if (p.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${p.nombre} debe recibirse en Bodega Adison`);
   }
-  if (ubicacion.codigo === 'CARN' && productos.some((p) => !esCargoContableCompra(p))) {
+  if (['CARN', 'BOD'].includes(ubicacion.codigo) && productos.some((p) => !esCargoContableCompra(p))) {
     await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
   }
   const totalRenglones = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
@@ -1522,7 +1522,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
     if (producto.linea_operacion === 'carne' && ubicacion.codigo !== 'CARN') throw new HttpError(400, `${producto.nombre} debe recibirse en Carnicería`);
     if (producto.linea_operacion === 'desechables' && ubicacion.codigo !== 'BOD') throw new HttpError(400, `${producto.nombre} debe recibirse en Bodega Adison`);
   }
-  if (ubicacion.codigo === 'CARN' && productos.some((producto) => !esCargoContableCompra(producto))) {
+  if (['CARN', 'BOD'].includes(ubicacion.codigo) && productos.some((producto) => !esCargoContableCompra(producto))) {
     await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacion.id);
   }
 
@@ -1808,7 +1808,9 @@ export async function guardarInventarioFinal(
       throw new HttpError(400, `El inventario debe incluir todos los productos. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
     }
   }
-  if (ubicacion.codigo === 'CARN') await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
+  if (['CARN', 'BOD'].includes(ubicacion.codigo)) {
+    await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
+  }
   // El conteo físico es evidencia y debe conservarse aunque exista una diferencia.
   // Antes la validación del motivo abortaba toda la transacción y el usuario perdía
   // la captura. La observación sigue siendo opcional; los ajustes quedan auditados

@@ -724,7 +724,12 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   const productoDe = new Map(productos.map((producto) => [producto.id.toString(), producto]));
 
   if (dist.fecha_entrega) {
-    for (const bodega of [...new Map([...bodegas.values()].filter((b) => b.codigo === 'CARN').map((b) => [b.id.toString(), b])).values()]) {
+    // Una ruta de carne puede llevar desechables embebidos. Inicializa cada
+    // bodega física involucrada para que BOD herede su propio cierre anterior;
+    // no debe depender de que la ruta principal sea de carne.
+    for (const bodega of [...new Map([...bodegas.values()]
+      .filter((b) => ['CARN', 'BOD'].includes(b.codigo))
+      .map((b) => [b.id.toString(), b])).values()]) {
       await asegurarInventarioInicialSemanal(negocioId, usuarioId, dist.fecha_entrega.toISOString().slice(0, 10), bodega.id);
     }
   }
