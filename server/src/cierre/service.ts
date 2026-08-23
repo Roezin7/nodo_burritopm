@@ -575,6 +575,9 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
   const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
+  // El cierre reconstruye las facturas de toda la semana, guarda la fotografía
+  // completa de inventario y arrastra los saldos. En producción puede superar
+  // el timeout genérico de 20 s; sigue siendo una sola transacción atómica.
   const cierre = await transaccionSerializable(async (tx) => {
     const vigente = await tx.semanas_operativas.findUnique({ where: { id: semana.id }, select: { estado: true } });
     if (vigente?.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
@@ -602,8 +605,20 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       });
       creadas.push(f);
     }
+    // Una semana puede contener cientos de líneas. Actualizarlas una por una
+    // mantenía abierta la transacción hasta vencer el timeout de Prisma; se
+    // agrupan por precio y se actualizan en pocos lotes sin cambiar el resultado.
+    const lineasPorPrecio = new Map<number, bigint[]>();
     for (const p of pedidos) {
-      for (const l of p.lineas) await tx.pedido_operativo_lineas.update({ where: { id: l.id }, data: { precio_unitario: precios.get(l.product_id.toString()) ?? l.precio_unitario } });
+      for (const l of p.lineas) {
+        const precio = precios.get(l.product_id.toString()) ?? num0(l.precio_unitario);
+        const ids = lineasPorPrecio.get(precio) ?? [];
+        ids.push(l.id);
+        lineasPorPrecio.set(precio, ids);
+      }
+    }
+    for (const [precio, ids] of lineasPorPrecio) {
+      await tx.pedido_operativo_lineas.updateMany({ where: { id: { in: ids } }, data: { precio_unitario: precio } });
     }
     await tx.pedidos_operativos.updateMany({ where: { id: { in: pedidos.map((p) => p.id) } }, data: { estado: 'cerrado' } });
     const [existencias, lotesCierre] = await Promise.all([
@@ -708,7 +723,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       cajas_perdidas: r3(saldosCierre.reduce((total, saldo) => total + saldo.cantidad, 0)),
       productos_con_faltante: saldosCierre.length,
     };
-  });
+  }, { maxWait: 15_000, timeout: 120_000 });
   if (cierre.productos_con_faltante > 0) {
     void avisarAdminFaltantesInventario(
       negocioId,
