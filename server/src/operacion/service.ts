@@ -1394,6 +1394,7 @@ function compraCoincide(
     && compra.ubicacion_id === BigInt(input.ubicacion_id)
     && compra.fecha.getTime() === fechaCompra.getTime()
     && num0(compra.total) === total
+    && Math.abs(num0(compra.ajuste_contable) - r2(total - input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0))) <= 0.01
     && (compra.referencia ?? null) === (input.referencia ?? null)
     && JSON.stringify(firmaGuardada) === JSON.stringify(firmaLineasCompra(input.lineas));
 }
@@ -1420,6 +1421,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
   }
   const totalRenglones = r2(input.lineas.reduce((a, l) => a + l.costo_total, 0));
   const total = r2(input.total_factura ?? totalRenglones);
+  const ajusteContable = r2(total - totalRenglones);
   if (total < 0) throw new HttpError(400, 'El total de la factura no puede ser negativo');
   const f = fecha(input.fecha);
 
@@ -1435,7 +1437,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     }
 
     const c = await tx.compras.create({
-      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, referencia: input.referencia, total, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
+      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, referencia: input.referencia, total, ajuste_contable: ajusteContable, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
     });
     for (const [i, l] of input.lineas.entries()) {
       const pid = BigInt(l.product_id);
@@ -1526,6 +1528,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
 
   const totalRenglones = r2(input.lineas.reduce((suma, linea) => suma + linea.costo_total, 0));
   const total = r2(input.total_factura ?? totalRenglones);
+  const ajusteContable = r2(total - totalRenglones);
   if (total < 0) throw new HttpError(400, 'El total de la factura no puede ser negativo');
   const nuevaFecha = fecha(input.fecha);
   return transaccionSerializable(async (tx) => {
@@ -1580,7 +1583,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
     await tx.compra_lineas.deleteMany({ where: { compra_id: compraId } });
     await tx.compras.update({
       where: { id: compraId },
-      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, referencia: input.referencia, total },
+      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, referencia: input.referencia, total, ajuste_contable: ajusteContable },
     });
 
     for (const [indice, linea] of input.lineas.entries()) {
@@ -2609,7 +2612,7 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
     resumen_proteinas: resumenProteinas,
-    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
+    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), ajuste_contable: num0(c.ajuste_contable), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
     // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.

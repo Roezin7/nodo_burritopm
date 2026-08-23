@@ -3,7 +3,7 @@ import { prisma } from '../db.js';
 import { num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { reconciliarConteo } from '../ledger/service.js';
-import { transaccionSerializable } from '../lib/transaccion.js';
+import { esErrorPrisma, transaccionSerializable } from '../lib/transaccion.js';
 
 const EDITABLES = ['borrador', 'en_captura', 'reabierto'] as const;
 type EstadoEditable = (typeof EDITABLES)[number];
@@ -118,23 +118,34 @@ export async function abrirConteoDeHoy(negocioId: bigint, ubicacionId: bigint, u
     throw new HttpError(400, 'Esta ubicación no tiene productos habilitados. Configúralos en el catálogo por ubicación.');
   }
 
-  const conteo = await prisma.$transaction(async (tx) => {
-    const c = await tx.conteos.create({
-      data: { negocio_id: negocioId, ubicacion_id: ubicacionId, estado: 'en_captura', creado_por: usuarioId, fecha: hoy },
-    });
-    await tx.conteo_lineas.createMany({
-      data: habilitados.map((h) => ({
-        conteo_id: c.id,
-        product_id: h.products.id,
-        unidad_id: h.products.unidad_distribucion_id,
-        qty: 0,
-        factor: 1,
-        contado: false,
-      })),
-    });
-    return c;
-  });
-  return { id: Number(conteo.id), reusado: false };
+  try {
+    const conteo = await transaccionSerializable(async (tx) => {
+      const concurrente = await tx.conteos.findFirst({
+        where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: hoy },
+        orderBy: { id: 'desc' },
+      });
+      if (concurrente) return concurrente;
+      const c = await tx.conteos.create({
+        data: { negocio_id: negocioId, ubicacion_id: ubicacionId, estado: 'en_captura', creado_por: usuarioId, fecha: hoy },
+      });
+      await tx.conteo_lineas.createMany({
+        data: habilitados.map((h) => ({
+          conteo_id: c.id,
+          product_id: h.products.id,
+          unidad_id: h.products.unidad_distribucion_id,
+          qty: 0,
+          factor: 1,
+          contado: false,
+        })),
+      });
+      return c;
+    }, { reintentarUnico: true });
+    return { id: Number(conteo.id), reusado: false };
+  } catch (error) {
+    if (!esErrorPrisma(error, 'P2002')) throw error;
+    const concurrente = await prisma.conteos.findFirstOrThrow({ where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: hoy }, orderBy: { id: 'desc' } });
+    return { id: Number(concurrente.id), reusado: true };
+  }
 }
 
 /** Detalle de un conteo con sus líneas (info de producto y categoría). */

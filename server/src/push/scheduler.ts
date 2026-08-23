@@ -3,6 +3,7 @@ import { autoCerrarTransitoVencido } from '../distribuciones/service.js';
 import { avisarAdminRezagados, enviarAUsuarios, pushHabilitado, usuariosDeUbicacion } from './service.js';
 import { procesarNotificaciones } from './order-notifications.js';
 import { registrarAvisoDeploy } from './release-notifications.js';
+import { randomUUID } from 'node:crypto';
 
 // Hora del negocio a partir de la cual se manda el aviso "hoy toca pedido" a sucursales.
 const HORA_AVISO = 8;
@@ -10,6 +11,30 @@ const HORA_AVISO = 8;
 const HORA_REZAGADOS = 11;
 const CADA_MS = 15 * 60 * 1000; // revisa cada 15 min
 const CADA_NOTIFICACIONES_MS = 15 * 1000; // cambios de pedidos: respuesta rápida sin bloquear el guardado
+const PROPIETARIO = `${process.pid}:${randomUUID()}`;
+
+async function conLease(clave: string, trabajo: () => Promise<void>) {
+  const tomado = await prisma.$queryRaw<{ clave: string }[]>`
+    INSERT INTO "scheduler_locks" ("clave", "propietario", "vence_at")
+    VALUES (${clave}, ${PROPIETARIO}, NOW() + INTERVAL '2 minutes')
+    ON CONFLICT ("clave") DO UPDATE
+      SET "propietario" = EXCLUDED."propietario",
+          "vence_at" = EXCLUDED."vence_at",
+          "actualizado_at" = NOW()
+      WHERE "scheduler_locks"."vence_at" < NOW()
+         OR "scheduler_locks"."propietario" = EXCLUDED."propietario"
+    RETURNING "clave"
+  `;
+  if (!tomado.length) return;
+  try {
+    await trabajo();
+  } finally {
+    await prisma.$executeRaw`
+      UPDATE "scheduler_locks" SET "vence_at" = NOW(), "actualizado_at" = NOW()
+      WHERE "clave" = ${clave} AND "propietario" = ${PROPIETARIO}
+    `;
+  }
+}
 
 const fechaISOEnTz = (d: Date, tz: string) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
@@ -105,12 +130,16 @@ export async function tickAutoCierre() {
 }
 
 async function tick() {
-  await tickAvisos().catch((error) => console.error('Error enviando avisos de pedidos', error));
-  await tickAutoCierre().catch((error) => console.error('Error ejecutando auto-cierre', error));
+  await conLease('avisos-y-auto-cierre', async () => {
+    await tickAvisos().catch((error) => console.error('Error enviando avisos de pedidos', error));
+    await tickAutoCierre().catch((error) => console.error('Error ejecutando auto-cierre', error));
+  }).catch((error) => console.error('Error adquiriendo lease del scheduler', error));
 }
 
 async function tickNotificaciones() {
-  await procesarNotificaciones().catch((error) => console.error('Error procesando notificaciones de pedidos', error));
+  await conLease('cola-notificaciones', async () => {
+    await procesarNotificaciones().catch((error) => console.error('Error procesando notificaciones de pedidos', error));
+  }).catch((error) => console.error('Error adquiriendo lease de notificaciones', error));
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;

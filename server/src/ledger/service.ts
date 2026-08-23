@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
+import { prepararSalidaFifo, registrarSalidaFifo } from '../inventario/fifo.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -140,10 +141,14 @@ export async function aplicarMovimiento(tx: Tx, p: MovimientoParams): Promise<bo
  * movimiento de ajuste por el delta de cada producto.
  */
 export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usuarioId: bigint, ubicacionId: bigint) {
-  const lineas = await prisma.conteo_lineas.findMany({
+  const [lineas, ubicacion] = await Promise.all([
+    prisma.conteo_lineas.findMany({
     where: { conteo_id: conteoId },
-    include: { products: { select: { ultimo_costo: true, costo_promedio: true } } },
-  });
+    include: { products: { select: { ultimo_costo: true, costo_promedio: true, linea_operacion: true } } },
+    }),
+    prisma.ubicaciones.findUnique({ where: { id: ubicacionId }, select: { codigo: true } }),
+  ]);
+  if (!ubicacion) throw new HttpError(404, 'Ubicación de conteo no encontrada');
   const sello = Date.now(); // cada cierre reconcilia (permite re-cierre tras reabrir)
 
   await transaccionSerializable(async (tx) => {
@@ -154,8 +159,16 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
       });
       const delta = r3(contado - num0(ex?.cantidad_disponible));
       if (delta === 0) continue;
-      const costo = num(l.products.ultimo_costo) ?? num(l.products.costo_promedio);
-      await aplicarMovimiento(tx, {
+      const costo = num(l.products.ultimo_costo) ?? num(l.products.costo_promedio) ?? 0;
+      const manejaFifo = ubicacion.codigo === 'BOD' && l.products.linea_operacion === 'desechables';
+      const salidaFifo = delta < 0 && manejaFifo
+        ? await prepararSalidaFifo(tx, {
+            negocioId, ubicacionId, productId: l.product_id, cantidad: Math.abs(delta), producto: `Producto ${l.product_id.toString()}`,
+            permitirFaltante: false, costoFaltante: costo,
+          })
+        : null;
+      const idempotencyKey = `conteo:${conteoId}:${sello}:${l.product_id}`;
+      const aplicada = await aplicarMovimiento(tx, {
         negocioId,
         productId: l.product_id,
         tipo: delta >= 0 ? (ex ? 'ajuste_positivo' : 'conteo_inicial') : 'ajuste_negativo',
@@ -167,9 +180,31 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
         documentoTipo: 'conteo',
         documentoId: conteoId,
         comentario: 'Reconciliación por conteo cerrado',
-        idempotencyKey: `conteo:${conteoId}:${sello}:${l.product_id}`,
+        idempotencyKey,
         deltas: [{ ubicacionId, productId: l.product_id, disponible: delta, costoUnitario: costo }],
       });
+      if (aplicada && salidaFifo) {
+        const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: idempotencyKey }, select: { id: true } });
+        if (!movimiento) throw new HttpError(500, 'No se pudo vincular el ajuste de conteo con FIFO');
+        await registrarSalidaFifo(tx, { movimientoId: movimiento.id, ubicacionId, productId: l.product_id, consumos: salidaFifo.consumos });
+        for (const consumo of salidaFifo.consumos) {
+          await tx.conteo_ajustes_lote.create({
+            data: { conteo_id: conteoId, lote_id: consumo.lote.id, cajas: consumo.cajas, peso_lb: consumo.peso, costo: consumo.costo },
+          });
+        }
+      } else if (aplicada && delta > 0 && manejaFifo) {
+        const lote = await tx.lotes_materia_prima.create({
+          data: {
+            negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: l.product_id,
+            fecha: new Date(), congelado: false, cajas_iniciales: delta, cajas_disponibles: delta,
+            peso_inicial_lb: 0, peso_disponible_lb: 0, costo_inicial: r3(delta * costo), costo_disponible: r3(delta * costo),
+          },
+        });
+        // Negativo significa que eliminar/reemplazar el conteo debe retirar esta capa.
+        await tx.conteo_ajustes_lote.create({
+          data: { conteo_id: conteoId, lote_id: lote.id, cajas: -delta, peso_lb: 0, costo: r3(-delta * costo) },
+        });
+      }
     }
   });
 }

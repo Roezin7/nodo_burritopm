@@ -126,7 +126,8 @@ async function main() {
   // Compras: la cuenta por pagar debe ser el total menos pagos, nunca negativa.
   for (const compra of compras) {
     const totalLineas = r2(compra.lineas.reduce((suma, linea) => suma + n(linea.costo_total), 0));
-    if (compra.lineas.length > 0 && r2(Math.abs(totalLineas - n(compra.total))) > 0.01) agregar(hallazgos, 'media', 'compra_total', `Compra ${compra.id} · ${compra.proveedor.nombre}: total ${n(compra.total).toFixed(2)} vs renglones ${totalLineas.toFixed(2)}.`);
+    const totalExplicado = r2(totalLineas + n(compra.ajuste_contable));
+    if (compra.lineas.length > 0 && r2(Math.abs(totalExplicado - n(compra.total))) > 0.01) agregar(hallazgos, 'alta', 'compra_total', `Compra ${compra.id} · ${compra.proveedor.nombre}: total ${n(compra.total).toFixed(2)} vs renglones ${totalLineas.toFixed(2)} + ajuste ${n(compra.ajuste_contable).toFixed(2)}.`);
     const pagos = r2(compra.pagos.reduce((suma, pago) => suma + n(pago.monto), 0));
     if (pagos - n(compra.total) > 0.01) agregar(hallazgos, 'alta', 'compra_sobrepagada', `Compra ${compra.id} · ${compra.proveedor.nombre}: pagos ${pagos.toFixed(2)} superan total ${n(compra.total).toFixed(2)}.`);
     const saldo = r2(Math.max(0, n(compra.total) - pagos));
@@ -141,7 +142,7 @@ async function main() {
     grupo.push(producto);
     ordenes.set(String(producto.linea_operacion), grupo);
     if (!producto.linea_operacion || !producto.tipo_operativo) agregar(hallazgos, 'alta', 'producto_sin_clasificacion', `${producto.sku} no tiene línea/tipo operativo.`);
-    if (producto.orden_operativo >= 999) agregar(hallazgos, 'media', 'producto_sin_orden', `${producto.sku} tiene orden operativo ${producto.orden_operativo}.`);
+    if (producto.orden_operativo >= 999 && producto.tipo_operativo !== 'servicio') agregar(hallazgos, 'media', 'producto_sin_orden', `${producto.sku} tiene orden operativo ${producto.orden_operativo}.`);
     if (producto.linea_operacion === 'carne' && producto.tipo_operativo === 'proteina' && producto.costo_promedio == null && producto.ultimo_costo == null) agregar(hallazgos, 'alta', 'proteina_sin_costo', `${producto.sku} no tiene costo promedio ni último costo.`);
     if (producto.tipo_operativo === 'precio_fijo' && producto.precio_venta_fijo != null && producto.ultimo_costo != null && r2(n(producto.ultimo_costo) - n(producto.precio_venta_fijo)) === 0) {
       agregar(hallazgos, 'alta', 'costo_igual_precio_venta', `${producto.sku}: costo ${n(producto.ultimo_costo).toFixed(2)} está igualado al precio fijo ${n(producto.precio_venta_fijo).toFixed(2)}.`);
@@ -164,13 +165,14 @@ async function main() {
   const productoPorId = new Map(productos.map((producto) => [producto.id.toString(), producto]));
   const fifoPorProducto = new Map<string, number>();
   for (const lote of lotes) if (lote.ubicacion.codigo === 'BOD') fifoPorProducto.set(lote.product_id.toString(), (fifoPorProducto.get(lote.product_id.toString()) ?? 0) + n(lote.cajas_disponibles));
-  const existenciaBod = existencias.filter((existencia) => existencia.ubicacion_id === 1);
+  const bodega = await prisma.ubicaciones.findFirst({ where: { negocio_id: negocio.id, codigo: 'BOD' }, select: { id: true } });
+  const existenciaBod = existencias.filter((existencia) => bodega && existencia.ubicacion_id === bodega.id);
   for (const existencia of existenciaBod) {
     const producto = productoPorId.get(existencia.product_id.toString());
     if (!producto || (producto.tipo_operativo !== 'materia_prima' && producto.linea_operacion !== 'desechables')) continue;
     const saldo = n(existencia.cantidad_disponible);
     const fifo = r3(fifoPorProducto.get(existencia.product_id.toString()) ?? 0);
-    if (Math.abs(saldo - fifo) > 0.001) agregar(hallazgos, 'alta', 'fifo_vs_existencia', `${producto.sku} en BOD: existencia ${saldo.toFixed(3)} vs FIFO ${fifo.toFixed(3)}.`);
+    if (saldo >= -0.001 && Math.abs(saldo - fifo) > 0.001) agregar(hallazgos, 'alta', 'fifo_vs_existencia', `${producto.sku} en BOD: existencia ${saldo.toFixed(3)} vs FIFO ${fifo.toFixed(3)}.`);
   }
 
   // El Excel maestro fija CUP HOLDER como el octavo desechable. Se conserva
@@ -212,7 +214,8 @@ async function main() {
   // Los negativos pueden ser provisionales de lunes a viernes, pero deben quedar visibles.
   for (const existencia of existencias) {
     if (n(existencia.cantidad_disponible) < -0.001 || n(existencia.cantidad_reservada) < -0.001 || n(existencia.cantidad_transito) < -0.001) {
-      agregar(hallazgos, 'alta', 'existencia_negativa', `Ubicación ${existencia.ubicacion_id} · producto ${existencia.product_id}: disponible ${n(existencia.cantidad_disponible)}, reservada ${n(existencia.cantidad_reservada)}, tránsito ${n(existencia.cantidad_transito)}.`);
+      const incidencia = await prisma.incidencias.findFirst({ where: { negocio_id: negocio.id, ubicacion_id: existencia.ubicacion_id, product_id: existencia.product_id, tipo: 'cajas_perdidas_inventario', estado: 'abierta' }, select: { id: true } });
+      agregar(hallazgos, incidencia ? 'media' : 'alta', incidencia ? 'faltante_documentado' : 'existencia_negativa', `Ubicación ${existencia.ubicacion_id} · producto ${existencia.product_id}: disponible ${n(existencia.cantidad_disponible)}, reservada ${n(existencia.cantidad_reservada)}, tránsito ${n(existencia.cantidad_transito)}${incidencia ? ` (incidencia ${incidencia.id.toString()})` : ''}.`);
     }
   }
 

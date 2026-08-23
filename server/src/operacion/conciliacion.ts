@@ -450,7 +450,7 @@ export async function validarConciliacionParaCierre(negocioId: bigint, desde: st
 }
 
 type ErrorIntegridadPedidos = {
-  tipo: 'pedido_sin_despacho' | 'pedido_con_despachos_duplicados' | 'vinculo_pedido_incorrecto' | 'salida_sin_movimiento' | 'movimiento_sin_salida';
+  tipo: 'pedido_sin_despacho' | 'pedido_con_despachos_duplicados' | 'vinculo_pedido_incorrecto' | 'salida_sin_movimiento' | 'movimiento_sin_salida' | 'movimiento_cantidad_incorrecta' | 'estado_pedido_inconsistente';
   detalle: string;
   pedido_id?: number;
   pedido_linea_id?: number;
@@ -532,6 +532,17 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
           detalle: `El renglón ${linea.id.toString()} apunta a un destino, producto o fecha distinta del pedido.`,
         });
       }
+      if (['entregada', 'cerrada', 'cerrada_con_incidencias'].includes(distribucion.distribuciones.estado)
+        && !['entregado', 'cerrado', 'cancelado'].includes(linea.pedido.estado)) {
+        errores.push({
+          tipo: 'estado_pedido_inconsistente',
+          pedido_id: Number(linea.pedido_id),
+          pedido_linea_id: Number(linea.id),
+          distribucion_id: Number(distribucion.distribucion_id),
+          distribucion_linea_id: Number(distribucion.id),
+          detalle: `El pedido ${linea.pedido_id.toString()} está ${linea.pedido.estado}, pero su despacho ${distribucion.distribucion_id.toString()} ya está ${distribucion.distribuciones.estado}.`,
+        });
+      }
     }
   }
 
@@ -600,8 +611,42 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
 
   const lineasTodas = distribucionIds.length ? await prisma.distribucion_lineas.findMany({
     where: { distribucion_id: { in: distribucionIds } },
-    select: { id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, pedido_linea: { select: { pedido_id: true } } },
+    select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, cantidad_recibida: true, pedido_linea: { select: { pedido_id: true } } },
   }) : [];
+  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
+  const movimientosPorLinea = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
+    where: { negocio_id: negocioId, distribucion_linea_id: { in: lineasTodas.map((linea) => linea.id) } },
+    select: { id: true, distribucion_linea_id: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true, idempotency_key: true },
+  }) : [];
+  const llavesFisicas = lineasTodas.flatMap((linea) => [`carga:${linea.id.toString()}`, `recepcion:${linea.id.toString()}`]);
+  const movimientosPorLlaveFisica = llavesFisicas.length ? await prisma.movimientos_inventario.findMany({
+    where: { negocio_id: negocioId, idempotency_key: { in: llavesFisicas } },
+    select: { id: true, idempotency_key: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
+  }) : [];
+  const movimientoFisicoDe = new Map(movimientosPorLlaveFisica.map((movimiento) => [movimiento.idempotency_key, movimiento]));
+  for (const linea of lineasTodas.filter((item) => num0(item.cantidad_recibida ?? item.cantidad_cargada) > 0)) {
+    const vinculados = movimientosPorLinea.filter((movimiento) => movimiento.distribucion_linea_id === linea.id);
+    const heredados = [movimientoFisicoDe.get(`carga:${linea.id.toString()}`), movimientoFisicoDe.get(`recepcion:${linea.id.toString()}`)]
+      .filter((movimiento): movimiento is NonNullable<typeof movimiento> => Boolean(movimiento));
+    const movimientosLinea = [...vinculados, ...heredados.filter((movimiento) => !vinculados.some((vinculado) => vinculado.id === movimiento.id))];
+    const movimientosEntrega = negocio?.reparto_habilitado
+      ? movimientosLinea.filter((movimiento) => !movimiento.idempotency_key.startsWith('carga:'))
+      : movimientosLinea;
+    const neto = r3(movimientosEntrega.reduce((total, movimiento) => {
+      if (movimiento.ubicacion_destino_id === linea.ubicacion_destino_id) return total + num0(movimiento.cantidad);
+      if (movimiento.ubicacion_origen_id === linea.ubicacion_destino_id) return total - num0(movimiento.cantidad);
+      return total;
+    }, 0));
+    const esperado = r3(num0(linea.cantidad_recibida ?? linea.cantidad_cargada));
+    if (Math.abs(neto - esperado) > 0.001) {
+      errores.push({
+        tipo: 'movimiento_cantidad_incorrecta',
+        distribucion_id: Number(linea.distribucion_id),
+        distribucion_linea_id: Number(linea.id),
+        detalle: `La línea ${linea.id.toString()} tiene salida física neta ${neto.toFixed(3)} y debería tener ${esperado.toFixed(3)}.`,
+      });
+    }
+  }
   const lineaPorId = new Map(lineasTodas.map((linea) => [linea.id.toString(), linea]));
   const movimientosDistribucion = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, documento_tipo: 'distribucion', documento_id: { in: distribucionIds }, idempotency_key: { startsWith: 'carga:' } },

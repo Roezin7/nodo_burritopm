@@ -33,7 +33,7 @@ de datos; no incluye ideas de roadmap. El sistema cubre actualmente:
 | --- | --- |
 | Acceso y seguridad | Inicio por usuario + PIN, JWT, roles, alcance por ubicación, revocación de sesiones, rate limit, CORS y CSP. |
 | Operación semanal | Selector domingo–sábado, compras, producción, pedidos, despacho, reparto opcional, recepción, conciliación y cierre/reapertura. |
-| Compras y proveedores | Facturas con varios renglones, cargos contables sin inventario, lotes de peso variable, vencimientos, pagos parciales/masivos y reversión. |
+| Compras y proveedores | Facturas con varios renglones, cargos contables sin inventario, lotes de peso variable, ciclo de pago por proveedor, pagos parciales/masivos y reversión. |
 | Producción y costeo | Recetas, consumos FIFO, batches, yield, desperdicio, subproductos, producción extraordinaria, costo semanal y precio fijo o con markup. |
 | Ventas | Captura por sucursal, cuadrícula semanal tipo Excel, pegado tabular, borradores locales, control de versión, confirmación masiva, historial e impresión. |
 | Distribución | Plantillas de ruta configurables, consolidación automática, carga por ruta/restaurante, paradas, entrega, faltantes, incidencias y auditoría de recepción. |
@@ -117,7 +117,7 @@ revoca sesiones anteriores.
 
 - Captura de varios productos en una sola factura.
 - Selector de proveedor administrable desde Configuración.
-- Fecha, referencia, ubicación y total de factura; el vencimiento se calcula automáticamente.
+- Fecha, referencia, ubicación y total de factura; la diferencia contra los renglones queda registrada como ajuste contable sin inventario.
 - Edición y eliminación mientras la operación posterior permita revertirla con seguridad.
 - Total semanal visible.
 - Pago a proveedor individual o masivo y reversión del pago.
@@ -363,7 +363,7 @@ Las compras pendientes forman la cartera de proveedores. Ésta sí es manual:
 - registrar pago individual;
 - registrar varios pagos a la vez;
 - revertir un pago;
-- revisar vencidos, proveedor, referencia y detalle de compra.
+- revisar proveedor, referencia, renglones, ajuste contable y detalle de compra.
 
 ## Dashboard
 
@@ -376,7 +376,7 @@ El panorama seleccionable por semana resume:
 - costo, cajas y yield de producción;
 - compras semanales;
 - cuentas por cobrar del ciclo de tres semanas;
-- cuentas por pagar y vencimientos;
+- cuentas por pagar agrupadas por proveedor y saldo pendiente;
 - balance operativo;
 - borradores, despachos, faltantes e inventario bajo mínimo.
 
