@@ -19,7 +19,6 @@ interface FacturaEmitida {
   anio: number;
   semana: number;
   emitida_at: string;
-  vence_at: string;
   estado: 'emitida' | 'pagada';
   total: number;
   pagado: number;
@@ -38,7 +37,6 @@ interface FacturaRecibida {
   proveedor: string;
   ubicacion: string;
   recibida_at: string;
-  vence_at: string;
   estado: 'pendiente' | 'pagada';
   total: number;
   pagado: number;
@@ -53,10 +51,8 @@ interface Cartera {
     por_cobrar_proyectado: number;
     documentos_proyectados: number;
     proyeccion_pendiente_produccion: boolean;
-    vencido_cobrar: number;
     facturas_por_cobrar: number;
     por_pagar: number;
-    vencido_pagar: number;
     facturas_por_pagar: number;
     credito_lisle_disponible: number;
   };
@@ -80,8 +76,8 @@ interface Cartera {
 type Detalle = { tipo: 'cobrar'; factura: FacturaEmitida } | { tipo: 'pagar'; factura: FacturaRecibida };
 type Movimiento = { ids: number[]; titulo: string; saldo: number; permiteParcial: boolean };
 
-const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const fechaCorta = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }).replace('.', '');
 const texto = (valor: string | null | undefined) => (valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
@@ -225,22 +221,20 @@ export default function Facturacion() {
   }
 
   function filaEmitida(factura: FacturaEmitida) {
-    const vencida = factura.en_ciclo && factura.vence_at < hoy();
-    return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
+    return <article className="billing-row" key={factura.id}>
       <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'cobrar', factura })}><strong>{factura.numero}</strong><span>{factura.ubicacion}</span><small>{factura.empresa} · {factura.linea} · semana {factura.semana}</small></button>
-      <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.en_ciclo ? 'Sale del ciclo' : 'Salió del ciclo'}</small>{fechaCorta(factura.sale_ciclo_at)}</span></div>
-      <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? vencida ? 'chip--danger' : 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? vencida ? 'En ventana · vencida' : 'En ventana' : 'Fuera de ventana'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'incluido en el balance' : 'total histórico'}</small></div>
+      <div className="billing-row-dates"><span><small>Emitida</small>{fechaCorta(factura.emitida_at)}</span><span><small>{factura.en_ciclo ? 'Ciclo activo' : 'Histórico'}</small>{factura.en_ciclo ? `Semana ${factura.semana}` : 'Fuera de las 3 semanas'}</span></div>
+      <div className="billing-row-balance"><span className={`chip ${factura.en_ciclo ? 'chip--warn' : 'chip--ok'}`}>{factura.en_ciclo ? 'Por cobrar' : 'Histórica'}</span><strong>{usd(factura.en_ciclo ? factura.saldo : factura.total)}</strong><small>{factura.credito_aplicado > 0 ? `${usd(factura.credito_aplicado)} crédito Lisle` : factura.en_ciclo ? 'incluido en el ciclo' : 'total histórico'}</small></div>
     </article>;
   }
 
   function filaRecibida(factura: FacturaRecibida) {
-    const vencida = factura.estado === 'pendiente' && factura.vence_at < hoy();
     const abonada = factura.estado === 'pendiente' && factura.pagado > 0;
-    return <article className={`billing-row ${vencida ? 'is-overdue' : ''}`} key={factura.id}>
+    return <article className="billing-row" key={factura.id}>
       {factura.estado === 'pendiente' && <input className="billing-row-check" type="checkbox" aria-label={`Seleccionar compra ${factura.referencia ?? factura.id}`} checked={seleccionPagar.has(factura.id)} onChange={() => alternarSeleccion(factura.id)} />}
       <button className="billing-row-main" onClick={() => setDetalle({ tipo: 'pagar', factura })}><strong>{factura.referencia || `Compra #${factura.id}`}</strong><span>{factura.proveedor}</span><small>{factura.ubicacion}</small></button>
-      <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Vence'}</small>{fechaCorta(factura.pagado_at ?? factura.vence_at)}</span></div>
-      <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : vencida ? 'chip--danger' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : abonada ? 'Pago parcial' : vencida ? 'Vencida' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{abonada ? `${usd(factura.pagado)} abonado` : factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
+      <div className="billing-row-dates"><span><small>Recibida</small>{fechaCorta(factura.recibida_at)}</span><span><small>{factura.estado === 'pagada' ? 'Pagada' : 'Sin liquidar'}</small>{factura.pagado_at ? fechaCorta(factura.pagado_at) : 'Pago según proveedor'}</span></div>
+      <div className="billing-row-balance"><span className={`chip ${factura.estado === 'pagada' ? 'chip--ok' : 'chip--warn'}`}>{factura.estado === 'pagada' ? 'Pagada' : abonada ? 'Pago parcial' : 'Pendiente'}</span><strong>{usd(factura.estado === 'pendiente' ? factura.saldo : factura.total)}</strong><small>{abonada ? `${usd(factura.pagado)} abonado` : factura.estado === 'pendiente' ? 'saldo' : 'total'}</small></div>
       <div className="billing-row-actions">{factura.estado === 'pendiente' ? <><button className="btn btn-primary btn-sm" disabled={busy} onClick={() => prepararMovimiento(factura.id, factura.referencia || `Compra #${factura.id}`, factura.saldo)}>Registrar pago</button>{abonada && <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir pagos</button>}</> : <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void revertirMovimiento(factura.id)}>Revertir</button>}</div>
     </article>;
   }
@@ -248,7 +242,7 @@ export default function Facturacion() {
   if (!datos) return <div className="page billing-page"><header className="page-head"><div><span className="eyebrow">Control</span><h1>Facturación</h1></div></header><Spinner label="Cargando cartera…" />{error && <p className="error-msg">{error}</p>}</div>;
 
   return <div className="page billing-page">
-    <header className="page-head billing-page-head"><div><span className="eyebrow">Finanzas</span><h1>{tipo === 'pagar' ? 'Cuentas por pagar' : 'Facturación a restaurantes'}</h1><p className="page-sub">{tipo === 'pagar' ? 'Documentos y pagos agrupados por proveedor.' : 'Facturas generadas por el cierre y ventana operativa de tres semanas.'}</p></div></header>
+    <header className="page-head billing-page-head"><div><span className="eyebrow">Finanzas</span><h1>{tipo === 'pagar' ? 'Cuentas por pagar' : 'Cuentas por cobrar'}</h1><p className="page-sub">{tipo === 'pagar' ? 'Saldos agrupados por proveedor. Los pagos se registran manualmente.' : 'La cartera incluye la semana actual y las dos anteriores.'}</p></div></header>
     {error && <p className="notice notice--error">{error}</p>}
 
     {tipo === 'pagar' && datos.excepciones.length > 0 && <details className="billing-help billing-exceptions">
@@ -258,14 +252,13 @@ export default function Facturacion() {
 
     <section className="billing-kpis" aria-label="Resumen de cartera">
       <div><span>Por cobrar · ciclo 3 semanas</span><strong>{usd(datos.resumen.por_cobrar)}</strong><small>{datos.resumen.proyeccion_pendiente_produccion ? 'Proyección pendiente: registrar producción semanal' : datos.resumen.documentos_proyectados > 0 ? `Incluye proyección actual: ${usd(datos.resumen.por_cobrar_proyectado)}` : 'Semana actual + las 2 anteriores'}</small></div>
-      <div className={datos.resumen.vencido_cobrar > 0 ? 'is-overdue' : ''}><span>Con fecha vencida</span><strong>{usd(datos.resumen.vencido_cobrar)}</strong><small>Informativo dentro de la ventana</small></div>
-      <div><span>Total por pagar</span><strong>{usd(datos.resumen.por_pagar)}</strong><small>Incluye {usd(datos.resumen.vencido_pagar)} ya vencidos</small></div>
-      <div className={datos.resumen.vencido_pagar > 0 ? 'is-overdue' : ''}><span>De ese total, vencido</span><strong>{usd(datos.resumen.vencido_pagar)}</strong><small>No se suma otra vez · proveedores</small></div>
+      <div><span>Por pagar</span><strong>{usd(datos.resumen.por_pagar)}</strong><small>{datos.resumen.facturas_por_pagar} documentos con saldo</small></div>
+      <div><span>Regla operativa</span><strong>3 semanas</strong><small>La cartera de clientes sale por antigüedad del ciclo</small></div>
     </section>
 
     <details className="billing-help">
       <summary>Cómo funciona la cartera</summary>
-      <p>Las facturas emitidas forman parte del balance durante su semana y las dos siguientes. Si la semana actual sigue abierta, sus pedidos confirmados se muestran como proyección y se reemplazan por la factura al cerrar. Después quedan fuera de esa ventana; esto no registra un cobro ni un movimiento bancario. Los pagos a proveedores sí se confirman manualmente y los créditos de producción reducen exclusivamente la cuenta de Lisle.</p>
+      <p>Las cuentas por cobrar incluyen la semana actual y las dos anteriores. Si la semana actual sigue abierta, sus pedidos confirmados se muestran como proyección y se reemplazan por la factura al cerrar. Después salen del ciclo automáticamente; esto no registra un cobro. Las cuentas por pagar se conservan hasta que se registren pagos, y se liquidan según cada proveedor.</p>
     </details>
 
     <CollapsibleSection className="lisle-credit-panel" title="Créditos de Lisle" count={datos.creditos.filter((credito) => credito.estado === 'abierto').length} summary={datos.resumen.credito_lisle_disponible > 0 ? `${usd(datos.resumen.credito_lisle_disponible)} disponible` : 'Saldo a favor por producción'}>
@@ -286,7 +279,7 @@ export default function Facturacion() {
 
     <div className="billing-ledgers billing-ledgers--single">
       {tipo === 'cobrar' && <section className="workspace-card billing-ledger">
-        <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Entran durante tres semanas y después pasan solas al historial.</p></div><div className="billing-select-head"><span>{emitidas.length}</span></div></div>
+        <div className="workspace-card-head"><div><span className="eyebrow">Ingresos</span><h2>Facturas emitidas</h2><p>Por cobrar durante tres semanas; después pasan al historial.</p></div><div className="billing-select-head"><span>{emitidas.length}</span></div></div>
         <div className="billing-groups">
           {emitidasPorRestaurante.map(([restaurante, facturas]) => <details className="billing-group" open key={restaurante}><summary><span><strong>{restaurante}</strong><small>{facturas.length} factura{facturas.length === 1 ? '' : 's'} separadas por línea</small></span><strong>{usd(facturas.reduce((total, factura) => total + (factura.en_ciclo ? factura.saldo : factura.total), 0))}</strong></summary><div className="billing-list">{facturas.map(filaEmitida)}</div></details>)}
           {emitidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
@@ -294,7 +287,7 @@ export default function Facturacion() {
       </section>}
 
       {tipo === 'pagar' && <section className="workspace-card billing-ledger">
-        <div className="workspace-card-head"><div><span className="eyebrow">Egresos</span><h2>Facturas recibidas</h2><p>Compras pendientes de pagar.</p></div><div className="billing-select-head"><span>{recibidas.length}</span>{vista === 'pendientes' && recibidas.length > 0 && <button className="link-btn" onClick={() => setSeleccionPagar(seleccionPagar.size === recibidas.length ? new Set() : new Set(recibidas.map((factura) => factura.id)))}>{seleccionPagar.size === recibidas.length ? 'Quitar todas' : 'Seleccionar todas'}</button>}</div></div>
+        <div className="workspace-card-head"><div><span className="eyebrow">Egresos</span><h2>Facturas recibidas</h2><p>Compras agrupadas por proveedor hasta liquidarlas.</p></div><div className="billing-select-head"><span>{recibidas.length}</span>{vista === 'pendientes' && recibidas.length > 0 && <button className="link-btn" onClick={() => setSeleccionPagar(seleccionPagar.size === recibidas.length ? new Set() : new Set(recibidas.map((factura) => factura.id)))}>{seleccionPagar.size === recibidas.length ? 'Quitar todas' : 'Seleccionar todas'}</button>}</div></div>
         <div className="billing-groups">
           {recibidasPorProveedor.map(([proveedor, facturas]) => <details className="billing-group" open key={proveedor}><summary><span><strong>{proveedor}</strong><small>{facturas.length} documento{facturas.length === 1 ? '' : 's'}</small></span><strong>{usd(facturas.reduce((total, factura) => total + (factura.estado === 'pendiente' ? factura.saldo : factura.total), 0))}</strong></summary><div className="billing-list">{facturas.map(filaRecibida)}</div></details>)}
           {recibidas.length === 0 && <div className="empty-state"><strong>Sin facturas {vista === 'pendientes' ? 'pendientes' : 'pagadas'}</strong><span>No hay resultados con estos filtros.</span></div>}
@@ -305,10 +298,10 @@ export default function Facturacion() {
     {detalle && <Modal className={`billing-detail ${detalle.tipo === 'cobrar' ? 'invoice-print' : ''}`} ariaLabelledBy="billing-detail-title" onClose={() => setDetalle(null)}>
       <div className="card-head"><div><span className="eyebrow">{detalle.tipo === 'cobrar' ? 'Factura emitida' : 'Factura recibida'}</span><strong id="billing-detail-title">{detalle.tipo === 'cobrar' ? detalle.factura.numero : detalle.factura.referencia || `Compra #${detalle.factura.id}`}</strong></div><button className="icon-btn" aria-label="Cerrar" onClick={() => setDetalle(null)}><Icono name="x" /></button></div>
       {detalle.tipo === 'cobrar' ? <>
-        <div className="billing-detail-context"><div><small>Cliente</small><strong>{detalle.factura.ubicacion}</strong><span>{detalle.factura.empresa}</span></div><div><small>Periodo</small><strong>Semana {detalle.factura.semana} · {detalle.factura.anio}</strong><span>Vence {fechaCorta(detalle.factura.vence_at)}</span></div></div>
+        <div className="billing-detail-context"><div><small>Cliente</small><strong>{detalle.factura.ubicacion}</strong><span>{detalle.factura.empresa}</span></div><div><small>Periodo</small><strong>Semana {detalle.factura.semana} · {detalle.factura.anio}</strong><span>Emitida {fechaCorta(detalle.factura.emitida_at)}</span></div></div>
         <div className="invoice-detail">{detalle.factura.lineas.map((linea, indice) => <div key={indice}><span><strong>{linea.descripcion}</strong><small>{linea.cantidad} × {usd(linea.precio)}</small></span><strong>{usd(linea.importe)}</strong></div>)}</div>
       </> : <>
-        <div className="billing-detail-context"><div><small>Proveedor</small><strong>{detalle.factura.proveedor}</strong><span>{detalle.factura.ubicacion}</span></div><div><small>Fechas</small><strong>Recibida {fechaCorta(detalle.factura.recibida_at)}</strong><span>Vence {fechaCorta(detalle.factura.vence_at)}</span></div></div>
+        <div className="billing-detail-context"><div><small>Proveedor</small><strong>{detalle.factura.proveedor}</strong><span>{detalle.factura.ubicacion}</span></div><div><small>Fechas</small><strong>Recibida {fechaCorta(detalle.factura.recibida_at)}</strong><span>{detalle.factura.pagado_at ? `Último pago ${fechaCorta(detalle.factura.pagado_at)}` : 'Pago según proveedor'}</span></div></div>
         <div className="invoice-detail">{detalle.factura.lineas.map((linea, indice) => <div key={indice}><span><strong>{linea.producto}</strong><small>{linea.cantidad} {linea.unidad.toLowerCase()}{linea.peso_lb > 0 ? ` · ${linea.peso_lb.toLocaleString('es-MX')} lb` : ''}</small></span><strong>{usd(linea.importe)}</strong></div>)}</div>
       </>}
       <div className="invoice-grand-total"><span>{detalle.tipo === 'cobrar' ? detalle.factura.en_ciclo ? 'Saldo del ciclo' : 'Total histórico' : detalle.factura.estado === 'pagada' ? 'Total pagado' : 'Saldo pendiente'}</span><strong>{usd(detalle.tipo === 'cobrar' ? detalle.factura.en_ciclo ? detalle.factura.saldo : detalle.factura.total : detalle.factura.estado === 'pagada' ? detalle.factura.total : detalle.factura.saldo)}</strong></div>

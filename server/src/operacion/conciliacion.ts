@@ -542,7 +542,7 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
   const distribucionIds = distribuciones.map((d) => d.id);
   const lineasCargadas = distribucionIds.length ? await prisma.distribucion_lineas.findMany({
     where: { distribucion_id: { in: distribucionIds }, cantidad_cargada: { gt: 0 } },
-    select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true },
+    select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, pedido_linea: { select: { pedido_id: true } } },
   }) : [];
   const llaves = lineasCargadas.map((linea) => `carga:${linea.id.toString()}`);
   const movimientos = llaves.length ? await prisma.movimientos_inventario.findMany({
@@ -555,15 +555,30 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
     // movimiento físico que respalda la línea si coincide en producto,
     // cantidad, origen y destino.
     where: { negocio_id: negocioId, documento_tipo: { in: ['correccion_distribucion', 'correccion_venta'] }, fecha: { gte: inicio, lt: sumarDias(fin, 1) } },
-    select: { product_id: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
+    select: { id: true, distribucion_linea_id: true, product_id: true, cantidad: true, documento_tipo: true, documento_id: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
   }) : [];
   const movimientoPorLlave = new Map(movimientos.map((movimiento) => [movimiento.idempotency_key, movimiento]));
   for (const linea of lineasCargadas) {
     const movimiento = movimientoPorLlave.get(`carga:${linea.id.toString()}`);
     const cantidad = num0(linea.cantidad_cargada);
-    const movimientoCorrectivo = movimientosCorrectivos.some((correccion) => correccion.product_id === linea.product_id
-      && Math.abs(num0(correccion.cantidad) - cantidad) <= 0.0001
+    const correctivosDirectos = movimientosCorrectivos.filter((correccion) => correccion.distribucion_linea_id === linea.id
+      && correccion.product_id === linea.product_id
       && correccion.ubicacion_destino_id === linea.ubicacion_destino_id);
+    const correctivosLegacy = movimientosCorrectivos.filter((correccion) => correccion.distribucion_linea_id == null
+      && ((correccion.documento_tipo === 'correccion_distribucion' && correccion.documento_id === linea.distribucion_id)
+        || (correccion.documento_tipo === 'correccion_venta' && correccion.documento_id === linea.pedido_linea?.pedido_id))
+      && correccion.product_id === linea.product_id
+      && Math.abs(num0(correccion.cantidad) - cantidad) <= 0.0001
+      && (correccion.ubicacion_destino_id === linea.ubicacion_destino_id || correccion.ubicacion_origen_id === linea.ubicacion_destino_id));
+    const movimientoCorrectivo = correctivosDirectos.length > 0
+      || (correctivosDirectos.length === 0 && correctivosLegacy.length === 1);
+    const correctivoAmbiguo = correctivosDirectos.length === 0 && correctivosLegacy.length > 1;
+    if (correctivoAmbiguo) errores.push({
+      tipo: 'vinculo_pedido_incorrecto',
+      distribucion_id: Number(linea.distribucion_id),
+      distribucion_linea_id: Number(linea.id),
+      detalle: `La línea ${linea.id.toString()} tiene más de una corrección física candidata; requiere vínculo explícito.`,
+    });
     if (!movimiento) {
       if (!movimientoCorrectivo) errores.push({
         tipo: 'salida_sin_movimiento',
@@ -585,7 +600,7 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
 
   const lineasTodas = distribucionIds.length ? await prisma.distribucion_lineas.findMany({
     where: { distribucion_id: { in: distribucionIds } },
-    select: { id: true, cantidad_cargada: true },
+    select: { id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, pedido_linea: { select: { pedido_id: true } } },
   }) : [];
   const lineaPorId = new Map(lineasTodas.map((linea) => [linea.id.toString(), linea]));
   const movimientosDistribucion = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
@@ -595,10 +610,23 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
   for (const movimiento of movimientosDistribucion) {
     const idLinea = movimiento.idempotency_key.slice('carga:'.length);
     const linea = lineaPorId.get(idLinea);
-    const revertido = movimientosCorrectivos.some((correccion) => correccion.product_id === movimiento.product_id
+    const lineaRevertida = linea && movimientosCorrectivos.some((correccion) => correccion.distribucion_linea_id === BigInt(idLinea)
+      && correccion.product_id === movimiento.product_id
+      && correccion.ubicacion_origen_id === movimiento.ubicacion_destino_id
+      && correccion.ubicacion_destino_id === movimiento.ubicacion_origen_id);
+    const correctivosLegacy = movimientosCorrectivos.filter((correccion) => correccion.distribucion_linea_id == null
+      && ((correccion.documento_tipo === 'correccion_distribucion' && correccion.documento_id === movimiento.documento_id)
+        || (correccion.documento_tipo === 'correccion_venta' && linea && correccion.documento_id === linea.pedido_linea?.pedido_id))
+      && correccion.product_id === movimiento.product_id
       && Math.abs(num0(correccion.cantidad) - num0(movimiento.cantidad)) <= 0.0001
       && correccion.ubicacion_origen_id === movimiento.ubicacion_destino_id
       && correccion.ubicacion_destino_id === movimiento.ubicacion_origen_id);
+    const revertido = lineaRevertida || (!lineaRevertida && correctivosLegacy.length === 1);
+    if (correctivosLegacy.length > 1 && !lineaRevertida) errores.push({
+      tipo: 'vinculo_pedido_incorrecto',
+      distribucion_id: movimiento.documento_id ? Number(movimiento.documento_id) : undefined,
+      detalle: `El movimiento ${movimiento.id.toString()} tiene más de una corrección inversa candidata.`,
+    });
     if ((!linea || num0(linea.cantidad_cargada) <= 0) && !revertido) {
       errores.push({
         tipo: 'movimiento_sin_salida',

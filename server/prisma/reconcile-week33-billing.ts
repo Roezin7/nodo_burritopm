@@ -124,13 +124,12 @@ async function main() {
         }
 
         const maxVersion = relacionadas.reduce((max, factura) => Math.max(max, factura.version), 0);
-        const diasCredito = linea === 'carne' ? location.empresa_cliente!.dias_credito_carne : location.empresa_cliente!.dias_credito_desechables;
         const factura = await tx.facturas.create({
           data: {
             negocio_id: negocio.id, semana_id: semana.id, empresa_cliente_id: location.empresa_cliente_id,
             ubicacion_id: location.id, linea_operacion: linea,
             numero: numeroFactura(location.empresa_cliente!.codigo, location.codigo, linea),
-            emitida_at: fin, vence_at: new Date(fin.getTime() + diasCredito * 86400000), estado: 'emitida',
+            emitida_at: fin, estado: 'emitida',
             subtotal: esperado, total: esperado, version: maxVersion + 1, reemplaza_factura_id: actual?.id ?? null,
           },
         });

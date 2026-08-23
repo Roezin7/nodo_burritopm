@@ -27,6 +27,7 @@ export interface MovimientoParams {
   costoUnitario?: number | null;
   documentoTipo?: string;
   documentoId?: bigint;
+  distribucionLineaId?: bigint | null;
   comentario?: string;
   idempotencyKey: string;
   deltas: DeltaExistencia[];
@@ -123,6 +124,7 @@ export async function aplicarMovimiento(tx: Tx, p: MovimientoParams): Promise<bo
       costo_total: p.costoUnitario != null ? Math.round(p.cantidad * p.costoUnitario * 100) / 100 : null,
       documento_tipo: p.documentoTipo,
       documento_id: p.documentoId,
+      distribucion_linea_id: p.distribucionLineaId ?? null,
       usuario_id: p.usuarioId,
       comentario: p.comentario,
       idempotency_key: p.idempotencyKey,

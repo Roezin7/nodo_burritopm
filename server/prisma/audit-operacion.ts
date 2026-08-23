@@ -17,6 +17,7 @@ type Severidad = 'alta' | 'media' | 'baja';
 type Hallazgo = { severidad: Severidad; regla: string; detalle: string };
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const n = (v: unknown) => {
   const value = Number(v ?? 0);
   return Number.isFinite(value) ? value : 0;
@@ -32,7 +33,7 @@ function agregar(hallazgos: Hallazgo[], severidad: Severidad, regla: string, det
 
 async function main() {
   const negocio = await prisma.negocios.findFirstOrThrow({ where: { nombre: negocioNombre } });
-  const [semanas, facturas, compras, productos, conteos, pedidos, distribuciones, existencias] = await Promise.all([
+  const [semanas, facturas, compras, productos, conteos, pedidos, distribuciones, existencias, recetas, lotes] = await Promise.all([
     prisma.semanas_operativas.findMany({
       where: { negocio_id: negocio.id },
       include: { _count: { select: { facturas: true, inventario_semanal: true } } },
@@ -69,6 +70,14 @@ async function main() {
       where: { negocio_id: negocio.id },
       select: { ubicacion_id: true, product_id: true, cantidad_disponible: true, cantidad_reservada: true, cantidad_transito: true },
     }),
+    prisma.recetas_produccion.findMany({
+      where: { negocio_id: negocio.id },
+      select: { producto_salida_id: true, sin_costo: true },
+    }),
+    prisma.lotes_materia_prima.findMany({
+      where: { negocio_id: negocio.id, cajas_disponibles: { gt: 0 } },
+      select: { ubicacion_id: true, product_id: true, cajas_disponibles: true, ubicacion: { select: { codigo: true } } },
+    }),
   ]);
 
   const hallazgos: Hallazgo[] = [];
@@ -100,12 +109,12 @@ async function main() {
     grupo.push(factura);
     facturasPorClave.set(k, grupo);
     const totalLineas = r2(factura.lineas.reduce((suma, linea) => suma + n(linea.importe), 0));
-    if (Math.abs(totalLineas - n(factura.total)) > 0.01) {
+    if (r2(Math.abs(totalLineas - n(factura.total))) > 0.01) {
       agregar(hallazgos, 'alta', 'factura_total', `${factura.numero}: total ${n(factura.total).toFixed(2)} vs renglones ${totalLineas.toFixed(2)}.`);
     }
     for (const linea of factura.lineas) {
       const esperado = r2(n(linea.cantidad) * n(linea.precio_unitario));
-      if (Math.abs(esperado - n(linea.importe)) > 0.01) agregar(hallazgos, 'alta', 'factura_linea', `${factura.numero} · ${linea.descripcion}: importe ${n(linea.importe).toFixed(2)} vs ${esperado.toFixed(2)}.`);
+      if (r2(Math.abs(esperado - n(linea.importe))) > 0.01) agregar(hallazgos, 'alta', 'factura_linea', `${factura.numero} · ${linea.descripcion}: importe ${n(linea.importe).toFixed(2)} vs ${esperado.toFixed(2)}.`);
     }
     const pagos = r2(factura.pagos.reduce((suma, pago) => suma + n(pago.monto), 0));
     if (n(factura.total) >= 0 && pagos - n(factura.total) > 0.01) agregar(hallazgos, 'alta', 'factura_sobrepagada', `${factura.numero}: pagos ${pagos.toFixed(2)} superan total ${n(factura.total).toFixed(2)}.`);
@@ -117,7 +126,7 @@ async function main() {
   // Compras: la cuenta por pagar debe ser el total menos pagos, nunca negativa.
   for (const compra of compras) {
     const totalLineas = r2(compra.lineas.reduce((suma, linea) => suma + n(linea.costo_total), 0));
-    if (Math.abs(totalLineas - n(compra.total)) > 0.01) agregar(hallazgos, 'media', 'compra_total', `Compra ${compra.id} · ${compra.proveedor.nombre}: total ${n(compra.total).toFixed(2)} vs renglones ${totalLineas.toFixed(2)}.`);
+    if (compra.lineas.length > 0 && r2(Math.abs(totalLineas - n(compra.total))) > 0.01) agregar(hallazgos, 'media', 'compra_total', `Compra ${compra.id} · ${compra.proveedor.nombre}: total ${n(compra.total).toFixed(2)} vs renglones ${totalLineas.toFixed(2)}.`);
     const pagos = r2(compra.pagos.reduce((suma, pago) => suma + n(pago.monto), 0));
     if (pagos - n(compra.total) > 0.01) agregar(hallazgos, 'alta', 'compra_sobrepagada', `Compra ${compra.id} · ${compra.proveedor.nombre}: pagos ${pagos.toFixed(2)} superan total ${n(compra.total).toFixed(2)}.`);
     const saldo = r2(Math.max(0, n(compra.total) - pagos));
@@ -134,11 +143,34 @@ async function main() {
     if (!producto.linea_operacion || !producto.tipo_operativo) agregar(hallazgos, 'alta', 'producto_sin_clasificacion', `${producto.sku} no tiene línea/tipo operativo.`);
     if (producto.orden_operativo >= 999) agregar(hallazgos, 'media', 'producto_sin_orden', `${producto.sku} tiene orden operativo ${producto.orden_operativo}.`);
     if (producto.linea_operacion === 'carne' && producto.tipo_operativo === 'proteina' && producto.costo_promedio == null && producto.ultimo_costo == null) agregar(hallazgos, 'alta', 'proteina_sin_costo', `${producto.sku} no tiene costo promedio ni último costo.`);
+    if (producto.tipo_operativo === 'precio_fijo' && producto.precio_venta_fijo != null && producto.ultimo_costo != null && r2(n(producto.ultimo_costo) - n(producto.precio_venta_fijo)) === 0) {
+      agregar(hallazgos, 'alta', 'costo_igual_precio_venta', `${producto.sku}: costo ${n(producto.ultimo_costo).toFixed(2)} está igualado al precio fijo ${n(producto.precio_venta_fijo).toFixed(2)}.`);
+    }
+  }
+  const sinCosto = new Set(recetas.filter((receta) => receta.sin_costo).map((receta) => receta.producto_salida_id.toString()));
+  for (const producto of productos) {
+    if (sinCosto.has(producto.id.toString()) && Math.abs(n(producto.ultimo_costo)) > 0.001) {
+      agregar(hallazgos, 'alta', 'subproducto_con_costo', `${producto.sku}: la receta está marcada sin costo pero el catálogo conserva ${n(producto.ultimo_costo).toFixed(2)}.`);
+    }
   }
   for (const [linea, grupo] of ordenes) {
     const porOrden = new Map<number, string[]>();
     for (const producto of grupo) porOrden.set(producto.orden_operativo, [...(porOrden.get(producto.orden_operativo) ?? []), producto.sku]);
     for (const [orden, skus] of porOrden) if (skus.length > 1 && orden < 999) agregar(hallazgos, 'media', 'orden_catalogo_duplicado', `${linea} orden ${orden}: ${skus.join(', ')}.`);
+  }
+
+  // Las salidas de Bodega deben tener el mismo respaldo FIFO que saldo vivo.
+  // Las sucursales reciben transferencia, por eso la comparación sólo aplica a BOD.
+  const productoPorId = new Map(productos.map((producto) => [producto.id.toString(), producto]));
+  const fifoPorProducto = new Map<string, number>();
+  for (const lote of lotes) if (lote.ubicacion.codigo === 'BOD') fifoPorProducto.set(lote.product_id.toString(), (fifoPorProducto.get(lote.product_id.toString()) ?? 0) + n(lote.cajas_disponibles));
+  const existenciaBod = existencias.filter((existencia) => existencia.ubicacion_id === 1);
+  for (const existencia of existenciaBod) {
+    const producto = productoPorId.get(existencia.product_id.toString());
+    if (!producto || (producto.tipo_operativo !== 'materia_prima' && producto.linea_operacion !== 'desechables')) continue;
+    const saldo = n(existencia.cantidad_disponible);
+    const fifo = r3(fifoPorProducto.get(existencia.product_id.toString()) ?? 0);
+    if (Math.abs(saldo - fifo) > 0.001) agregar(hallazgos, 'alta', 'fifo_vs_existencia', `${producto.sku} en BOD: existencia ${saldo.toFixed(3)} vs FIFO ${fifo.toFixed(3)}.`);
   }
 
   // El Excel maestro fija CUP HOLDER como el octavo desechable. Se conserva
@@ -180,14 +212,14 @@ async function main() {
   // Los negativos pueden ser provisionales de lunes a viernes, pero deben quedar visibles.
   for (const existencia of existencias) {
     if (n(existencia.cantidad_disponible) < -0.001 || n(existencia.cantidad_reservada) < -0.001 || n(existencia.cantidad_transito) < -0.001) {
-      agregar(hallazgos, 'baja', 'existencia_negativa', `Ubicación ${existencia.ubicacion_id} · producto ${existencia.product_id}: disponible ${n(existencia.cantidad_disponible)}, reservada ${n(existencia.cantidad_reservada)}, tránsito ${n(existencia.cantidad_transito)}.`);
+      agregar(hallazgos, 'alta', 'existencia_negativa', `Ubicación ${existencia.ubicacion_id} · producto ${existencia.product_id}: disponible ${n(existencia.cantidad_disponible)}, reservada ${n(existencia.cantidad_reservada)}, tránsito ${n(existencia.cantidad_transito)}.`);
     }
   }
 
   const resumen = {
     negocio: negocio.nombre,
     revisado_at: new Date().toISOString(),
-    registros: { semanas: semanas.length, facturas: facturas.length, compras: compras.length, productos_activos: productos.length, conteos: conteos.length, pedidos: pedidos.length, distribuciones: distribuciones.length, existencias: existencias.length },
+    registros: { semanas: semanas.length, facturas: facturas.length, compras: compras.length, productos_activos: productos.length, conteos: conteos.length, pedidos: pedidos.length, distribuciones: distribuciones.length, existencias: existencias.length, recetas: recetas.length, lotes: lotes.length },
     hallazgos,
     totales: {
       alta: hallazgos.filter((h) => h.severidad === 'alta').length,

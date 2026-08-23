@@ -126,9 +126,9 @@ async function main() {
   const catDesechables = await prisma.categorias.upsert({ where: { negocio_id_nombre: { negocio_id: org.id, nombre: 'Desechables' } }, update: {}, create: { negocio_id: org.id, nombre: 'Desechables', orden: 1 } });
 
   const empresas = {
-    BPM: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'BPM' } }, update: {}, create: { negocio_id: org.id, codigo: 'BPM', nombre: 'Burrito Parrilla Mexicana', tipo: 'interna', dias_credito_carne: 14, dias_credito_desechables: 14 } }),
-    AUR: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'AUR' } }, update: {}, create: { negocio_id: org.id, codigo: 'AUR', nombre: 'Taquería Aurora', tipo: 'externa', dias_credito_carne: 7, dias_credito_desechables: 7 } }),
-    LBT: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'LBT' } }, update: {}, create: { negocio_id: org.id, codigo: 'LBT', nombre: 'Los Burritos Tapatíos', tipo: 'externa', dias_credito_carne: 0, dias_credito_desechables: 0 } }),
+    BPM: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'BPM' } }, update: {}, create: { negocio_id: org.id, codigo: 'BPM', nombre: 'Burrito Parrilla Mexicana', tipo: 'interna' } }),
+    AUR: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'AUR' } }, update: {}, create: { negocio_id: org.id, codigo: 'AUR', nombre: 'Taquería Aurora', tipo: 'externa' } }),
+    LBT: await prisma.empresas_clientes.upsert({ where: { negocio_id_codigo: { negocio_id: org.id, codigo: 'LBT' } }, update: {}, create: { negocio_id: org.id, codigo: 'LBT', nombre: 'Los Burritos Tapatíos', tipo: 'externa' } }),
   };
   for (const [nombre, codigo] of ubicacionesBpm) {
     await prisma.ubicaciones.upsert({

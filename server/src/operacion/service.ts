@@ -277,7 +277,7 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       produccion_extraordinaria: skusProduccionExtraordinaria.has(p.sku),
       es_cargo_compra: esAdmin ? p.es_cargo_compra : undefined,
     })),
-    proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre, dias_credito: p.dias_credito })) : [],
+    proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre })) : [],
     plantillas: esAdmin ? plantillas.map((p) => ({
       id: Number(p.id), nombre: p.nombre, codigo: p.codigo, linea: p.linea_operacion,
       dia_semana: p.dia_semana, conductor: p.conductor,
@@ -475,7 +475,7 @@ async function corregirLineaDistribuida(
             productId: input.producto.id,
             cantidad,
             producto: input.producto.nombre,
-            permitirFaltante: true,
+            permitirFaltante: false,
             costoFaltante: costoUnitario,
           });
           costoUnitario = salidaFifo.costo_unitario ?? costoUnitario;
@@ -491,13 +491,14 @@ async function corregirLineaDistribuida(
           costoUnitario,
           documentoTipo: 'correccion_venta',
           documentoId: input.pedidoId,
+          distribucionLineaId: input.linea.id,
           comentario: recibida ? 'Aumento de venta ya entregada' : 'Aumento de venta ya cargada',
           idempotencyKey: clave,
           deltas: recibida ? [
             { ubicacionId: bodega.id, productId: input.producto.id, disponible: -cantidad },
             { ubicacionId: input.linea.ubicacion_destino_id, productId: input.producto.id, disponible: cantidad, costoUnitario },
           ] : [{ ubicacionId: bodega.id, productId: input.producto.id, disponible: -cantidad, transito: cantidad }],
-          permitirDisponibleNegativo: true,
+          permitirDisponibleNegativo: bodega.codigo === 'CARN',
         });
         const costoDelta = salidaFifo?.costo_total ?? r2(cantidad * (costoUnitario ?? 0));
         costoNuevo = r2(costoAnterior + costoDelta);
@@ -546,13 +547,14 @@ async function corregirLineaDistribuida(
           costoUnitario: cantidad > 0 ? r4(costoRestaurado / cantidad) : costoUnitario,
           documentoTipo: 'correccion_venta',
           documentoId: input.pedidoId,
+          distribucionLineaId: input.linea.id,
           comentario: recibida ? 'Disminución de venta ya entregada' : 'Disminución de venta ya cargada',
           idempotencyKey: clave,
           deltas: recibida ? [
             { ubicacionId: input.linea.ubicacion_destino_id, productId: input.producto.id, disponible: -cantidad },
             { ubicacionId: bodega.id, productId: input.producto.id, disponible: cantidad, costoUnitario },
           ] : [{ ubicacionId: bodega.id, productId: input.producto.id, disponible: cantidad, transito: -cantidad, costoUnitario }],
-          permitirDisponibleNegativo: true,
+          permitirDisponibleNegativo: bodega.codigo === 'CARN',
         });
       }
       costoUnitario = nueva > 0 ? r4(costoNuevo / nueva) : costoUnitario;
@@ -1433,7 +1435,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     }
 
     const c = await tx.compras.create({
-      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, vence_at: sumarDias(f, proveedor.dias_credito), referencia: input.referencia, total, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
+      data: { negocio_id: negocioId, proveedor_id: proveedor.id, ubicacion_id: ubicacion.id, fecha: f, referencia: input.referencia, total, registrado_por: usuarioId, idempotency_key: input.idempotency_key },
     });
     for (const [i, l] of input.lineas.entries()) {
       const pid = BigInt(l.product_id);
@@ -1490,7 +1492,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
     if (!input.idempotency_key || !esErrorPrisma(error, 'P2002')) throw error;
     compra = await ejecutar();
   }
-  return { id: Number(compra.id), total, vence_at: iso(compra.vence_at) };
+  return { id: Number(compra.id), total };
 }
 
 /**
@@ -1578,7 +1580,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
     await tx.compra_lineas.deleteMany({ where: { compra_id: compraId } });
     await tx.compras.update({
       where: { id: compraId },
-      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, vence_at: sumarDias(nuevaFecha, proveedor.dias_credito), referencia: input.referencia, total },
+      data: { proveedor_id: proveedor.id, fecha: nuevaFecha, referencia: input.referencia, total },
     });
 
     for (const [indice, linea] of input.lineas.entries()) {
@@ -1649,7 +1651,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
         datos: { anterior: { fecha: iso(anterior.fecha), total: num0(anterior.total) }, nuevo: { fecha: input.fecha, total } },
       },
     });
-    return { id: Number(compraId), total, vence_at: iso(sumarDias(nuevaFecha, proveedor.dias_credito)) };
+    return { id: Number(compraId), total };
   });
 }
 
@@ -2607,7 +2609,7 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
     resumen_proteinas: resumenProteinas,
-    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), vence_at: iso(c.vence_at), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
+    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
     // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.

@@ -70,7 +70,7 @@ export default function PanelAdmin() {
 
       <section className="card overview-card">
         <div className="card-head"><div><strong>Cuentas del cierre</strong><div className="muted">Saldos del cierre</div></div><Link className="link-btn" to={rutaSemana('/semana/cierre')}>Abrir cierre →</Link></div>
-        <div className="cash-grid"><div><small>Por cobrar · ciclo 3 semanas</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>semana actual + 2 anteriores</span></div><div><small>Por pagar al corte</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras con saldo</span></div><div><small>Balance operativo</small><strong>{usd(p.cartera.balance_neto)}</strong><span>inventario + por cobrar − por pagar</span></div></div>
+        <div className="cash-grid"><div><small>Por cobrar · ciclo 3 semanas</small><strong>{usd(p.cartera.por_cobrar)}</strong><span>semana actual + 2 anteriores</span></div><div><small>Por pagar</small><strong>{usd(p.cartera.por_pagar)}</strong><span>{p.cartera.compras_pendientes} compras con saldo · pago por proveedor</span></div><div><small>Balance operativo</small><strong>{usd(p.cartera.balance_neto)}</strong><span>inventario + por cobrar − por pagar</span></div></div>
       </section>
 
       <section className="card overview-card">

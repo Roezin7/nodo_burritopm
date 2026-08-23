@@ -274,8 +274,7 @@ async function importarSaldosPendientes(negocioId: bigint, adminId: bigint) {
         const total = Math.round(importes[linea] * 100) / 100;
         if (total <= 0) continue;
         const empresa = await prisma.empresas_clientes.findUniqueOrThrow({ where: { id: ubic.empresa_cliente_id } });
-        const diasCredito = linea === 'carne' ? empresa.dias_credito_carne : empresa.dias_credito_desechables;
-        await upsertSaldo({ negocioId, semanaId: semana.id, empresaId: empresa.id, ubicacionId: ubic.id, linea, numero: `2026-${sem.numero}-${empresa.codigo}-${codigo}-${linea === 'carne' ? 'M' : 'D'}-OPEN`, emitida: date(sem.sabado), vence: new Date(date(sem.sabado).getTime() + diasCredito * 86400000), total, descripcion: `Saldo pendiente importado de Billing semana ${sem.numero}` });
+        await upsertSaldo({ negocioId, semanaId: semana.id, empresaId: empresa.id, ubicacionId: ubic.id, linea, numero: `2026-${sem.numero}-${empresa.codigo}-${codigo}-${linea === 'carne' ? 'M' : 'D'}-OPEN`, emitida: date(sem.sabado), total, descripcion: `Saldo pendiente importado de Billing semana ${sem.numero}` });
       }
     }
   }
@@ -288,7 +287,7 @@ async function importarSaldosPendientes(negocioId: bigint, adminId: bigint) {
   });
   const lombard = ubicaciones.get('LOMBA')!;
   const saldo26 = n(billing.getWorksheet('Billing (28)')!.getCell('BW6').value);
-  await upsertSaldo({ negocioId, semanaId: semana26.id, empresaId: bpm.id, ubicacionId: lombard.id, linea: 'carne', numero: '2026-26-BPM-SALDO-OPEN', emitida: date('2026-06-27'), vence: date('2026-07-11'), total: saldo26, descripcion: 'Saldo anterior Billing 26 arrastrado por el archivo 3Q' });
+  await upsertSaldo({ negocioId, semanaId: semana26.id, empresaId: bpm.id, ubicacionId: lombard.id, linea: 'carne', numero: '2026-26-BPM-SALDO-OPEN', emitida: date('2026-06-27'), total: saldo26, descripcion: 'Saldo anterior Billing 26 arrastrado por el archivo 3Q' });
 
   await importarCuentasPorPagar(negocioId, adminId, billing.getWorksheet('Billing (28)')!);
 }
@@ -308,17 +307,17 @@ async function importarCuentasPorPagar(negocioId: bigint, adminId: bigint, ws: E
     if (!proveedor) throw new Error(`Falta proveedor para cuenta por pagar: ${nombre}`);
     const referencia = `IMPORT-3Q-W28-${proveedor.id}`;
     const existente = await prisma.compras.findFirst({ where: { negocio_id: negocioId, referencia } });
-    const data = { proveedor_id: proveedor.id, ubicacion_id: carniceria.id, fecha: date('2026-07-11'), vence_at: date('2026-07-11'), referencia, total, estado: 'pendiente' as const, registrado_por: adminId };
+    const data = { proveedor_id: proveedor.id, ubicacion_id: carniceria.id, fecha: date('2026-07-11'), referencia, total, estado: 'pendiente' as const, registrado_por: adminId };
     if (existente) await prisma.compras.update({ where: { id: existente.id }, data });
     else await prisma.compras.create({ data: { negocio_id: negocioId, ...data } });
   }
 }
 
-async function upsertSaldo(input: { negocioId: bigint; semanaId: bigint; empresaId: bigint; ubicacionId: bigint; linea: 'carne' | 'desechables'; numero: string; emitida: Date; vence: Date; total: number; descripcion: string }) {
+async function upsertSaldo(input: { negocioId: bigint; semanaId: bigint; empresaId: bigint; ubicacionId: bigint; linea: 'carne' | 'desechables'; numero: string; emitida: Date; total: number; descripcion: string }) {
   const existente = await prisma.facturas.findUnique({ where: { negocio_id_numero_version: { negocio_id: input.negocioId, numero: input.numero, version: 1 } } });
   const factura = existente
-    ? await prisma.facturas.update({ where: { id: existente.id }, data: { semana_id: input.semanaId, empresa_cliente_id: input.empresaId, ubicacion_id: input.ubicacionId, linea_operacion: input.linea, emitida_at: input.emitida, vence_at: input.vence, estado: 'emitida', subtotal: input.total, total: input.total } })
-    : await prisma.facturas.create({ data: { negocio_id: input.negocioId, semana_id: input.semanaId, empresa_cliente_id: input.empresaId, ubicacion_id: input.ubicacionId, linea_operacion: input.linea, numero: input.numero, emitida_at: input.emitida, vence_at: input.vence, estado: 'emitida', subtotal: input.total, total: input.total } });
+    ? await prisma.facturas.update({ where: { id: existente.id }, data: { semana_id: input.semanaId, empresa_cliente_id: input.empresaId, ubicacion_id: input.ubicacionId, linea_operacion: input.linea, emitida_at: input.emitida, estado: 'emitida', subtotal: input.total, total: input.total } })
+    : await prisma.facturas.create({ data: { negocio_id: input.negocioId, semana_id: input.semanaId, empresa_cliente_id: input.empresaId, ubicacion_id: input.ubicacionId, linea_operacion: input.linea, numero: input.numero, emitida_at: input.emitida, estado: 'emitida', subtotal: input.total, total: input.total } });
   await prisma.factura_lineas.deleteMany({ where: { factura_id: factura.id } });
   await prisma.factura_lineas.create({ data: { factura_id: factura.id, descripcion: input.descripcion, cantidad: 1, precio_unitario: input.total, importe: input.total } });
 }

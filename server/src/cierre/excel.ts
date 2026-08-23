@@ -709,10 +709,10 @@ function llenarLibroCliente(wb: ExcelJS.Workbook, d: Datos, tipo: 'lbt' | 'auror
     const ubicacion = d.ubicaciones.find((u) => u.codigo === codigo);
     const facturas = d.semana.facturas.filter((f) => f.ubicacion.codigo === codigo);
     // Los estados de cuenta originales se emiten el lunes posterior al cierre del sábado.
+    // No se exporta vencimiento: CxC se administra por el ciclo móvil de 3 semanas.
     const fechaEmision = sumarDias(d.semana.termina_at, 2);
-    const fechaVence = sumarDias(fechaEmision, tipo === 'aurora' ? 7 : 0);
     ws.getCell(1, base + 8).value = excelDate(fechaEmision);
-    ws.getCell(2, base + 8).value = excelDate(fechaVence);
+    ws.getCell(2, base + 8).value = null;
     ws.getCell(4, base + 8).value = `${d.semana.anio}-${d.semana.semana}`;
     if (ubicacion) {
       ws.getCell(5, base).value = ubicacion.nombre;

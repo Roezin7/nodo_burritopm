@@ -404,14 +404,12 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     const lineas = [...g.items.values()].filter((item) => item.cantidad > 0);
     if (!lineas.length) return [];
     const total = r2(lineas.reduce((suma, item) => suma + item.cantidad * item.precio, 0));
-    const diasCredito = g.linea === 'carne' ? g.empresa.dias_credito_carne : g.empresa.dias_credito_desechables;
     return [{
       numero: numeroFactura(semana.anio, semana.semana, g.empresa.codigo, g.ubicacion.codigo, g.linea),
       ubicacion_id: g.ubicacion.id.toString(),
       empresa: g.empresa.nombre,
       ubicacion: g.ubicacion.nombre,
       linea: g.linea,
-      vence_at: iso(sumarDias(semana.termina_at, diasCredito)),
       productos: lineas.length,
       unidades: r3(lineas.reduce((suma, item) => suma + item.cantidad, 0)),
       total,
@@ -467,7 +465,6 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       empresa: factura.empresa.nombre,
       ubicacion: factura.ubicacion.nombre,
       linea: factura.linea_operacion,
-      vence_at: iso(factura.vence_at),
       productos: factura.lineas.length,
       unidades: r3(factura.lineas.reduce((suma, linea) => suma + num0(linea.cantidad), 0)),
       total: num0(factura.total),
@@ -595,9 +592,8 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       const total = r2(items.reduce((a, i) => a + i.cantidad * i.precio, 0));
       const numero = numeroFactura(semana.anio, semana.semana, g.empresa.codigo, g.ubicacion.codigo, g.linea);
       const previa = anteriores.find((f) => f.numero === numero);
-      const diasCredito = g.linea === 'carne' ? g.empresa.dias_credito_carne : g.empresa.dias_credito_desechables;
       const f = await tx.facturas.create({
-        data: { negocio_id: negocioId, semana_id: semana.id, empresa_cliente_id: g.empresa.id, ubicacion_id: g.ubicacion.id, linea_operacion: g.linea, numero, emitida_at: semana.termina_at, vence_at: sumarDias(semana.termina_at, diasCredito), estado: 'emitida', subtotal: total, total, version: (previa?.version ?? 0) + 1, reemplaza_factura_id: previa?.id ?? null },
+        data: { negocio_id: negocioId, semana_id: semana.id, empresa_cliente_id: g.empresa.id, ubicacion_id: g.ubicacion.id, linea_operacion: g.linea, numero, emitida_at: semana.termina_at, estado: 'emitida', subtotal: total, total, version: (previa?.version ?? 0) + 1, reemplaza_factura_id: previa?.id ?? null },
       });
       await tx.factura_lineas.createMany({ data: items.map((i) => ({ factura_id: f.id, product_id: i.productId, descripcion: i.descripcion, cantidad: i.cantidad, precio_unitario: i.precio, importe: r2(i.cantidad * i.precio) })) });
       const ajustesIds = items.flatMap((item) => item.ajusteId ? [item.ajusteId] : []);
@@ -812,7 +808,7 @@ export async function listarCierres(negocioId: bigint) {
   return semanas.map((s) => ({
     id: Number(s.id), anio: s.anio, semana: s.semana, inicia_at: iso(s.inicia_at), termina_at: iso(s.termina_at), estado: s.estado,
     valor_carne: num0(s.valor_carne), valor_congelado: num0(s.valor_congelado), valor_desechables: num0(s.valor_desechables), cuentas_por_cobrar: num0(s.cuentas_por_cobrar), cuentas_por_pagar: num0(s.cuentas_por_pagar), balance_neto: num0(s.balance_neto),
-    facturas: s.facturas.map((f) => ({ id: Number(f.id), numero: f.numero, version: f.version, empresa: f.empresa.nombre, ubicacion: f.ubicacion.nombre, linea: f.linea_operacion, emitida_at: iso(f.emitida_at), vence_at: iso(f.vence_at), estado: f.estado, total: num0(f.total), pagado: r2(f.pagos.reduce((a, p) => a + num0(p.monto), 0)), lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })) })),
+    facturas: s.facturas.map((f) => ({ id: Number(f.id), numero: f.numero, version: f.version, empresa: f.empresa.nombre, ubicacion: f.ubicacion.nombre, linea: f.linea_operacion, emitida_at: iso(f.emitida_at), estado: f.estado, total: num0(f.total), pagado: r2(f.pagos.reduce((a, p) => a + num0(p.monto), 0)), lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })) })),
   }));
 }
 
@@ -830,7 +826,7 @@ export async function listarCartera(negocioId: bigint) {
         pagos: { orderBy: { pagado_at: 'desc' } },
         lineas: { orderBy: { descripcion: 'asc' } },
       },
-      orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
+      orderBy: [{ emitida_at: 'asc' }, { id: 'desc' }],
     }),
     prisma.compras.findMany({
       where: { negocio_id: negocioId, estado: { in: ['pendiente', 'pagada'] } },
@@ -840,7 +836,7 @@ export async function listarCartera(negocioId: bigint) {
         pagos: { orderBy: [{ pagado_at: 'desc' }, { id: 'desc' }] },
         lineas: { include: { producto: { select: { nombre: true, es_cargo_compra: true, unidad_distribucion: { select: { nombre: true } } } } } },
       },
-      orderBy: [{ vence_at: 'asc' }, { id: 'desc' }],
+      orderBy: [{ fecha: 'asc' }, { id: 'desc' }],
     }),
     prisma.ajustes_facturacion.findMany({
       where: { negocio_id: negocioId, tipo: 'credito' },
@@ -911,7 +907,6 @@ export async function listarCartera(negocioId: bigint) {
       anio: f.semana.anio,
       semana: f.semana.semana,
       emitida_at: iso(f.emitida_at),
-      vence_at: iso(f.vence_at),
       estado: f.estado,
       total: num0(f.total),
       pagado,
@@ -933,7 +928,6 @@ export async function listarCartera(negocioId: bigint) {
     proveedor: c.proveedor.nombre,
     ubicacion: c.ubicacion.nombre,
     recibida_at: iso(c.fecha),
-    vence_at: iso(c.vence_at),
     estado: saldo <= 0 ? 'pagada' : 'pendiente',
     total: num0(c.total),
     pagado,
@@ -949,7 +943,6 @@ export async function listarCartera(negocioId: bigint) {
   }});
   const pendientesEmitidas = emitidas.filter((f) => f.en_ciclo && f.saldo > 0);
   const pendientesRecibidas = recibidas.filter((f) => f.estado === 'pendiente');
-  const hoy = await hoyNegocio(negocioId);
   const referencias = new Map<string, number>();
   for (const factura of pendientesRecibidas) if (factura.referencia?.trim()) {
     const clave = `${factura.proveedor}:${factura.referencia.trim().toLowerCase()}`;
@@ -961,8 +954,11 @@ export async function listarCartera(negocioId: bigint) {
     const totalLineas = r2(factura.lineas.reduce((total, linea) => total + linea.importe, 0));
     if (!referencia) alertas.push({ tipo: 'sin_referencia', titulo: 'Documento sin referencia', detalle: `${factura.proveedor} · ${factura.total.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
     else if ((referencias.get(`${factura.proveedor}:${referencia.toLowerCase()}`) ?? 0) > 1) alertas.push({ tipo: 'referencia_duplicada', titulo: 'Referencia repetida', detalle: `${factura.proveedor} · ${referencia}`, compra_id: factura.id, proveedor: factura.proveedor });
-    if (Math.abs(totalLineas - factura.total) > 0.01) alertas.push({ tipo: 'total_diferente', titulo: 'Total distinto a los renglones', detalle: `${factura.proveedor} · factura ${factura.total.toFixed(2)} · renglones ${totalLineas.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
-    if (factura.pagado > 0 && factura.vence_at < hoy) alertas.push({ tipo: 'abono_vencido', titulo: 'Saldo parcial vencido', detalle: `${factura.proveedor} · saldo ${factura.saldo.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
+    // Una factura puede traer redondeos de centavos entre el total y sus líneas.
+    // Normalizamos antes de comparar para no presentar falsos positivos por
+    // representación binaria de Decimal como number.
+    const diferenciaLineas = r2(Math.abs(totalLineas - factura.total));
+    if (factura.lineas.length > 0 && diferenciaLineas > 0.01) alertas.push({ tipo: 'total_diferente', titulo: 'Total distinto a los renglones', detalle: `${factura.proveedor} · factura ${factura.total.toFixed(2)} · renglones ${totalLineas.toFixed(2)}`, compra_id: factura.id, proveedor: factura.proveedor });
     return alertas;
   });
 
@@ -972,10 +968,8 @@ export async function listarCartera(negocioId: bigint) {
       por_cobrar_proyectado: r2(documentosProyectados.reduce((total, documento) => total + documento.total, 0)),
       documentos_proyectados: documentosProyectados.length,
       proyeccion_pendiente_produccion: proyeccionPendienteProduccion,
-      vencido_cobrar: r2(pendientesEmitidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
       facturas_por_cobrar: pendientesEmitidas.length,
       por_pagar: r2(pendientesRecibidas.reduce((total, f) => total + f.saldo, 0)),
-      vencido_pagar: r2(pendientesRecibidas.filter((f) => f.vence_at < hoy).reduce((total, f) => total + f.saldo, 0)),
       facturas_por_pagar: pendientesRecibidas.length,
       credito_lisle_disponible: carteraTresSemanas.creditoDisponible,
     },
@@ -1199,5 +1193,5 @@ export async function detalleFactura(negocioId: bigint, facturaId: bigint) {
     include: { empresa: true, ubicacion: true, lineas: { orderBy: { descripcion: 'asc' } }, pagos: true },
   });
   if (!f) throw new HttpError(404, 'Factura no encontrada');
-  return { id: Number(f.id), numero: f.numero, version: f.version, empresa: f.empresa.nombre, ubicacion: f.ubicacion.nombre, linea: f.linea_operacion, emitida_at: iso(f.emitida_at), vence_at: iso(f.vence_at), estado: f.estado, total: num0(f.total), pagado: r2(f.pagos.reduce((a, p) => a + num0(p.monto), 0)), lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })) };
+  return { id: Number(f.id), numero: f.numero, version: f.version, empresa: f.empresa.nombre, ubicacion: f.ubicacion.nombre, linea: f.linea_operacion, emitida_at: iso(f.emitida_at), estado: f.estado, total: num0(f.total), pagado: r2(f.pagos.reduce((a, p) => a + num0(p.monto), 0)), lineas: f.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: num0(l.cantidad), precio: num0(l.precio_unitario), importe: num0(l.importe) })) };
 }

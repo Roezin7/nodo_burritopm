@@ -752,7 +752,10 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
           productId: l.product_id,
           cantidad: cargada,
           producto: producto.nombre,
-          permitirFaltante: true,
+          // Un despacho de desechables sólo puede salir si existe una capa FIFO
+          // que lo respalde. El fallback por precio/catálogo ocultaba faltantes
+          // y dejaba existencias negativas en Bodega.
+          permitirFaltante: false,
           costoFaltante: costo,
         });
         costo = salidaFifo.costo_unitario;
@@ -782,7 +785,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
                 { ubicacionId: bodega.id, productId: l.product_id, disponible: -cargada },
                 { ubicacionId: l.ubicacion_destino_id, productId: l.product_id, disponible: cargada, costoUnitario: costo },
               ],
-          permitirDisponibleNegativo: bodega.codigo === 'CARN' || producto?.linea_operacion === 'desechables',
+          permitirDisponibleNegativo: bodega.codigo === 'CARN',
         });
         if (aplicada && salidaFifo) {
           const movimiento = await tx.movimientos_inventario.findUnique({ where: { idempotency_key: `carga:${l.id}` }, select: { id: true } });

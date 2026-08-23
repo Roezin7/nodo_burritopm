@@ -183,7 +183,7 @@ async function main() {
     const providers = new Map((await tx.proveedores.findMany({ where: { negocio_id: negocio.id }, select: { id: true, nombre: true } })).map(p=>[p.nombre.toUpperCase(),p]));
     for (const account of cuentas) {
       const provider=providers.get(account.proveedor.toUpperCase()); if(!provider) throw new Error(`Proveedor sin mapear: ${account.proveedor}`);
-      await tx.compras.create({ data: { negocio_id: negocio.id, proveedor_id: provider.id, ubicacion_id: carniceria.id, fecha: endDelete, vence_at: endDelete, referencia: `APERTURA-W32-${provider.id}`, total: account.total, estado: 'pendiente', registrado_por: admin.id, idempotency_key: `reset-week32-cxp:${provider.id}` } });
+      await tx.compras.create({ data: { negocio_id: negocio.id, proveedor_id: provider.id, ubicacion_id: carniceria.id, fecha: endDelete, referencia: `APERTURA-W32-${provider.id}`, total: account.total, estado: 'pendiente', registrado_por: admin.id, idempotency_key: `reset-week32-cxp:${provider.id}` } });
     }
     await tx.importaciones_sistema.create({ data: { negocio_id: negocio.id, clave: KEY } });
     await tx.auditoria_operativa.create({ data: { negocio_id: negocio.id, usuario_id: admin.id, accion: 'reiniciar_operacion_semana_32', entidad: 'semana_operativa', entidad_id: week32.id, datos: { eliminadas: { pedidos: orders.count, distribuciones: distributionIds.length, compras: purchases.length, producciones: productions.length, conteos: counts.length, facturas: invoices.length }, inventario: calculated, cuentas } } });
