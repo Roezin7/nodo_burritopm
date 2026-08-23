@@ -316,8 +316,10 @@ semanal y cierra los pedidos como una sola unidad. Una semana cerrada no cambia 
 del inventario vivo.
 
 La última semana puede reabrirse para corregir compras, producción o ventas. Al reabrir se
-anulan las facturas vigentes, se restauran los ajustes aplicados y el siguiente cierre crea una
-nueva versión del folio. No se permite reabrir detrás de operación posterior incompatible.
+anulan las facturas vigentes, se restaura el arrastre técnico del cierre y el siguiente cierre
+crea una nueva versión del folio. Los conteos físicos se conservan como evidencia y fotografía
+operativa; si se captura una corrección, el flujo de reemplazo revierte el conteo anterior de
+forma explícita. No se permite reabrir detrás de operación posterior incompatible.
 
 ## Facturación
 

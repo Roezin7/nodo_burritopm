@@ -105,7 +105,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
     orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
   });
   const ids = productos.map((p) => p.id);
-  const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior, semanaAnterior] = await Promise.all([
+  const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior, semanaAnterior, movimientosConteo] = await Promise.all([
     prisma.existencias.findMany({ where: { ubicacion_id: ubicacion.id, product_id: { in: ids } } }),
     prisma.compras.findMany({
       where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, estado: { not: 'cancelada' } },
@@ -149,6 +149,20 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
         },
       },
     }),
+    // Un conteo físico final es una corrección de la fotografía, no una entrada
+    // operativa. Si se conserva al reabrir una semana, hay que excluir su delta
+    // al reconstruir la apertura desde el saldo vivo para no convertirlo en
+    // inventario inicial artificial.
+    prisma.movimientos_inventario.findMany({
+      where: {
+        negocio_id: negocioId,
+        product_id: { in: ids },
+        fecha: { gte: inicio, lte: fin },
+        documento_tipo: 'conteo',
+        OR: [{ ubicacion_destino_id: ubicacion.id }, { ubicacion_origen_id: ubicacion.id }],
+      },
+      select: { product_id: true, tipo: true, cantidad: true },
+    }),
   ]);
 
   const acumulados = new Map(ids.map((id) => [id.toString(), vacio()]));
@@ -175,6 +189,12 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   }
 
   const actualDe = new Map(existencias.map((e) => [e.product_id.toString(), num0(e.cantidad_disponible)]));
+  const ajustesConteoDe = new Map<string, number>();
+  for (const movimiento of movimientosConteo) {
+    const key = movimiento.product_id.toString();
+    const signo = movimiento.tipo === 'ajuste_negativo' ? -1 : 1;
+    ajustesConteoDe.set(key, r3((ajustesConteoDe.get(key) ?? 0) + signo * num0(movimiento.cantidad)));
+  }
   const inicialDe = new Map(inicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const cierreAnteriorDe = new Map(cierreAnterior?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const snapshotAnteriorDe = new Map(semanaAnterior?.inventario_semanal
@@ -184,13 +204,14 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   const filas = productos.map((p) => {
     const a = acumulados.get(p.id.toString()) ?? vacio();
     const actual = actualDe.get(p.id.toString()) ?? 0;
+    const actualSinConteos = r3(actual - (ajustesConteoDe.get(p.id.toString()) ?? 0));
     // El cierre físico anterior es la apertura más confiable. Solo si no existe se
     // reconstruye hacia atrás desde el saldo vivo y los movimientos de la semana.
     const inicialCalculado = normalizarSaldoApertura(usarCierreAnterior
       ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
       : semanaAnterior
         ? (snapshotAnteriorDe.get(p.id.toString()) ?? 0)
-        : r3(actual - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
+        : r3(actualSinConteos - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
           + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2));
     // También protege semanas que ya tenían una apertura histórica negativa fijada.
     const inicialCantidad = normalizarSaldoApertura(inicialDe.get(p.id.toString()) ?? inicialCalculado);

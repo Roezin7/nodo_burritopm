@@ -4,7 +4,6 @@ import { num, num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { preciosVentaSemana, sincronizarDespachosConfirmados } from '../operacion/service.js';
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
-import { eliminarConteoEnTx } from '../conteos/service.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
 import { aplicarMovimiento } from '../ledger/service.js';
@@ -789,14 +788,37 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
     await tx.movimientos_inventario.deleteMany({
       where: { negocio_id: negocioId, documento_tipo: 'cierre_arrastre', documento_id: s.id },
     });
-    // El ajuste físico y la semana se revierten juntos; nunca queda una reapertura parcial.
-    for (const inventario of inventariosFinales) await eliminarConteoEnTx(tx, negocioId, inventario.id, usuarioId, 'reabrir_semana');
+    // El conteo físico es evidencia operativa y la última fotografía válida del
+    // inventario. Al reabrir no se debe eliminar ni revertir: hacerlo borra el
+    // conteo y sus capas FIFO, y deja el saldo vivo en una fotografía anterior.
+    // El flujo normal de recaptura reemplaza explícitamente el conteo anterior
+    // (revirtiéndolo y registrando el nuevo), por lo que conservarlo aquí no
+    // duplica el inventario.
     await tx.inventario_semanal.deleteMany({ where: { semana_id: s.id } });
+    await tx.auditoria_operativa.create({
+      data: {
+        negocio_id: negocioId,
+        usuario_id: usuarioId,
+        accion: 'reabrir_semana',
+        entidad: 'semana',
+        entidad_id: s.id,
+        datos: {
+          arrastres_revertidos: ajustesArrastre.length,
+          conteos_fisicos_conservados: inventariosFinales.map((inventario) => Number(inventario.id)),
+          snapshots_eliminados: true,
+        },
+      },
+    });
   });
-  // La apertura se fija después de quitar el ajuste final. Esto también repara semanas antiguas
-  // que fueron cerradas antes de que existiera la fotografía de inventario inicial.
+  // La apertura se fija después de quitar el arrastre técnico. El conteo físico
+  // conservado queda fuera de la reconstrucción hacia atrás y sigue siendo la
+  // referencia para esta semana.
   if (carniceria) await asegurarInventarioInicialSemanal(negocioId, usuarioId, iso(s.inicia_at), carniceria.id);
-  return { ok: true, inventarios_finales_revertidos: inventariosFinales.length };
+  return {
+    ok: true,
+    inventarios_finales_revertidos: 0,
+    inventarios_finales_conservados: inventariosFinales.length,
+  };
 }
 
 export async function listarCierres(negocioId: bigint) {

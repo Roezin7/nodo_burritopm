@@ -58,7 +58,11 @@ cierreRouter.post('/:id/reabrir', asyncHandler(async (req, res) => {
     tipo: 'semana_reabierta', entidad: 'semana', entidadId: semanaId, actorId: req.auth!.usuarioId,
     dedupeKey: `semana:${semanaId}:reabierta:${Date.now()}`, titulo: 'Semana reabierta ↩️',
     cuerpo: 'La semana fue reabierta para corregir operación, inventario o facturación.', url: '/semana/cierre',
-    datos: { semana_id: Number(semanaId), inventarios_finales_revertidos: resultado.inventarios_finales_revertidos },
+    datos: {
+      semana_id: Number(semanaId),
+      inventarios_finales_revertidos: resultado.inventarios_finales_revertidos,
+      inventarios_finales_conservados: resultado.inventarios_finales_conservados,
+    },
   });
   res.json(resultado);
 }));

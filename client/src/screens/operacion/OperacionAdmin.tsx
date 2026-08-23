@@ -787,7 +787,7 @@ function Cierres({ cierres, semana, busy, setBusy, onDone, setError }: { cierres
   async function reabrir(id: number) {
     if (!await dialog.confirm({
       title: 'Reabrir esta semana',
-      description: 'Se anularán las facturas y, si existió un conteo físico, se revertirán sus ajustes. Después podrás corregir compras o producción y cerrar nuevamente.',
+      description: 'Se anularán las facturas y se revertirá el arrastre técnico del cierre. El último conteo físico se conservará como fotografía válida; después podrás corregir compras o producción y cerrar nuevamente.',
       confirmLabel: 'Reabrir semana',
       tone: 'danger',
     })) return;
