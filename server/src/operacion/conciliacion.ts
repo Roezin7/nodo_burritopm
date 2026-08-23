@@ -410,6 +410,11 @@ export async function fijarInventarioInicialSemanal(negocioId: bigint, usuarioId
 }
 
 export async function validarConciliacionParaCierre(negocioId: bigint, desde: string, hasta: string) {
+  // Compatibilidad con despachos históricos: antes de auditar, normaliza el estado
+  // de los pedidos que ya fueron entregados/cerrados físicamente. Esto evita que una
+  // distribución cerrada bloquee el cierre sólo porque el pedido conservó un estado
+  // antiguo en_preparacion.
+  await repararEstadosPedidosDesdeDespachos(negocioId, desde, hasta);
   const integridad = await auditarPedidosVsDistribuciones(negocioId, desde, hasta);
   if (!integridad.ok) {
     const detalle = integridad.errores.slice(0, 3).map((error) => error.detalle).join(' · ');
@@ -498,6 +503,7 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
     },
   });
 
+  const pedidosConEstadoInconsistente = new Set<string>();
   for (const linea of pedidosLineas) {
     const activos = linea.distribucion_lineas.filter((d) => d.distribuciones.estado !== 'cancelada');
     if (!activos.length && num0(linea.cantidad) > 0) {
@@ -534,6 +540,11 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
       }
       if (['entregada', 'cerrada', 'cerrada_con_incidencias'].includes(distribucion.distribuciones.estado)
         && !['entregado', 'cerrado', 'cancelado'].includes(linea.pedido.estado)) {
+        // El estado es propiedad del pedido, no de cada producto. Reportarlo por
+        // línea convertía un solo pedido atrasado en decenas de errores idénticos.
+        const pedidoKey = linea.pedido_id.toString();
+        if (pedidosConEstadoInconsistente.has(pedidoKey)) continue;
+        pedidosConEstadoInconsistente.add(pedidoKey);
         errores.push({
           tipo: 'estado_pedido_inconsistente',
           pedido_id: Number(linea.pedido_id),
@@ -691,8 +702,60 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
   };
 }
 
+/**
+ * Sincroniza el estado comercial con el último estado físico del despacho.
+ * La entrega de un despacho cerrado prevalece sobre el estado intermedio que
+ * tuviera el pedido; nunca toca pedidos cancelados o ya cerrados.
+ */
+export async function repararEstadosPedidosDesdeDespachos(negocioId: bigint, desde?: string, hasta?: string) {
+  const fechaEntrega = desde || hasta
+    ? { gte: desde ? fecha(desde) : undefined, lte: hasta ? fecha(hasta) : undefined }
+    : undefined;
+  const distribuciones = await prisma.distribuciones.findMany({
+    where: {
+      negocio_id: negocioId,
+      fecha_entrega: fechaEntrega,
+      estado: { in: ['en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias'] },
+      lineas: { some: { pedido_linea_id: { not: null } } },
+    },
+    select: {
+      estado: true,
+      lineas: {
+        where: { pedido_linea_id: { not: null } },
+        select: { pedido_linea: { select: { pedido_id: true } } },
+      },
+    },
+  });
+  const entregados = new Set<string>();
+  const despachados = new Set<string>();
+  for (const distribucion of distribuciones) {
+    const destino = ['entregada', 'cerrada', 'cerrada_con_incidencias'].includes(distribucion.estado) ? entregados : despachados;
+    for (const linea of distribucion.lineas) {
+      if (linea.pedido_linea) destino.add(linea.pedido_linea.pedido_id.toString());
+    }
+  }
+  let entregadosActualizados = 0;
+  let despachadosActualizados = 0;
+  if (entregados.size) {
+    const result = await prisma.pedidos_operativos.updateMany({
+      where: { id: { in: [...entregados].map(BigInt) }, estado: { notIn: ['cerrado', 'cancelado', 'entregado'] } },
+      data: { estado: 'entregado' },
+    });
+    entregadosActualizados = result.count;
+  }
+  if (despachados.size) {
+    const result = await prisma.pedidos_operativos.updateMany({
+      where: { id: { in: [...despachados].map(BigInt) }, estado: { in: ['borrador', 'confirmado', 'en_preparacion'] } },
+      data: { estado: 'despachado' },
+    });
+    despachadosActualizados = result.count;
+  }
+  return { entregados: entregadosActualizados, despachados: despachadosActualizados };
+}
+
 /** Repara pedidos que dicen estar preparados pero ya no tienen ninguna línea vinculada. */
 export async function repararPedidosHuerfanos(negocioId: bigint) {
+  await repararEstadosPedidosDesdeDespachos(negocioId);
   const huerfanos = await prisma.pedidos_operativos.findMany({
     where: { negocio_id: negocioId, estado: 'en_preparacion', lineas: { none: { distribucion_lineas: { some: {} } } } },
     select: { id: true },
