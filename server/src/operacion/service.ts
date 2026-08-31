@@ -95,9 +95,10 @@ export function costoProteinaSinProduccion(
   costoSnapshot: number | null | undefined,
   costoInventarioVivo: number | null | undefined,
   semanaAbierta: boolean,
+  costoCatalogo: number | null | undefined = null,
 ) {
   if (costoSnapshot != null) return costoSnapshot;
-  return semanaAbierta ? (costoInventarioVivo ?? null) : null;
+  return semanaAbierta ? (costoInventarioVivo ?? costoCatalogo ?? null) : null;
 }
 
 /** Para proteínas producidas en la semana usa costo total / cajas + markup. Si una
@@ -183,7 +184,8 @@ export async function preciosVentaSemana(
     const total = producido.get(p.id.toString());
     const costoArrastrado = costoAnterior.get(p.id.toString());
     const costoInventario = costoInventarioVivo.get(p.id.toString());
-    const costoSinProduccion = costoProteinaSinProduccion(costoArrastrado, costoInventario, semanaAbierta);
+    const costoCatalogo = num(p.ultimo_costo) ?? num(p.costo_promedio);
+    const costoSinProduccion = costoProteinaSinProduccion(costoArrastrado, costoInventario, semanaAbierta, costoCatalogo);
     const precio = total
       ? calcularPrecioProteinaSemanal(total.cajas, total.costo)
       : costoSinProduccion != null

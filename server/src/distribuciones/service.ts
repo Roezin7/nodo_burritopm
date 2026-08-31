@@ -846,7 +846,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
         data: { estado: 'cancelada', notas: 'Reparto desactivado: entrega completada al despachar' },
       });
     }
-  });
+  }, { timeout: 900_000 });
   if (negocio?.reparto_habilitado) {
     void avisarPedidoEnCamino(id).catch(() => {}); // aviso best-effort a las sucursales
   }

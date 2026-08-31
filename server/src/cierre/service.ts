@@ -723,7 +723,7 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       cajas_perdidas: r3(saldosCierre.reduce((total, saldo) => total + saldo.cantidad, 0)),
       productos_con_faltante: saldosCierre.length,
     };
-  }, { maxWait: 15_000, timeout: 120_000 });
+  }, { maxWait: 15_000, timeout: 900_000 });
   if (cierre.productos_con_faltante > 0) {
     void avisarAdminFaltantesInventario(
       negocioId,
