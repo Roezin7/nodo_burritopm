@@ -25,12 +25,13 @@ const desechables = [
   // Se agregan al final para conservar BPM-0047..0052. El orden visible del
   // inventario se corrige con ordenDesechables, sin cambiar SKU históricos.
   ['CLASIC COKE', 137.54, 137.54], ['CO2 CYLINDER 20 LBS', 70.54, 84.65],
+  ['BOTTLED WATER', 0, 0],
 ] as const;
 
 const ordenDesechables = new Map<string, number>([
   ...Array.from({ length: 46 }, (_, i) => [`BPM-${String(i + 1).padStart(4, '0')}`, i + 1] as const),
-  ['BPM-0053', 47], ['BPM-0054', 48],
-  ...Array.from({ length: 6 }, (_, i) => [`BPM-${String(i + 47).padStart(4, '0')}`, i + 49] as const),
+  ['BPM-0055', 47], ['BPM-0053', 48], ['BPM-0054', 49], ['BPM-0052', 50],
+  ['BPM-0051', 51], ['BPM-0047', 52], ['BPM-0048', 53], ['BPM-0049', 54], ['BPM-0050', 55],
 ]);
 
 const bpmActivas = ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'];

@@ -22,6 +22,7 @@ const ARCHIVOS: Record<TipoExcel, string> = {
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const MARKUP_PROTEINA = 15;
+const SEMANA_INICIAL_BILLING = 32;
 const normal = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 const excelDate = (d: Date) => new Date(`${iso(d)}T12:00:00.000Z`);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
@@ -249,7 +250,7 @@ function errorCobertura(libro: string, detalles: string[]) {
 }
 
 function esCierreHistoricoSinDetalle(d: Datos) {
-  return d.semana.estado === 'cerrada' && d.semana.facturas.length > 0
+  return d.semana.facturas.length > 0
     && d.semana.facturas.every((f) => f.lineas.every((l) => l.product_id == null));
 }
 
@@ -510,11 +511,15 @@ const COLUMNA_BILLING: Record<string, number> = {
   NAPER2: 29, ROLLI: 32, SCHAU: 35, CRYST: 38, LAKEZ: 41, FRANK: 44, PLAIN: 47,
   AUROR: 56, BURLI: 59, TGE: 62, TST: 65, TLO: 68, TNA: 71, TBO: 74,
 };
+const COLUMNAS_BILLING_LEGADAS = [50, 51, 53, 54]; // PROJECT 16/17 ya no existen en el sistema.
 
 function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const ws = hojaSemana(wb, /^Billing \(/, d.semana.semana, `Billing (${d.semana.semana})`);
-  if (esCierreHistoricoSinDetalle(d)) return;
-  const carne = d.productos.filter((x) => x.linea_operacion === 'carne' && x.tipo_operativo !== 'servicio' && FILA_BILLING[x.sku]);
+  const historicoSinDetalle = esCierreHistoricoSinDetalle(d);
+  for (const col of COLUMNAS_BILLING_LEGADAS) {
+    for (let row = 3; row <= 23; row += 1) ws.getCell(row, col).value = null;
+  }
+  const carne = historicoSinDetalle ? [] : d.productos.filter((x) => x.linea_operacion === 'carne' && x.tipo_operativo !== 'servicio' && FILA_BILLING[x.sku]);
   const sinCelda = d.pedidos.flatMap((pedido) => pedido.lineas
     .filter((l) => l.producto.linea_operacion === 'carne' && l.producto.tipo_operativo !== 'servicio' && cantidadLinea(l) > 0
       && (!FILA_BILLING[l.producto.sku] || !COLUMNA_BILLING[pedido.ubicacion.codigo]))
@@ -528,6 +533,18 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   const creditoLisle = d.ajustes
     .filter((ajuste) => ajuste.linea_operacion === 'carne' && ajuste.tipo === 'credito' && ajuste.ubicacion.codigo === 'LISLE')
     .reduce((total, ajuste) => total + num0(ajuste.monto), 0);
+  if (historicoSinDetalle) {
+    // Algunas semanas importadas conservan solo el total por factura. Limpia
+    // la hoja clonada antes de escribir ese resumen para no arrastrar datos de
+    // la última hoja de la plantilla (Billing 29).
+    for (const row of [...Array.from({ length: 17 }, (_, i) => i + 3), 20, 21, 22, 23]) {
+      for (const col of Object.values(COLUMNA_BILLING)) {
+        ws.getCell(row, col).value = null;
+        ws.getCell(row, col + 1).value = null;
+      }
+    }
+    for (let row = 3; row <= 19; row += 1) ws.getCell(row, 3).value = null;
+  }
   ws.getCell('A15').value = 'CREDIT LISLE (PRODUCTION)';
   ws.getCell('C15').value = creditoLisle ? -creditoLisle : null;
   const filas = carne.map((p) => FILA_BILLING[p.sku]).filter((row): row is number => row != null);
@@ -559,12 +576,14 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
     const facturas = d.semana.facturas.filter((f) => f.ubicacion.codigo === codigo);
     const facturasCarne = facturas.filter((f) => f.linea_operacion === 'carne');
     let totalCarne = facturasCarne.reduce((a, f) => a + num0(f.total), 0);
-    let base = facturasCarne.flatMap((f) => f.lineas).reduce((a, l) => {
+    let base = historicoSinDetalle
+      ? totalCarne
+      : facturasCarne.flatMap((f) => f.lineas).reduce((a, l) => {
       const markup = l.producto?.tipo_operativo === 'proteina' ? MARKUP_PROTEINA : 0;
       return a + Math.max(0, num0(l.importe) - num0(l.cantidad) * markup);
     }, 0);
     let desechables = facturas.filter((f) => f.linea_operacion === 'desechables').reduce((a, f) => a + num0(f.total), 0);
-    if (!facturas.length) {
+    if (!facturas.length && !historicoSinDetalle) {
       const lineas = d.pedidos.filter((p) => p.ubicacion.codigo === codigo).flatMap((p) => p.lineas);
       for (const l of lineas) {
         const cantidad = cantidadLinea(l);
@@ -677,6 +696,40 @@ function llenarBilling(wb: ExcelJS.Workbook, d: Datos) {
   ws.getCell('BY18').value = 'TOTAL';
   if (cierreCongelado) ws.getCell('BW18').value = balance;
   else formula(ws, 'BW18', 'BW9+BW17', balance);
+}
+
+/**
+ * Billing es un libro acumulativo: conserva las semanas que ya existen en el
+ * sistema desde la 32 y agrega la semana solicitada al final. La plantilla
+ * histórica todavía trae 27–29, pero esas hojas ya no deben viajar en las
+ * descargas nuevas.
+ */
+async function llenarBillingAcumulado(wb: ExcelJS.Workbook, negocioId: bigint, actual: Datos) {
+  const semanas = await prisma.semanas_operativas.findMany({
+    where: {
+      negocio_id: negocioId,
+      anio: actual.semana.anio,
+      semana: { gte: SEMANA_INICIAL_BILLING, lte: actual.semana.semana },
+    },
+    orderBy: { semana: 'asc' },
+    select: { id: true, semana: true },
+  });
+  const semanasAExportar = semanas.some((s) => s.id === actual.semana.id)
+    ? semanas
+    : [...semanas, { id: actual.semana.id, semana: actual.semana.semana }].sort((a, b) => a.semana - b.semana);
+  const existentes = wb.worksheets.filter((sheet) => /^Billing \(/.test(sheet.name));
+  const fuente = existentes.sort((a, b) => (numeroHoja(b.name) ?? 0) - (numeroHoja(a.name) ?? 0))[0];
+  if (!fuente) throw new Error('La plantilla no contiene una hoja de Billing');
+
+  // Clonar primero y borrar después conserva el formato de la plantilla sin
+  // dejar las hojas legadas 27–29 en el libro final.
+  for (const semana of semanasAExportar) clonarHoja(wb, fuente, `Billing (${semana.semana})`);
+  for (const sheet of existentes) wb.removeWorksheet(sheet.id);
+
+  for (const semana of semanasAExportar) {
+    const datosSemana = semana.id === actual.semana.id ? actual : await datos(negocioId, semana.id);
+    llenarBilling(wb, datosSemana);
+  }
 }
 
 function limpiarBloqueFactura(ws: ExcelJS.Worksheet, base: number, hasta = 37) {
@@ -829,7 +882,7 @@ export async function generarExcel(negocioId: bigint, semanaId: bigint, tipo: Ti
   if (tipo === 'weekly-order') llenarWeeklyOrder(wb, d);
   else if (tipo === 'disposables') llenarDesechables(wb, d);
   else if (tipo === 'production') llenarProduccion(wb, d);
-  else if (tipo === 'billing') llenarBilling(wb, d);
+  else if (tipo === 'billing') await llenarBillingAcumulado(wb, negocioId, d);
   else llenarLibroCliente(wb, d, tipo);
   validarSalida(tipo, wb, d);
   const buffer = await wb.xlsx.writeBuffer();
