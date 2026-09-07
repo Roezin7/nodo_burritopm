@@ -915,7 +915,11 @@ export async function coberturaPedidosBpm(negocioId: bigint, linea: LineaOperaci
   }) : [];
   const plantillas = await prisma.plantillas_ruta.findMany({
     where: { negocio_id: negocioId, linea_operacion: linea, activo: true },
-    select: { dia_semana: true, paradas: { select: { ubicacion_id: true } } },
+    // Una parada opcional puede recibir un pedido cuando lo necesita, pero no
+    // convierte su ausencia en una deuda de captura ni bloquea el cierre.
+    // El scheduler ya usa esta misma regla; la cobertura semanal debe ser
+    // consistente con ella.
+    select: { dia_semana: true, paradas: { where: { opcional: false }, select: { ubicacion_id: true } } },
   });
   const paradasPorDia = new Map<number, Set<string>>();
   for (const plantilla of plantillas) {

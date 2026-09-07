@@ -76,15 +76,15 @@ const carne = [
 
 const rutas: { codigo: string; nombre: string; linea: LineaOperacion; dia: number; conductor: string; paradas: string[]; opcionales?: string[] }[] = [
   { codigo: 'CAR-SUR-MIE', nombre: 'Carne Sur · miércoles', linea: 'carne', dia: 3, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL'] },
-  { codigo: 'CAR-NOR-MIE', nombre: 'Carne Norte · miércoles', linea: 'carne', dia: 3, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'] },
+  { codigo: 'CAR-NOR-MIE', nombre: 'Carne Norte · miércoles', linea: 'carne', dia: 3, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'], opcionales: ['LAKEZ'] },
   { codigo: 'CAR-SUR-SAB', nombre: 'Carne Sur · sábado', linea: 'carne', dia: 6, conductor: 'Pablo', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'AUROR', 'BATAV', 'WESTC', 'CAROL'] },
-  { codigo: 'CAR-NOR-SAB', nombre: 'Carne Norte · sábado', linea: 'carne', dia: 6, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'] },
-  { codigo: 'CAR-FRA-MIE', nombre: 'Carne Frankfurt · miércoles', linea: 'carne', dia: 3, conductor: 'POR ASIGNAR', paradas: ['FRANK'] },
-  { codigo: 'CAR-FRA-SAB', nombre: 'Carne Frankfurt · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['FRANK'] },
+  { codigo: 'CAR-NOR-SAB', nombre: 'Carne Norte · sábado', linea: 'carne', dia: 6, conductor: 'MH', paradas: ['GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ'], opcionales: ['LAKEZ'] },
+  { codigo: 'CAR-FRA-MIE', nombre: 'Carne Frankfurt · miércoles', linea: 'carne', dia: 3, conductor: 'POR ASIGNAR', paradas: ['FRANK'], opcionales: ['FRANK'] },
+  { codigo: 'CAR-FRA-SAB', nombre: 'Carne Frankfurt · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['FRANK'], opcionales: ['FRANK'] },
   { codigo: 'TAP-LUN', nombre: 'Tapatíos · lunes', linea: 'carne', dia: 1, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO', 'TDOW'] },
   { codigo: 'TAP-JUE', nombre: 'Tapatíos · jueves', linea: 'carne', dia: 4, conductor: 'Pablo', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO', 'TDOW'] },
   { codigo: 'TAP-SAB', nombre: 'Tapatíos · sábado', linea: 'carne', dia: 6, conductor: 'POR ASIGNAR', paradas: ['TGE', 'TLO', 'TST', 'TNA', 'TBO', 'TDOW'] },
-  { codigo: 'DES-BPM-MIE', nombre: 'Desechables BPM · miércoles', linea: 'desechables', dia: 3, conductor: 'POR ASIGNAR', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'] },
+  { codigo: 'DES-BPM-MIE', nombre: 'Desechables BPM · miércoles', linea: 'desechables', dia: 3, conductor: 'POR ASIGNAR', paradas: ['LOMBA', 'LISLE', 'NAPER2', 'NAPER', 'BATAV', 'WESTC', 'CAROL', 'GLEND', 'SCHAU', 'ROLLI', 'ALGON', 'CRYST', 'LAKEZ', 'FRANK'], opcionales: ['LAKEZ', 'FRANK'] },
 ];
 
 async function seedDesechables(negocioId: bigint, categoriaId: bigint, cajaId: bigint) {
