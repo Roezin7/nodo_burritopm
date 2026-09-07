@@ -1787,14 +1787,18 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
 export async function guardarInventarioFinal(
   negocioId: bigint,
   usuarioId: bigint,
-  input: { ubicacion_id: number; fecha: string; motivo?: string | null; lineas: { product_id: number; cantidad: number }[] },
+  input: { ubicacion_id: number; fecha: string; tipo_captura?: 'apertura' | 'cierre'; motivo?: string | null; lineas: { product_id: number; cantidad: number }[] },
 ) {
   await asegurarSemanaEditable(negocioId, input.fecha);
+  const tipoCaptura = input.tipo_captura ?? 'cierre';
+  const semana = rangoSemana(input.fecha);
+  if (tipoCaptura === 'apertura' && input.fecha !== semana.desde) {
+    throw new HttpError(400, `La apertura debe capturarse el domingo ${semana.desde}. Selecciona "Apertura de semana" para registrar el inventario inicial.`);
+  }
   const ubicacionId = BigInt(input.ubicacion_id);
   const ubicacion = await prisma.ubicaciones.findFirst({ where: { id: ubicacionId, negocio_id: negocioId, tipo: 'bodega', activo: true } });
   if (!ubicacion) throw new HttpError(400, 'Almacén no válido');
-  if (ubicacion.codigo === 'CARN') {
-    const semana = rangoSemana(input.fecha);
+  if (ubicacion.codigo === 'CARN' && tipoCaptura === 'cierre') {
     if (input.fecha !== semana.hasta) throw new HttpError(400, `El inventario final de Carnicería debe capturarse el sábado ${semana.hasta}.`);
   }
   if (new Set(input.lineas.map((l) => l.product_id)).size !== input.lineas.length) {
@@ -1817,6 +1821,45 @@ export async function guardarInventarioFinal(
       throw new HttpError(400, `El inventario debe incluir todos los productos. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
     }
   }
+  // La apertura es una fotografía de referencia, no un ajuste contra el saldo
+  // vivo. Reemplazarla no resta ni suma ventas, despachos ni compras ya
+  // registrados; esos movimientos se aplican después en la conciliación.
+  if (tipoCaptura === 'apertura') {
+    const aperturaExistente = await prisma.conteos.findFirst({
+      where: {
+        negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(semana.desde),
+        OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }],
+      },
+      select: { id: true }, orderBy: { id: 'desc' },
+    });
+    const registro = await transaccionSerializable(async (tx) => {
+      const existente = aperturaExistente
+        ? await tx.conteos.findFirst({ where: { id: aperturaExistente.id, negocio_id: negocioId }, select: { id: true } })
+        : null;
+      const id = existente?.id ?? (await tx.conteos.create({
+        data: {
+          negocio_id: negocioId, ubicacion_id: ubicacionId, estado: 'cerrado', fecha: fecha(semana.desde),
+          creado_por: usuarioId, cerrado_por: usuarioId, cerrado_at: new Date(), tipo_captura: 'apertura',
+          notas: `inventario_inicial_operativo:${semana.desde}${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ': capturado'}`,
+        },
+        select: { id: true },
+      })).id;
+      const movimientos = await tx.movimientos_inventario.count({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: id } });
+      if (movimientos > 0) throw new HttpError(409, 'La apertura ya tiene ajustes aplicados; no se puede reemplazar sin conservar el saldo. Crea una corrección de inventario con auditoría.');
+      await tx.conteos.update({ where: { id }, data: {
+        tipo_captura: 'apertura', estado: 'cerrado', cerrado_por: usuarioId, cerrado_at: new Date(),
+        notas: `inventario_inicial_operativo:${semana.desde}${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ': capturado'}`,
+      } });
+      await tx.conteo_lineas.deleteMany({ where: { conteo_id: id } });
+      await tx.conteo_lineas.createMany({ data: input.lineas.map((l) => {
+        const producto = productos.find((p) => p.id === BigInt(l.product_id))!;
+        return { conteo_id: id, product_id: producto.id, qty: r3(l.cantidad), unidad_id: producto.unidad_distribucion_id, factor: 1, contado: true };
+      }) });
+      return { id };
+    });
+    return { ok: true, ajustes: 0, inventario_id: Number(registro.id), tipo_captura: 'apertura' as const, advertencias: [] };
+  }
+
   if (['CARN', 'BOD'].includes(ubicacion.codigo)) {
     await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
   }
@@ -1829,7 +1872,7 @@ export async function guardarInventarioFinal(
       negocio_id: negocioId,
       ubicacion_id: ubicacionId,
       fecha: fecha(input.fecha),
-      notas: { startsWith: 'inventario_final_operativo' },
+      OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }],
     },
     select: { id: true },
     orderBy: { id: 'desc' },
@@ -1849,6 +1892,7 @@ export async function guardarInventarioFinal(
         creado_por: usuarioId,
         cerrado_por: usuarioId,
         cerrado_at: new Date(),
+        tipo_captura: 'cierre',
         notas: `inventario_final_operativo${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ''}`,
       },
     });
@@ -1971,7 +2015,11 @@ const claveInventarioLegacy = (key: string) => {
 export async function listarInventariosFinales(negocioId: bigint, ubicacionId?: bigint) {
   const [conteos, legacy] = await Promise.all([
     prisma.conteos.findMany({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacionId, notas: { startsWith: 'inventario_final_operativo' } },
+      where: { negocio_id: negocioId, ubicacion_id: ubicacionId, OR: [
+        { tipo_captura: { in: ['apertura', 'cierre', 'historico'] } },
+        { notas: { startsWith: 'inventario_inicial_operativo' } },
+        { notas: { startsWith: 'inventario_final_operativo' } },
+      ] },
       include: { ubicaciones: { select: { nombre: true } }, _count: { select: { lineas: true } }, lineas: { select: { product_id: true, qty: true } } },
       orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
       take: 50,
@@ -1998,7 +2046,8 @@ export async function listarInventariosFinales(negocioId: bigint, ubicacionId?: 
       ubicacion: c.ubicaciones.nombre,
       ajustes: c._count.lineas,
       tipo: 'trazable' as const,
-      motivo: c.notas?.startsWith('inventario_final_operativo:') ? c.notas.slice('inventario_final_operativo:'.length).trim() : null,
+      captura: c.tipo_captura === 'apertura' || c.notas?.startsWith('inventario_inicial_operativo') ? 'apertura' as const : c.tipo_captura === 'historico' ? 'historico' as const : 'cierre' as const,
+      motivo: c.notas?.startsWith('inventario_final_operativo:') ? c.notas.slice('inventario_final_operativo:'.length).trim() : c.notas?.startsWith('inventario_inicial_operativo:') ? c.notas.slice('inventario_inicial_operativo:'.length).trim() : null,
       lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), cantidad: num0(l.qty) })),
     })),
     ...[...gruposLegacy.values()].map((g) => ({ id: `legacy-${g.id}`, fecha: g.fecha, ubicacion: g.ubicacion, ajustes: g.ajustes, tipo: 'anterior' as const, motivo: null, lineas: null })),
@@ -2009,7 +2058,7 @@ export async function listarInventariosFinales(negocioId: bigint, ubicacionId?: 
 export async function eliminarInventarioFinal(negocioId: bigint, token: string, usuarioId: bigint) {
   if (token.startsWith('conteo-')) {
     const id = BigInt(token.slice('conteo-'.length));
-    const conteo = await prisma.conteos.findFirst({ where: { id, negocio_id: negocioId, notas: { startsWith: 'inventario_final_operativo' } } });
+    const conteo = await prisma.conteos.findFirst({ where: { id, negocio_id: negocioId, OR: [{ tipo_captura: { in: ['apertura', 'cierre'] } }, { notas: { startsWith: 'inventario_final_operativo' } }, { notas: { startsWith: 'inventario_inicial_operativo' } }] } });
     if (!conteo) throw new HttpError(404, 'Inventario no encontrado');
     await asegurarSemanaEditable(negocioId, iso(conteo.fecha ?? conteo.creado_at));
     return eliminarConteo(negocioId, id, usuarioId);

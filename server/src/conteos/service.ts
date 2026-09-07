@@ -55,6 +55,7 @@ export async function listarConteos(negocioId: bigint, ubicacionId: bigint) {
   return conteos.map((c) => ({
     id: Number(c.id),
     estado: c.estado,
+    tipo_captura: c.tipo_captura === 'apertura' || c.notas?.startsWith('inventario_inicial_operativo') ? 'apertura' : c.tipo_captura === 'cierre' || c.notas?.startsWith('inventario_final_operativo') ? 'cierre' : c.tipo_captura === 'historico' ? 'historico' : 'diario',
     fecha: c.fecha ? c.fecha.toISOString().slice(0, 10) : null,
     creado_at: c.creado_at.toISOString(),
     cerrado_at: c.cerrado_at?.toISOString() ?? null,

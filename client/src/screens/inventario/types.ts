@@ -1,6 +1,7 @@
 export interface InventarioResumen {
   id: number;
   estado: string;
+  tipo_captura?: 'apertura' | 'cierre' | 'historico' | 'diario';
   fecha: string | null;
   creado_at: string;
   cerrado_at: string | null;

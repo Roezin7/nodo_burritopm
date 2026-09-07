@@ -128,15 +128,15 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
       include: { lineas: true },
     }),
     prisma.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio, notas: { startsWith: 'inventario_inicial_operativo' } },
+      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio, OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }] },
       include: { lineas: true }, orderBy: { id: 'desc' },
     }),
     prisma.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, notas: { startsWith: 'inventario_final_operativo' } },
+      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }] },
       include: { lineas: true }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     }),
     prisma.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio }, notas: { startsWith: 'inventario_final_operativo' } },
+      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio }, OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }] },
       include: { lineas: true }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
     }),
     prisma.semanas_operativas.findFirst({
@@ -267,11 +267,11 @@ export async function obtenerInventarioSemanalDesechables(
     select: { id: true, sku: true, nombre: true },
   });
   const ids = productos.map((p) => p.id);
-  const [conteoInicial, conteoAnterior, semanaAnterior, compras, movimientosDespacho, movimientosDirectos, conteoFinal] = await Promise.all([
+  const [conteoInicial, conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos, conteoFinal] = await Promise.all([
     prisma.conteos.findFirst({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio,
-        notas: { startsWith: 'inventario_inicial_operativo' },
+        OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }],
       },
       include: { lineas: { where: { product_id: { in: ids } } } },
       orderBy: { id: 'desc' },
@@ -279,7 +279,7 @@ export async function obtenerInventarioSemanalDesechables(
     prisma.conteos.findFirst({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio },
-        notas: { startsWith: 'inventario_final_operativo' },
+        OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }],
       },
       include: { lineas: { where: { product_id: { in: ids } } } },
       orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
@@ -306,18 +306,24 @@ export async function obtenerInventarioSemanalDesechables(
       },
       include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cajas: true } } },
     }),
-    // La salida de Bodega se reconoce cuando existe el movimiento FIFO real,
-    // no por la fecha programada del despacho. Una orden creada la semana
-    // anterior puede cargarse el lunes de ésta; usar fecha_entrega ocultaba
-    // justamente esos consumos y hacía que el físico pareciera cuadrar sin
-    // haber restado la salida.
-    prisma.movimientos_inventario.findMany({
+    // La salida se atribuye al día de entrega y se reconcilia con el movimiento
+    // de carga si existe. El movimiento puede haberse creado días después (por
+    // ejemplo al sincronizar un despacho), por lo que filtrar por su fecha
+    // dejaba la existencia semanal inflada. Si no hay movimiento, la línea
+    // cargada es el respaldo operativo explícito.
+    prisma.distribuciones.findMany({
       where: {
-        negocio_id: negocioId, product_id: { in: ids },
-        fecha: { gte: inicio, lt: finExclusivo }, documento_tipo: 'distribucion',
-        ubicacion_origen_id: ubicacion.id,
+        negocio_id: negocioId, fecha_entrega: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
       },
-      select: { product_id: true, cantidad: true, fecha: true },
+      include: {
+        lineas: {
+          where: { product_id: { in: ids } },
+          select: {
+            id: true, product_id: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true,
+            movimientos: { select: { id: true, tipo: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true, idempotency_key: true } },
+          },
+        },
+      },
     }),
     prisma.movimientos_inventario.findMany({
       where: {
@@ -330,7 +336,7 @@ export async function obtenerInventarioSemanalDesechables(
     prisma.conteos.findFirst({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fecha(hasta) },
-        notas: { startsWith: 'inventario_final_operativo' },
+        OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }],
       },
       include: { lineas: { where: { product_id: { in: ids } } } },
       orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
@@ -370,9 +376,18 @@ export async function obtenerInventarioSemanalDesechables(
     if (corteFisico && compra.creado_at > corteFisico) continue;
     for (const linea of compra.lineas) sumar(entradas, linea.product_id, num0(linea.cajas));
   }
-  for (const movimiento of movimientosDespacho) {
-    if (corteFisico && movimiento.fecha > corteFisico) continue;
-    sumar(salidas, movimiento.product_id, num0(movimiento.cantidad));
+  for (const distribucion of distribuciones) {
+    for (const linea of distribucion.lineas) {
+      // Sólo `carga` descuenta la bodega. En rutas con tránsito la recepción
+      // también referencia la bodega, pero no debe volver a restarse.
+      const cargas = linea.movimientos.filter((movimiento) =>
+        movimiento.ubicacion_origen_id === ubicacion.id && movimiento.idempotency_key.startsWith('carga:')),
+        cantidadMovimiento = cargas.reduce((total, movimiento) => total + num0(movimiento.cantidad), 0);
+      const cantidad = cantidadMovimiento > 0
+        ? cantidadMovimiento
+        : num0(linea.cantidad_cargada ?? linea.cantidad_aprobada ?? linea.cantidad_sugerida);
+      if (cantidad > 0) sumar(salidas, linea.product_id, cantidad);
+    }
   }
   for (const movimiento of movimientosDirectos) {
     if (corteFisico && movimiento.fecha > corteFisico) continue;
@@ -418,7 +433,7 @@ export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuari
     throw new HttpError(400, 'La apertura semanal solo puede fijarse para Carnicería o Bodega Adison');
   }
   const existente = await prisma.conteos.findFirst({
-    where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), notas: { startsWith: 'inventario_inicial_operativo' } },
+    where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }] },
     select: { id: true },
   });
   if (existente) return { id: Number(existente.id), creado: false };
@@ -444,7 +459,7 @@ export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuari
     const unidadDe = new Map(productos.map((producto) => [producto.id.toString(), producto.unidad_distribucion_id]));
     const conteo = await transaccionSerializable(async (tx) => {
       const ya = await tx.conteos.findFirst({
-        where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), notas: { startsWith: 'inventario_inicial_operativo' } },
+        where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }] },
         select: { id: true },
       });
       if (ya) return ya;
@@ -457,6 +472,7 @@ export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuari
           creado_por: usuarioId,
           cerrado_por: usuarioId,
           cerrado_at: new Date(),
+          tipo_captura: 'apertura',
           notas: `inventario_inicial_operativo:${rango.desde}:heredado-desechables`,
         },
       });
@@ -482,12 +498,12 @@ export async function asegurarInventarioInicialSemanal(negocioId: bigint, usuari
   });
   const conteo = await transaccionSerializable(async (tx) => {
     const ya = await tx.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), notas: { startsWith: 'inventario_inicial_operativo' } },
+      where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }] },
       select: { id: true },
     });
     if (ya) return ya;
     const c = await tx.conteos.create({
-      data: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), estado: 'cerrado', creado_por: usuarioId, cerrado_por: usuarioId, cerrado_at: new Date(), notas: `inventario_inicial_operativo:${rango.desde}` },
+      data: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(rango.desde), estado: 'cerrado', creado_por: usuarioId, cerrado_por: usuarioId, cerrado_at: new Date(), tipo_captura: 'apertura', notas: `inventario_inicial_operativo:${rango.desde}` },
     });
     const unidadDe = new Map(productos.map((p) => [p.id.toString(), p.unidad_distribucion_id]));
     if (reporte.filas.length) await tx.conteo_lineas.createMany({

@@ -192,11 +192,12 @@ operacionRouter.delete('/compras/:id', soloAdmin, asyncHandler(async (req, res) 
   res.json(resultado);
 }));
 
-/** Captura directa del inventario físico final, en el mismo orden del libro semanal. */
+/** Captura una fotografía de apertura o un inventario físico de cierre. */
 operacionRouter.put('/inventario-final', soloAdmin, asyncHandler(async (req, res) => {
   const b = z.object({
     ubicacion_id: id,
     fecha,
+    tipo_captura: z.enum(['apertura', 'cierre']).default('cierre'),
     motivo: z.string().trim().max(500).nullable().optional(),
     lineas: z.array(z.object({ product_id: id, cantidad: z.coerce.number().nonnegative() })).min(1),
   }).parse(req.body);

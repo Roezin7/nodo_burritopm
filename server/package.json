@@ -28,6 +28,7 @@
     "backfill:meat-supplies": "tsx prisma/backfill-meat-order-supplies.ts",
     "backfill:weekly-snapshots": "tsx prisma/backfill-weekly-snapshots.ts",
     "audit:operacion": "tsx prisma/audit-operacion.ts",
+    "reclassify:week36-opening": "tsx prisma/reclassify-week36-opening.ts",
     "repair:production": "tsx prisma/repair-production-integrity.ts",
     "backfill:reconstructed-snapshots": "tsx prisma/backfill-reconstructed-snapshots.ts",
     "reset:week29:meat": "tsx prisma/reset-week29-meat.ts",

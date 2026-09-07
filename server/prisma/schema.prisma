@@ -414,6 +414,10 @@ model conteos {
   estado       EstadoConteo          @default(en_captura)
   // Día de inventario al que pertenece (sesión por fecha). Una sesión por ubicación por día.
   fecha        DateTime?             @db.Date
+  // Tipo de fotografía para no confundir la apertura operativa con el cierre
+  // físico ni con un conteo diario. Los registros históricos se backfillean
+  // desde `notas` en la migración.
+  tipo_captura String                 @default("diario")
   creado_por   BigInt
   creado_at    DateTime              @default(now()) @db.Timestamptz(6)
   cerrado_por  BigInt?

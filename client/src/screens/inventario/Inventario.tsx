@@ -152,7 +152,7 @@ export default function Inventario() {
             <button key={c.id} className="card card-click" onClick={() => void abrir(c.id)}>
               <div className="ubic-row">
                 <div>
-                  <strong className="inv-fecha-titulo">{esPedido ? 'Pedido' : 'Inventario'} {fechaLarga(c.fecha)}</strong>{' '}
+                  <strong className="inv-fecha-titulo">{esPedido ? 'Pedido' : c.tipo_captura === 'apertura' ? 'Apertura' : c.tipo_captura === 'cierre' ? 'Cierre físico' : c.tipo_captura === 'historico' ? 'Histórico' : 'Conteo'} {fechaLarga(c.fecha)}</strong>{' '}
                   <EstadoChip estado={c.estado} />
                   <div className="muted">{c.contadas}/{c.total_lineas} contados</div>
                 </div>
