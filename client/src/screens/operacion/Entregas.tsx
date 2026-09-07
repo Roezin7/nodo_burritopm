@@ -8,6 +8,7 @@ import Modal from '../../components/Modal';
 import { Icono } from '../../icons';
 import MoreActions from '../../components/MoreActions';
 import HistoryToggle from '../../components/HistoryToggle';
+import OperacionError from '../../components/OperacionError';
 
 interface DistResumen {
   id: number;
@@ -351,7 +352,7 @@ export default function Entregas({ integrado = false, semana = crearSemana() }: 
     <div className={integrado ? 'embedded-operation' : 'page'}>
       {!integrado && <header className="page-head"><div><span className="eyebrow">Producción a restaurante</span><h1>Despacho</h1><p className="page-sub">Documentos para la entrega directa a cada restaurante.</p></div></header>}
       {integrado && <header className="embedded-head"><div><span className="eyebrow">Producción a restaurante</span><h2>Despacho</h2></div></header>}
-      {error && <p className="error-msg">{error}</p>}
+      {error && <OperacionError mensaje={error} semana={semana.inicio} />}
 
       <div className="history-access-bar"><strong>{mostrarCompletadas ? 'Todas las salidas de la semana' : 'Salidas por preparar'}</strong><HistoryToggle active={mostrarCompletadas} openLabel="Consultar completadas" closeLabel="Volver a pendientes" onToggle={() => setMostrarCompletadas((actual) => !actual)} /></div>
 

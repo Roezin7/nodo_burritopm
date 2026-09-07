@@ -198,6 +198,16 @@ table th {
   font-size: 0.85rem;
   font-weight: 500;
 }
+.error-msg--action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.9rem;
+}
+.error-msg--action > span { flex: 1 1 30rem; }
+.error-msg__actions { display: inline-flex; flex-wrap: wrap; gap: 0.65rem; }
+.error-msg__link { color: var(--danger); font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+.error-msg__link--secondary { color: var(--ink-2); }
 .badge-ok {
   color: var(--success);
   font-weight: 600;

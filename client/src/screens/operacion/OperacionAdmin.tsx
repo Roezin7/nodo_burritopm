@@ -9,6 +9,7 @@ import { guardarBorradorLocal, leerBorradorLocal, useUnsavedChanges } from '../.
 import { useDialog } from '../../dialog';
 import Modal from '../../components/Modal';
 import { Icono } from '../../icons';
+import OperacionError from '../../components/OperacionError';
 
 export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
@@ -115,7 +116,7 @@ export default function OperacionAdmin({ seccion, integrado = false, semana = cr
     } catch (e) { if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'No se pudo cargar la operación.'); }
   }
   useEffect(() => { setResumen(null); void cargar(); }, [semana.inicio, semana.fin]);
-  if (!catalogo || !resumen) return <div className={integrado ? '' : 'page'}><Spinner /><p className="error-msg">{error}</p></div>;
+  if (!catalogo || !resumen) return <div className={integrado ? '' : 'page'}><Spinner />{error && <OperacionError mensaje={error} semana={semana.inicio} />}</div>;
   const semanaCerrada = cierres.some((s) => s.anio === semana.anio && s.semana === semana.numero && s.estado === 'cerrada');
   const vista = meta[seccion];
 
@@ -123,7 +124,7 @@ export default function OperacionAdmin({ seccion, integrado = false, semana = cr
     <div className={integrado ? 'operation-embedded' : 'page operation-page'}>
       {!integrado && <header className="page-head operation-page-head"><div><span className="eyebrow">{vista.eyebrow}</span><h1>{vista.titulo}</h1><p className="page-sub">{vista.descripcion}</p></div></header>}
       {integrado && <header className="embedded-head"><span className="eyebrow">{vista.eyebrow}</span><h2>{vista.titulo}</h2></header>}
-      {error && <p className="error-msg">{error}</p>}
+      {error && <OperacionError mensaje={error} semana={semana.inicio} />}
       {semanaCerrada && ['compras', 'produccion'].includes(seccion) && <p className="notice notice--warning">La semana {semana.numero} está cerrada y se muestra en modo consulta. Reábrela desde Cierre para hacer correcciones.</p>}
       {seccion === 'compras' && <Compras catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={async (mensaje = 'Compra registrada e inventario actualizado.') => { await cargar(); toast.ok(mensaje); }} setError={setError} />}
       {seccion === 'produccion' && <Produccion catalogo={catalogo} resumen={resumen} semana={semana} bloqueada={semanaCerrada} busy={busy} setBusy={setBusy} onDone={cargar} setError={setError} />}
