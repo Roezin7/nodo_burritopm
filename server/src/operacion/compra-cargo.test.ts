@@ -39,6 +39,9 @@ describe('compras con cargo contable', () => {
     await prisma.compras.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.existencias.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.auditoria_operativa.deleteMany({ where: { negocio_id: negocioId } });
+    // registrarCompra fija automáticamente la apertura de una bodega nueva;
+    // elimina la fotografía antes de borrar sus productos.
+    await prisma.conteos.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.products.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.proveedores.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.usuarios.deleteMany({ where: { negocio_id: negocioId } });
