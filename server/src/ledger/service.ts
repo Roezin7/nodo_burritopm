@@ -141,13 +141,16 @@ export async function aplicarMovimiento(tx: Tx, p: MovimientoParams): Promise<bo
  * movimiento de ajuste por el delta de cada producto.
  */
 export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usuarioId: bigint, ubicacionId: bigint) {
-  const [lineas, ubicacion] = await Promise.all([
+  const [conteo, lineas, ubicacion] = await Promise.all([
+    prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId, ubicacion_id: ubicacionId }, select: { fecha: true } }),
     prisma.conteo_lineas.findMany({
     where: { conteo_id: conteoId },
     include: { products: { select: { ultimo_costo: true, costo_promedio: true, linea_operacion: true } } },
     }),
     prisma.ubicaciones.findUnique({ where: { id: ubicacionId }, select: { codigo: true } }),
   ]);
+  if (!conteo || !conteo.fecha) throw new HttpError(404, 'Conteo de inventario no encontrado');
+  const fechaConteo = conteo.fecha;
   if (!ubicacion) throw new HttpError(404, 'Ubicación de conteo no encontrada');
   const sello = Date.now(); // cada cierre reconcilia (permite re-cierre tras reabrir)
 
@@ -159,8 +162,30 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
       });
       const delta = r3(contado - num0(ex?.cantidad_disponible));
       if (delta === 0) continue;
-      const costo = num(l.products.ultimo_costo) ?? num(l.products.costo_promedio) ?? 0;
       const manejaFifo = ubicacion.codigo === 'BOD' && l.products.linea_operacion === 'desechables';
+      // Para una entrada detectada por conteo, el costo operativo es el del lote más
+      // reciente de ese producto. Así una presentación física agregada no hereda un
+      // costo obsoleto del catálogo y la nueva capa queda valuada exactamente igual
+      // que una compra normal. Si todavía no existe un lote, usamos el último costo
+      // del producto como respaldo explícito.
+      const costoUltimoProducto = num(l.products.ultimo_costo);
+      const costoPromedioProducto = num(l.products.costo_promedio);
+      let costo = costoUltimoProducto != null && costoUltimoProducto > 0
+        ? costoUltimoProducto
+        : costoPromedioProducto ?? 0;
+      if (delta > 0 && manejaFifo) {
+        const ultimoLote = await tx.lotes_materia_prima.findFirst({
+          where: { negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: l.product_id, fecha: { lte: fechaConteo }, cajas_iniciales: { gt: 0 } },
+          orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+          select: { cajas_iniciales: true, costo_inicial: true },
+        });
+        const cajasLote = num0(ultimoLote?.cajas_iniciales);
+        const costoLote = cajasLote > 0 ? num(ultimoLote?.costo_inicial) : null;
+        if (costoLote != null && costoLote > 0) costo = costoLote / cajasLote;
+      }
+      if (delta > 0 && manejaFifo && !(costo > 0)) {
+        throw new HttpError(409, `No hay un costo conocido para ${l.products.linea_operacion} (producto ${l.product_id.toString()}); registra una compra o configura su costo antes de reconciliar.`);
+      }
       const salidaFifo = delta < 0 && manejaFifo
         ? await prepararSalidaFifo(tx, {
             negocioId, ubicacionId, productId: l.product_id, cantidad: Math.abs(delta), producto: `Producto ${l.product_id.toString()}`,
@@ -193,10 +218,49 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
           });
         }
       } else if (aplicada && delta > 0 && manejaFifo) {
+        const costoTotal = r3(delta * costo);
+        const compraKey = `conteo-compra:${conteoId}:${sello}:${l.product_id}`;
+        const proveedor = await tx.proveedores.upsert({
+          where: { negocio_id_nombre: { negocio_id: negocioId, nombre: 'Ajuste de inventario físico' } },
+          update: { activo: true },
+          create: { negocio_id: negocioId, nombre: 'Ajuste de inventario físico', activo: true },
+        });
+        // El documento hace visible la entrada en Compras y conserva el costo de la
+        // capa FIFO. `origen` permite excluirla de flujo de caja/cuentas por pagar:
+        // el conteo confirma una existencia, no una salida de efectivo a proveedor.
+        const compra = await tx.compras.create({
+          data: {
+            negocio_id: negocioId,
+            proveedor_id: proveedor.id,
+            ubicacion_id: ubicacionId,
+            fecha: fechaConteo,
+            referencia: `Ajuste automático por conteo físico #${conteoId.toString()}`,
+            total: costoTotal,
+            ajuste_contable: 0,
+            estado: 'pagada',
+            origen: 'conteo_fisico',
+            registrado_por: usuarioId,
+            pagado_at: new Date(),
+            idempotency_key: compraKey,
+          },
+        });
+        const compraLinea = await tx.compra_lineas.create({
+          data: { compra_id: compra.id, product_id: l.product_id, cajas: delta, peso_total_lb: 0, costo_total: costoTotal, congelado: false },
+        });
+        await tx.auditoria_operativa.create({
+          data: {
+            negocio_id: negocioId,
+            usuario_id: usuarioId,
+            accion: 'ajuste_automatico_conteo',
+            entidad: 'compra',
+            entidad_id: compra.id,
+            datos: { conteo_id: Number(conteoId), product_id: Number(l.product_id), cantidad: delta, costo_unitario: r4(costo), costo_total: costoTotal },
+          },
+        });
         const lote = await tx.lotes_materia_prima.create({
           data: {
             negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: l.product_id,
-            fecha: new Date(), congelado: false, cajas_iniciales: delta, cajas_disponibles: delta,
+            compra_linea_id: compraLinea.id, fecha: fechaConteo, congelado: false, cajas_iniciales: delta, cajas_disponibles: delta,
             peso_inicial_lb: 0, peso_disponible_lb: 0, costo_inicial: r3(delta * costo), costo_disponible: r3(delta * costo),
           },
         });
@@ -204,6 +268,7 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
         await tx.conteo_ajustes_lote.create({
           data: { conteo_id: conteoId, lote_id: lote.id, cajas: -delta, peso_lb: 0, costo: r3(-delta * costo) },
         });
+        await tx.products.update({ where: { id: l.product_id }, data: { ultimo_costo: r4(costo) } });
       }
     }
   });

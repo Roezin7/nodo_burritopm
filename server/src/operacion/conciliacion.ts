@@ -108,7 +108,7 @@ export async function obtenerConciliacionSemanal(negocioId: bigint, desde: strin
   const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior, semanaAnterior, movimientosConteo] = await Promise.all([
     prisma.existencias.findMany({ where: { ubicacion_id: ubicacion.id, product_id: { in: ids } } }),
     prisma.compras.findMany({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, estado: { not: 'cancelada' } },
+      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
       include: { lineas: true },
     }),
     prisma.producciones.findMany({
@@ -302,7 +302,7 @@ export async function obtenerInventarioSemanalDesechables(
     prisma.compras.findMany({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id,
-        fecha: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
+        fecha: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' },
       },
       include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cajas: true } } },
     }),

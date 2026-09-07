@@ -800,6 +800,9 @@ model compras {
   // Impuestos, flete u otro cargo que pertenece a la factura pero no a inventario.
   ajuste_contable Decimal       @default(0) @db.Decimal(12, 2)
   estado          EstadoCompra @default(pendiente)
+  // Distingue capturas de proveedor de entradas creadas al reconciliar un conteo físico.
+  // Los ajustes automáticos conservan trazabilidad FIFO, pero no representan flujo de caja.
+  origen          String       @default("manual")
   registrado_por  BigInt
   creado_at       DateTime     @default(now()) @db.Timestamptz(6)
   pagado_at       DateTime?    @db.Timestamptz(6)
@@ -815,6 +818,7 @@ model compras {
 
   @@index([negocio_id, fecha])
   @@index([proveedor_id, estado])
+  @@index([negocio_id, origen, fecha])
 }
 
 model pagos_compra {

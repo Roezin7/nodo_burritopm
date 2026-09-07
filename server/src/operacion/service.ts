@@ -1509,9 +1509,10 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
     prisma.proveedores.findFirst({ where: { id: BigInt(input.proveedor_id), negocio_id: negocioId, activo: true } }),
     prisma.ubicaciones.findFirst({ where: { id: BigInt(input.ubicacion_id), negocio_id: negocioId, activo: true } }),
     prisma.products.findMany({ where: { id: { in: input.lineas.map((l) => BigInt(l.product_id)) }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true } }),
-    prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId }, select: { fecha: true } }),
+    prisma.compras.findFirst({ where: { id: compraId, negocio_id: negocioId }, select: { fecha: true, origen: true } }),
   ]);
   if (!compraActual) throw new HttpError(404, 'Compra no encontrada');
+  if (compraActual.origen === 'conteo_fisico') throw new HttpError(409, 'El ajuste automático proviene de un conteo físico; corrígelo desde ese conteo, no como compra manual.');
   await asegurarSemanaEditable(negocioId, iso(compraActual.fecha));
   if (!proveedor) throw new HttpError(400, 'Proveedor no válido');
   if (!ubicacion) throw new HttpError(400, 'Ubicación no válida');
@@ -1542,6 +1543,7 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
       },
     });
     if (!anterior) throw new HttpError(404, 'Compra no encontrada');
+    if (anterior.origen === 'conteo_fisico') throw new HttpError(409, 'El ajuste automático proviene de un conteo físico; corrígelo desde ese conteo, no como compra manual.');
     if (anterior.estado !== 'pendiente') throw new HttpError(409, 'Solo se pueden editar compras pendientes de pago.');
     if (anterior.pagos.length > 0) throw new HttpError(409, 'La compra tiene pagos registrados. Reviértelos antes de editarla.');
     if (anterior.ubicacion_id !== ubicacion.id) throw new HttpError(409, 'No se puede cambiar el almacén de una compra existente.');
@@ -1681,6 +1683,7 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
       },
     });
     if (!compra) throw new HttpError(404, 'Compra no encontrada');
+    if (compra.origen === 'conteo_fisico') throw new HttpError(409, 'El ajuste automático proviene de un conteo físico; corrígelo desde ese conteo, no como compra manual.');
     if (compra.pagos.length > 0) throw new HttpError(409, 'La compra tiene pagos registrados. Reviértelos antes de eliminarla.');
     const datosAuditoria = {
       fecha: iso(compra.fecha), referencia: compra.referencia, total: num0(compra.total),
@@ -2569,9 +2572,10 @@ export async function editarProduccion(
 
 export async function resumenProduccion(negocioId: bigint, desde?: string, hasta?: string) {
   const rango = desde || hasta ? { gte: desde ? fecha(desde) : undefined, lte: hasta ? fecha(hasta) : undefined } : undefined;
-  const [compras, totalCompras, producciones, extraordinarias, lotes] = await Promise.all([
+  const [compras, totalCompras, totalAjustesInventario, producciones, extraordinarias, lotes] = await Promise.all([
     prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], take: 100 }),
-    prisma.compras.aggregate({ where: { negocio_id: negocioId, fecha: rango }, _sum: { total: true }, _count: { id: true } }),
+    prisma.compras.aggregate({ where: { negocio_id: negocioId, fecha: rango, origen: { not: 'conteo_fisico' } }, _sum: { total: true }, _count: { id: true } }),
+    prisma.compras.aggregate({ where: { negocio_id: negocioId, fecha: rango, origen: 'conteo_fisico' }, _sum: { total: true }, _count: { id: true } }),
     prisma.producciones.findMany({ where: { negocio_id: negocioId, fecha: rango }, include: { materia_prima: true, salidas: { include: { producto: { include: { unidad_distribucion: true } } } } }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }] }),
     prisma.producciones_extraordinarias.findMany({
       where: { negocio_id: negocioId, fecha: rango },
@@ -2615,8 +2619,10 @@ export async function resumenProduccion(negocioId: bigint, desde?: string, hasta
   return {
     total_compras: num0(totalCompras._sum.total),
     cantidad_compras: totalCompras._count.id,
+    total_ajustes_inventario: num0(totalAjustesInventario._sum.total),
+    cantidad_ajustes_inventario: totalAjustesInventario._count.id,
     resumen_proteinas: resumenProteinas,
-    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), ajuste_contable: num0(c.ajuste_contable), estado: c.estado, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
+    compras: compras.map((c) => ({ id: Number(c.id), fecha: iso(c.fecha), proveedor_id: Number(c.proveedor_id), ubicacion_id: Number(c.ubicacion_id), proveedor: c.proveedor.nombre, referencia: c.referencia, total: num0(c.total), ajuste_contable: num0(c.ajuste_contable), estado: c.estado, origen: c.origen, lineas: c.lineas.map((l) => ({ product_id: Number(l.product_id), producto: l.producto.nombre, cajas: num0(l.cajas), peso_lb: num0(l.peso_total_lb), costo: num0(l.costo_total), congelado: l.congelado, es_cargo_compra: l.producto.es_cargo_compra })) })),
     // En el historial cada costo pertenece a ese batch, por lo que debe mostrarse junto
     // al precio guardado para el mismo batch. El promedio semanal se reserva para pedidos,
     // facturas y cierre; mezclar ambos aquí hacía que el markup visible pareciera distinto.

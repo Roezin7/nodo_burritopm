@@ -21,8 +21,10 @@ interface Catalogo {
 interface Resumen {
   total_compras: number;
   cantidad_compras: number;
+  total_ajustes_inventario?: number;
+  cantidad_ajustes_inventario?: number;
   resumen_proteinas: { product_id: number; producto: string; cajas: number; costo_total: number; costo_caja: number; markup_caja: number; precio_venta_caja: number; venta_total: number }[];
-  compras: { id: number; fecha: string; proveedor_id: number; ubicacion_id: number; proveedor: string; referencia: string | null; total: number; ajuste_contable: number; estado: string; lineas: { product_id: number; producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean; es_cargo_compra: boolean }[] }[];
+  compras: { id: number; fecha: string; proveedor_id: number; ubicacion_id: number; proveedor: string; referencia: string | null; total: number; ajuste_contable: number; estado: string; origen?: string; lineas: { product_id: number; producto: string; cajas: number; peso_lb: number; costo: number; congelado: boolean; es_cargo_compra: boolean }[] }[];
   producciones: { id: number; token: string; extraordinaria: boolean; fecha: string; materia_prima: string; materia_prima_id: number | null; cajas_entrada: number; peso_entrada_lb: number; peso_salida_lb: number; desperdicio_lb: number; yield: number; costo: number; notas: string | null; salidas: { product_id: number; producto: string; sku: string; unidad: string; tipo: string | null; cajas: number; costo_caja: number; precio: number }[] }[];
   lotes: { id: number; fecha: string; producto: string; product_id: number; cajas: number; peso_lb: number; costo: number; congelado: boolean }[];
 }
@@ -277,8 +279,9 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
     }
     return [...grupos.values()].sort((a, b) => a.proveedor.localeCompare(b.proveedor, 'es-MX'));
   }, [resumen.compras]);
-  const totalCarne = resumen.compras.filter((compra) => lineaDeCompra(compra) === 'carne').reduce((total, compra) => total + compra.total, 0);
-  const totalDesechables = resumen.compras.filter((compra) => lineaDeCompra(compra) === 'desechables').reduce((total, compra) => total + compra.total, 0);
+  const comprasReales = resumen.compras.filter((compra) => compra.origen !== 'conteo_fisico');
+  const totalCarne = comprasReales.filter((compra) => lineaDeCompra(compra) === 'carne').reduce((total, compra) => total + compra.total, 0);
+  const totalDesechables = comprasReales.filter((compra) => lineaDeCompra(compra) === 'desechables').reduce((total, compra) => total + compra.total, 0);
 
   return <div className="operation-stack">
     <section className="workspace-card form-workspace purchase-workspace" ref={editorRef}>
@@ -309,15 +312,15 @@ function Compras({ catalogo, resumen, semana, bloqueada, busy, setBusy, onDone, 
       <div className="lot-grid">{resumen.lotes.map((l) => <article className="lot-card" key={l.id}><div className="card-head"><strong>{l.producto}</strong><span className={`chip ${l.congelado ? 'chip--info' : 'chip--ok'}`}>{l.congelado ? 'Congelado' : 'Fresco'}</span></div><div className="lot-value">{l.cajas} <small>cajas</small></div><p>{l.peso_lb.toLocaleString('es-MX')} lb · {l.cajas > 0 ? (l.peso_lb / l.cajas).toFixed(2) : '0.00'} lb/caja<br />{usd(l.costo)} · {l.cajas > 0 ? usd(l.costo / l.cajas) : usd(0)}/caja</p><footer><span>{l.fecha}</span><button className="link-btn" disabled={busy} onClick={() => void cambiarLote(l.id, !l.congelado)}>{l.congelado ? 'Descongelar' : 'Congelar'}</button></footer></article>)}</div>
     </CollapsibleSection>}
 
-    <CollapsibleSection title="Compras registradas" count={resumen.cantidad_compras} summary={`Semana ${semana.numero} · ${usd(resumen.total_compras)}`} className="purchase-history">
-      <div className="purchase-history-totals"><span><small>Carne</small><strong>{usd(totalCarne)}</strong></span><span><small>Desechables</small><strong>{usd(totalDesechables)}</strong></span><span><small>Total semanal</small><strong>{usd(resumen.total_compras)}</strong></span></div>
+    <CollapsibleSection title="Compras registradas" count={resumen.cantidad_compras + (resumen.cantidad_ajustes_inventario ?? 0)} summary={`Semana ${semana.numero} · compras ${usd(resumen.total_compras)}${(resumen.total_ajustes_inventario ?? 0) > 0 ? ` · ajustes físicos ${usd(resumen.total_ajustes_inventario ?? 0)}` : ''}`} className="purchase-history">
+      <div className="purchase-history-totals"><span><small>Carne</small><strong>{usd(totalCarne)}</strong></span><span><small>Desechables</small><strong>{usd(totalDesechables)}</strong></span><span><small>Total compras reales</small><strong>{usd(resumen.total_compras)}</strong></span>{(resumen.total_ajustes_inventario ?? 0) > 0 && <span><small>Ajustes físicos · sin caja</small><strong>{usd(resumen.total_ajustes_inventario ?? 0)}</strong></span>}</div>
       {comprasPorProveedor.length === 0 ? <div className="empty-state"><strong>Sin compras registradas</strong></div> : <div className="purchase-provider-groups">{comprasPorProveedor.map((grupo) => <section className="purchase-provider-group" key={grupo.proveedor_id}>
         <header><div><strong>{grupo.proveedor}</strong><small>{grupo.compras.length} factura{grupo.compras.length === 1 ? '' : 's'} · acumulado en la semana</small></div><strong>{usd(grupo.total)}</strong></header>
         <div className="purchase-records">{grupo.compras.map((c) => { const costoInventarioCompra = c.lineas.reduce((total, lineaCompra) => total + (lineaCompra.es_cargo_compra ? 0 : lineaCompra.costo), 0); const cargosCompra = c.lineas.reduce((total, lineaCompra) => total + (lineaCompra.es_cargo_compra ? lineaCompra.costo : 0), 0); const totalLineas = costoInventarioCompra + cargosCompra; const tipoCompra = lineaDeCompra(c); return <article className="purchase-record" key={c.id}>
-          <div className="purchase-record__main"><div><span className={`chip ${tipoCompra === 'carne' ? 'chip--warn' : 'chip--info'}`}>{tipoCompra === 'carne' ? 'Carne' : 'Desechables'}</span><strong>{c.referencia || `Compra #${c.id}`}</strong></div><span>{new Date(`${c.fecha}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })} · pago según proveedor</span></div>
+          <div className="purchase-record__main"><div><span className={`chip ${tipoCompra === 'carne' ? 'chip--warn' : 'chip--info'}`}>{tipoCompra === 'carne' ? 'Carne' : 'Desechables'}</span>{c.origen === 'conteo_fisico' && <span className="chip chip--ok">Ajuste físico</span>}<strong>{c.referencia || `Compra #${c.id}`}</strong></div><span>{new Date(`${c.fecha}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })} · {c.origen === 'conteo_fisico' ? 'sin flujo de caja' : 'pago según proveedor'}</span></div>
           <div className="purchase-record__amount"><strong>{usd(c.total)}</strong><span className={`chip ${c.estado === 'pendiente' ? 'chip--warn' : 'chip--ok'}`}>{c.estado}</span></div>
           <details className="purchase-record__detail"><summary><span>{c.lineas.length} producto{c.lineas.length === 1 ? '' : 's'}</span><small>{cargosCompra > 0 ? `Inventario ${usd(costoInventarioCompra)} · cargos ${usd(cargosCompra)}` : `Inventario ${usd(costoInventarioCompra)}`}</small><i>⌄</i></summary><div>{c.lineas.map((l, i) => <div key={i}><span><strong>{l.producto}</strong><small>{l.es_cargo_compra ? 'Cargo contable · sin inventario' : `${l.cajas} cajas${l.peso_lb > 0 ? ` · ${l.peso_lb.toLocaleString('es-MX')} lb · ${(l.peso_lb / l.cajas).toFixed(2)} lb/caja` : ''}`}{l.congelado ? ' · congelado' : ''}</small></span><strong>{usd(l.costo)}</strong></div>)}{Math.abs(c.ajuste_contable) > 0.009 && <p>Renglones {usd(totalLineas)} · ajuste contable {usd(c.ajuste_contable)} · factura {usd(c.total)}</p>}</div></details>
-          <div className="purchase-record__actions">{c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}<button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button></div>
+          <div className="purchase-record__actions">{c.origen !== 'conteo_fisico' && c.estado === 'pendiente' && <button className="btn btn-secondary btn-sm" disabled={bloqueada || busy} onClick={() => editarCompra(c)}>Editar</button>}{c.origen !== 'conteo_fisico' && <button className="btn btn-danger-ghost btn-sm" disabled={bloqueada || busy} onClick={() => void eliminarCompra(c.id)}>Eliminar</button>}</div>
         </article>; })}</div>
       </section>)}</div>}
     </CollapsibleSection>

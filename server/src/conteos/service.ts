@@ -261,7 +261,14 @@ export async function cerrarConteo(negocioId: bigint, conteoId: bigint, usuarioI
   });
   if (esBodega) {
     // Un conteo cerrado de bodega es la verdad física: sincroniza sus existencias.
-    await reconciliarConteo(negocioId, conteoId, usuarioId, conteo.ubicacion_id);
+    try {
+      await reconciliarConteo(negocioId, conteoId, usuarioId, conteo.ubicacion_id);
+    } catch (error) {
+      // La conciliación puede rechazar un ajuste sin costo conocido. No dejes la
+      // sesión bloqueada: el usuario debe poder corregirla y volver a intentar.
+      await prisma.conteos.update({ where: { id: conteoId }, data: { estado: conteo.estado, cerrado_por: null, cerrado_at: null } });
+      throw error;
+    }
   }
   return { ok: true };
 }
@@ -306,6 +313,17 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
     if (uso.consumos.length || uso.salidas_inventario.length) {
       throw new HttpError(409, 'No se puede reemplazar este conteo: la diferencia física ya fue utilizada en producción o despacho.');
     }
+  }
+  // Los conteos positivos generan una compra técnica para conservar la trazabilidad
+  // del costo FIFO. No es una factura de proveedor: se elimina junto con el conteo y
+  // nunca debe quedar como cuenta por pagar. Si alguien la pagó manualmente, bloquear
+  // la eliminación evita borrar una operación financiera ya intervenida.
+  const comprasConteo = await tx.compras.findMany({
+    where: { negocio_id: negocioId, origen: 'conteo_fisico', referencia: { startsWith: `Ajuste automático por conteo físico #${conteoId.toString()}` } },
+    select: { id: true, pagos: { select: { id: true }, take: 1 } },
+  });
+  if (comprasConteo.some((compra) => compra.pagos.length > 0)) {
+    throw new HttpError(409, 'No se puede reemplazar este conteo: el ajuste automático ya tiene un pago registrado.');
   }
   // Neto firmado que el conteo aplicó a existencias por producto (+ sumó, − restó).
   const neto = new Map<string, number>();
@@ -359,6 +377,9 @@ export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId
     });
   }
   await tx.movimientos_inventario.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId } });
+  if (comprasConteo.length) {
+    await tx.compras.deleteMany({ where: { id: { in: comprasConteo.map((compra) => compra.id) }, negocio_id: negocioId } });
+  }
   await tx.conteos.delete({ where: { id: conteoId } });
   await tx.auditoria_operativa.create({
     data: {

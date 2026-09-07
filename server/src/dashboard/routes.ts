@@ -168,7 +168,7 @@ dashboardRouter.get(
         include: { pagos: true },
       }),
       prisma.compras.findMany({
-        where: { negocio_id: negocioId, fecha: { lte: periodo.sabado }, estado: { not: 'cancelada' } },
+        where: { negocio_id: negocioId, fecha: { lte: periodo.sabado }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
         include: { pagos: { select: { monto: true } } },
       }),
       prisma.producciones.findMany({
@@ -179,7 +179,7 @@ dashboardRouter.get(
         where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado } },
         include: { salidas: true },
       }),
-      prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado }, estado: { not: 'cancelada' } } }),
+      prisma.compras.findMany({ where: { negocio_id: negocioId, fecha: { gte: periodo.domingo, lte: periodo.sabado }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } } }),
       prisma.distribuciones.findMany({
         where: { negocio_id: negocioId, fecha_entrega: { gte: periodo.domingo, lte: periodo.sabado }, estado: { notIn: [...DIST_FINAL] } },
       }),

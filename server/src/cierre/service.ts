@@ -314,6 +314,7 @@ async function calcularBalance(
       negocio_id: negocioId,
       fecha: { lte: terminaAt },
       estado: { not: 'cancelada' },
+      origen: { not: 'conteo_fisico' },
     },
     select: { total: true, pagos: { select: { monto: true } } },
   });
@@ -443,7 +444,7 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
       include: { pagos: true },
     }),
     prisma.compras.findMany({
-      where: { negocio_id: negocioId, estado: { not: 'cancelada' }, fecha: { lte: semana.termina_at } },
+      where: { negocio_id: negocioId, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' }, fecha: { lte: semana.termina_at } },
       include: {
         proveedor: { select: { nombre: true } },
         pagos: { select: { monto: true } },
@@ -747,7 +748,7 @@ export async function reabrirSemana(negocioId: bigint, semanaId: bigint, usuario
       where: { negocio_id: negocioId, inicia_at: { gt: s.inicia_at }, estado: 'cerrada' },
       orderBy: { inicia_at: 'asc' }, select: { anio: true, semana: true },
     }),
-    prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at }, estado: { not: 'cancelada' } } }),
+    prisma.compras.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } } }),
     prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at } } }),
     prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gt: s.termina_at } } }),
     prisma.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gt: s.termina_at }, estado: { not: 'cancelado' }, lineas: { some: {} } } }),
@@ -874,7 +875,7 @@ export async function listarCartera(negocioId: bigint) {
       orderBy: [{ emitida_at: 'asc' }, { id: 'desc' }],
     }),
     prisma.compras.findMany({
-      where: { negocio_id: negocioId, estado: { in: ['pendiente', 'pagada'] } },
+      where: { negocio_id: negocioId, estado: { in: ['pendiente', 'pagada'] }, origen: { not: 'conteo_fisico' } },
       include: {
         proveedor: { select: { nombre: true } },
         ubicacion: { select: { nombre: true } },
@@ -1121,7 +1122,7 @@ export async function pagarFactura(negocioId: bigint, facturaId: bigint, usuario
 export async function pagarCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint, fechaPago: string, montoSolicitado?: number) {
   const resultado = await transaccionSerializable(async (tx) => {
     const c = await tx.compras.findFirst({
-      where: { id: compraId, negocio_id: negocioId, estado: { not: 'cancelada' } },
+      where: { id: compraId, negocio_id: negocioId, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
       include: { pagos: true },
     });
     if (!c) throw new HttpError(404, 'Compra pendiente no encontrada');
@@ -1183,7 +1184,7 @@ export async function pagarComprasLote(negocioId: bigint, compraIds: bigint[], u
   if (fechaPago > await hoyNegocio(negocioId)) throw new HttpError(400, 'La fecha de pago no puede estar en el futuro');
   const resultado = await transaccionSerializable(async (tx) => {
     const compras = await tx.compras.findMany({
-      where: { id: { in: compraIds }, negocio_id: negocioId, estado: { not: 'cancelada' } },
+      where: { id: { in: compraIds }, negocio_id: negocioId, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
       include: { pagos: true },
     });
     if (compras.length !== new Set(compraIds.map(String)).size) throw new HttpError(409, 'Una o más compras ya no están pendientes. Recarga la cartera.');
@@ -1219,7 +1220,7 @@ export async function revertirPagoFactura(negocioId: bigint, facturaId: bigint, 
 
 export async function revertirPagoCompra(negocioId: bigint, compraId: bigint, usuarioId: bigint) {
   const compra = await prisma.compras.findFirst({
-    where: { id: compraId, negocio_id: negocioId, estado: { not: 'cancelada' } },
+    where: { id: compraId, negocio_id: negocioId, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
     include: { pagos: true },
   });
   if (!compra || compra.pagos.length === 0) throw new HttpError(404, 'La compra no tiene pagos para revertir');

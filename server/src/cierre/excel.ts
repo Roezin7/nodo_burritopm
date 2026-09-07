@@ -45,12 +45,12 @@ async function datos(negocioId: bigint, semanaId: bigint) {
       orderBy: [{ fecha_entrega: 'asc' }, { ubicacion: { orden_operativo: 'asc' } }],
     }),
     prisma.compras.findMany({
-      where: { negocio_id: negocioId, fecha: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { not: 'cancelada' } },
+      where: { negocio_id: negocioId, fecha: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
       include: { proveedor: true, lineas: { include: { producto: true } } }, orderBy: { fecha: 'asc' },
     }),
     prisma.compras.findMany({
       where: {
-        negocio_id: negocioId, fecha: { lte: semana.termina_at }, estado: { not: 'cancelada' },
+        negocio_id: negocioId, fecha: { lte: semana.termina_at }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' },
       },
       include: {
         proveedor: true,
