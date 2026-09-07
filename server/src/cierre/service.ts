@@ -551,9 +551,6 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     pagado: 0,
   }));
   const porCobrarActual = totalSaldoCartera(documentosAnteriores);
-  const ventaCarne = r2(facturasVista.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
-  const ventaDesechables = r2(facturasVista.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
-  const ventaTotal = r2(ventaCarne + ventaDesechables);
   const ajustesVista = ajustes.map((ajuste) => ({
     id: Number(ajuste.id),
     tipo: ajuste.tipo,
@@ -562,6 +559,14 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     linea: ajuste.linea_operacion,
     monto: r2(num0(ajuste.monto) * (ajuste.tipo === 'credito' ? -1 : 1)),
   }));
+  const ventaCarneTotal = r2(facturasVista.filter((f) => f.linea === 'carne').reduce((total, f) => total + f.total, 0));
+  // El markup del Billing del cliente es un componente separado ($10 por
+  // unidad). Se conserva dentro del total facturado, pero no se mezcla con
+  // carne base para que los reportes puedan compararlo explícitamente.
+  const ventaMarkup = r2(ajustesVista.filter((ajuste) => ajuste.tipo === 'markup').reduce((total, ajuste) => total + ajuste.monto, 0));
+  const ventaCarne = r2(ventaCarneTotal - ventaMarkup);
+  const ventaDesechables = r2(facturasVista.filter((f) => f.linea === 'desechables').reduce((total, f) => total + f.total, 0));
+  const ventaTotal = r2(ventaCarneTotal + ventaDesechables);
   const totalAjustes = r2(ajustesVista.reduce((total, ajuste) => total + ajuste.monto, 0));
   const ventaBruta = r2(ventaTotal - totalAjustes);
   const documentosProyectados: DocumentoCarteraCliente[] = facturasVista.map((factura, indice) => ({
@@ -600,6 +605,8 @@ export async function vistaPreviaCierre(negocioId: bigint, usuarioId: bigint, fe
     generado_at: new Date().toISOString(),
     ventas: {
       carne: ventaCarne,
+      markup: ventaMarkup,
+      carne_con_markup: ventaCarneTotal,
       desechables: ventaDesechables,
       bruta: ventaBruta,
       ajustes: totalAjustes,
