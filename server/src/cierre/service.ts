@@ -205,6 +205,7 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
     items: Map<string, { productId: bigint | null; ajusteId?: bigint; descripcion: string; cantidad: number; precio: number }>;
   };
   const grupos = new Map<string, Grupo>();
+  const productosSinPrecio = new Set<string>();
   for (const pedido of pedidos) {
     for (const l of pedido.lineas) {
       // La ruta puede ser de carne y llevar consumibles solicitados en la misma hoja.
@@ -216,9 +217,17 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
       const cantidad = await cantidadFacturable(l);
       if (cantidad <= 0) continue;
       const precio = precios.get(l.product_id.toString()) ?? 0;
+      // Nunca emitir una factura silenciosamente en cero. Un producto nuevo (por
+      // ejemplo una presentación recién agregada) debe tener precio de venta
+      // configurado antes de cerrar; de lo contrario la venta queda omitida y
+      // el total semanal parece artificialmente bajo.
+      if (precio <= 0 && !l.producto.es_cargo_compra) productosSinPrecio.add(l.producto.nombre);
       const previo = g.items.get(l.product_id.toString());
       g.items.set(l.product_id.toString(), { productId: l.product_id, descripcion: l.producto.nombre, cantidad: r3((previo?.cantidad ?? 0) + cantidad), precio });
     }
+  }
+  if (productosSinPrecio.size) {
+    throw new HttpError(409, `Falta precio de venta para: ${[...productosSinPrecio].sort().join(', ')}. Configúralo en Configuración > Productos antes de cerrar la semana.`);
   }
   for (const ajuste of ajustes) {
     const k = claveFacturaPorRestaurante(ajuste.empresa.id, ajuste.ubicacion_id, ajuste.linea_operacion);
