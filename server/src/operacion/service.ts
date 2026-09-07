@@ -1,6 +1,6 @@
 import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { aplicarMovimiento } from '../ledger/service.js';
+import { aplicarMovimiento, crearCompraAjusteConteo } from '../ledger/service.js';
 import { num, num0 } from '../lib/num.js';
 import { costoParaValuacionInventario } from '../inventario/valuacion.js';
 import { HttpError } from '../middleware/error.js';
@@ -1831,6 +1831,7 @@ export async function guardarInventarioFinal(
     orderBy: { id: 'desc' },
   });
   let ajustes = 0;
+  const sello = Date.now();
   const conteo = await transaccionSerializable(async (tx) => {
     // Una captura por almacén y fecha: reintentar o corregir el mismo conteo
     // reemplaza sus ajustes anteriores en vez de crear una segunda fotografía.
@@ -1882,11 +1883,15 @@ export async function guardarInventarioFinal(
           // una capa FIFO fechada en el conteo para que la siguiente producción
           // o salida consuma exactamente lo que se contó.
           const costo = costoLotes ?? num(existenciaBase?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
-          if (costo == null) throw new HttpError(409, `${producto.nombre}: falta costo para crear la capa FIFO del conteo.`);
+          if (costo == null || costo <= 0) throw new HttpError(409, `${producto.nombre}: falta costo para crear la capa FIFO del conteo.`);
+          const compraTecnica = producto.linea_operacion === 'desechables'
+            ? await crearCompraAjusteConteo(tx, { negocioId, conteoId: registro.id, usuarioId, ubicacionId, productId, fecha: fecha(input.fecha), cantidad: deltaConteo, costoUnitario: costo, sello })
+            : null;
           const pesoCaja = producto.tipo_operativo === 'materia_prima' ? num0(producto.peso_caja_lb) : 0;
           const lote = await tx.lotes_materia_prima.create({
             data: {
               negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: productId,
+              compra_linea_id: compraTecnica?.compraLineaId ?? null,
               fecha: fecha(input.fecha), congelado: false,
               cajas_iniciales: deltaConteo, cajas_disponibles: deltaConteo,
               peso_inicial_lb: r3(deltaConteo * pesoCaja), peso_disponible_lb: r3(deltaConteo * pesoCaja),

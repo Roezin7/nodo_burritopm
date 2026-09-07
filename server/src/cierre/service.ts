@@ -6,7 +6,7 @@ import { preciosVentaSemana, sincronizarDespachosConfirmados } from '../operacio
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
-import { aplicarMovimiento } from '../ledger/service.js';
+import { aplicarMovimiento, crearCompraAjusteConteo } from '../ledger/service.js';
 import { avisarAdminFaltantesInventario } from '../push/service.js';
 import { costoParaValuacionInventario, valorExistenciaRedondeado } from '../inventario/valuacion.js';
 import { hoyNegocio } from '../lib/semana-operativa.js';
@@ -368,12 +368,71 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
 }
 
 /**
+ * Backfill seguro para conteos físicos capturados antes de la compra técnica:
+ * si una fotografía de Bodega confirma más desechables que las capas FIFO vivas,
+ * crea sólo la capa faltante (sin volver a sumar existencias). Es idempotente porque
+ * en el siguiente intento compara de nuevo contra las capas ya creadas.
+ */
+async function respaldarConteosFisicosEnFifo(negocioId: bigint, usuarioId: bigint, semana: SemanaCierre) {
+  const conteos = await prisma.conteos.findMany({
+    where: {
+      negocio_id: negocioId,
+      estado: 'cerrado',
+      fecha: { gte: semana.inicia_at, lte: semana.termina_at },
+      notas: { startsWith: 'inventario_final_operativo' },
+      ubicaciones: { codigo: 'BOD' },
+    },
+    include: { lineas: { include: { products: { select: { id: true, nombre: true, linea_operacion: true, ultimo_costo: true, costo_promedio: true } } } } },
+    orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
+  });
+  if (!conteos.length) return;
+  const sello = Date.now();
+  await transaccionSerializable(async (tx) => {
+    for (const conteo of conteos) {
+      if (!conteo.fecha) continue;
+      for (const linea of conteo.lineas) {
+        if (linea.products.linea_operacion !== 'desechables') continue;
+        const fisico = r3(num0(linea.qty));
+        if (fisico <= 0) continue;
+        const lotes = await tx.lotes_materia_prima.findMany({
+          where: { negocio_id: negocioId, ubicacion_id: conteo.ubicacion_id, product_id: linea.product_id, cajas_disponibles: { gt: 0 } },
+          orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
+          select: { cajas_disponibles: true, costo_disponible: true, cajas_iniciales: true, costo_inicial: true },
+        });
+        const fifo = r3(lotes.reduce((total, lote) => total + num0(lote.cajas_disponibles), 0));
+        const faltante = r3(fisico - fifo);
+        if (faltante <= 0.0001) continue;
+        const ultimo = lotes[0];
+        const costoLote = ultimo && num0(ultimo.cajas_iniciales) > 0 ? num(ultimo.costo_inicial) : null;
+        const costo = costoLote != null && costoLote > 0
+          ? costoLote / num0(ultimo!.cajas_iniciales)
+          : num(linea.products.ultimo_costo) ?? num(linea.products.costo_promedio);
+        if (costo == null || costo <= 0) throw new HttpError(409, `${linea.products.nombre}: falta costo para respaldar el conteo físico en FIFO.`);
+        const compra = await crearCompraAjusteConteo(tx, {
+          negocioId, conteoId: conteo.id, usuarioId, ubicacionId: conteo.ubicacion_id,
+          productId: linea.product_id, fecha: conteo.fecha, cantidad: faltante, costoUnitario: costo, sello,
+        });
+        await tx.lotes_materia_prima.create({
+          data: {
+            negocio_id: negocioId, ubicacion_id: conteo.ubicacion_id, product_id: linea.product_id,
+            compra_linea_id: compra.compraLineaId, fecha: conteo.fecha, congelado: false,
+            cajas_iniciales: faltante, cajas_disponibles: faltante, peso_inicial_lb: 0, peso_disponible_lb: 0,
+            costo_inicial: compra.costoTotal, costo_disponible: compra.costoTotal,
+          },
+        });
+      }
+    }
+  });
+}
+
+/**
  * Completa despachos automáticos pendientes cuando Reparto está desactivado. Esto permite
  * cerrar capturas tardías sin revivir el paso eliminado de Preparación y conserva el ledger.
  */
 async function sincronizarVentasParaCierre(negocioId: bigint, usuarioId: bigint, semana: SemanaCierre) {
   const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
   if (!negocio?.reparto_habilitado) {
+    await respaldarConteosFisicosEnFifo(negocioId, usuarioId, semana);
     const desde = iso(semana.inicia_at);
     const hasta = iso(semana.termina_at);
     await sincronizarDespachosConfirmados(negocioId, usuarioId, desde, hasta);

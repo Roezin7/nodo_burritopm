@@ -135,6 +135,39 @@ export async function aplicarMovimiento(tx: Tx, p: MovimientoParams): Promise<bo
   return true;
 }
 
+/** Crea el documento auditable que respalda una existencia física no registrada.
+ * Es una entrada técnica: conserva costo/lote, pero se marca fuera de flujo de caja. */
+export async function crearCompraAjusteConteo(
+  tx: Tx,
+  input: { negocioId: bigint; conteoId: bigint; usuarioId: bigint; ubicacionId: bigint; productId: bigint; fecha: Date; cantidad: number; costoUnitario: number; sello: number },
+) {
+  const costoTotal = r3(input.cantidad * input.costoUnitario);
+  const compraKey = `conteo-compra:${input.conteoId}:${input.sello}:${input.productId}`;
+  const proveedor = await tx.proveedores.upsert({
+    where: { negocio_id_nombre: { negocio_id: input.negocioId, nombre: 'Ajuste de inventario físico' } },
+    update: { activo: true },
+    create: { negocio_id: input.negocioId, nombre: 'Ajuste de inventario físico', activo: true },
+  });
+  const compra = await tx.compras.create({
+    data: {
+      negocio_id: input.negocioId, proveedor_id: proveedor.id, ubicacion_id: input.ubicacionId,
+      fecha: input.fecha, referencia: `Ajuste automático por conteo físico #${input.conteoId.toString()}`,
+      total: costoTotal, ajuste_contable: 0, estado: 'pagada', origen: 'conteo_fisico', registrado_por: input.usuarioId,
+      pagado_at: new Date(), idempotency_key: compraKey,
+    },
+  });
+  const compraLinea = await tx.compra_lineas.create({
+    data: { compra_id: compra.id, product_id: input.productId, cajas: input.cantidad, peso_total_lb: 0, costo_total: costoTotal, congelado: false },
+  });
+  await tx.auditoria_operativa.create({
+    data: {
+      negocio_id: input.negocioId, usuario_id: input.usuarioId, accion: 'ajuste_automatico_conteo', entidad: 'compra', entidad_id: compra.id,
+      datos: { conteo_id: Number(input.conteoId), product_id: Number(input.productId), cantidad: input.cantidad, costo_unitario: r4(input.costoUnitario), costo_total: costoTotal },
+    },
+  });
+  return { compraId: compra.id, compraLineaId: compraLinea.id, costoTotal };
+}
+
 /**
  * Reconcilia las existencias de una ubicación con un conteo cerrado: deja
  * cantidad_disponible = lo contado (la fotografía física es la verdad). Registra un
@@ -218,49 +251,11 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
           });
         }
       } else if (aplicada && delta > 0 && manejaFifo) {
-        const costoTotal = r3(delta * costo);
-        const compraKey = `conteo-compra:${conteoId}:${sello}:${l.product_id}`;
-        const proveedor = await tx.proveedores.upsert({
-          where: { negocio_id_nombre: { negocio_id: negocioId, nombre: 'Ajuste de inventario físico' } },
-          update: { activo: true },
-          create: { negocio_id: negocioId, nombre: 'Ajuste de inventario físico', activo: true },
-        });
-        // El documento hace visible la entrada en Compras y conserva el costo de la
-        // capa FIFO. `origen` permite excluirla de flujo de caja/cuentas por pagar:
-        // el conteo confirma una existencia, no una salida de efectivo a proveedor.
-        const compra = await tx.compras.create({
-          data: {
-            negocio_id: negocioId,
-            proveedor_id: proveedor.id,
-            ubicacion_id: ubicacionId,
-            fecha: fechaConteo,
-            referencia: `Ajuste automático por conteo físico #${conteoId.toString()}`,
-            total: costoTotal,
-            ajuste_contable: 0,
-            estado: 'pagada',
-            origen: 'conteo_fisico',
-            registrado_por: usuarioId,
-            pagado_at: new Date(),
-            idempotency_key: compraKey,
-          },
-        });
-        const compraLinea = await tx.compra_lineas.create({
-          data: { compra_id: compra.id, product_id: l.product_id, cajas: delta, peso_total_lb: 0, costo_total: costoTotal, congelado: false },
-        });
-        await tx.auditoria_operativa.create({
-          data: {
-            negocio_id: negocioId,
-            usuario_id: usuarioId,
-            accion: 'ajuste_automatico_conteo',
-            entidad: 'compra',
-            entidad_id: compra.id,
-            datos: { conteo_id: Number(conteoId), product_id: Number(l.product_id), cantidad: delta, costo_unitario: r4(costo), costo_total: costoTotal },
-          },
-        });
+        const compra = await crearCompraAjusteConteo(tx, { negocioId, conteoId, usuarioId, ubicacionId, productId: l.product_id, fecha: fechaConteo, cantidad: delta, costoUnitario: costo, sello });
         const lote = await tx.lotes_materia_prima.create({
           data: {
             negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: l.product_id,
-            compra_linea_id: compraLinea.id, fecha: fechaConteo, congelado: false, cajas_iniciales: delta, cajas_disponibles: delta,
+            compra_linea_id: compra.compraLineaId, fecha: fechaConteo, congelado: false, cajas_iniciales: delta, cajas_disponibles: delta,
             peso_inicial_lb: 0, peso_disponible_lb: 0, costo_inicial: r3(delta * costo), costo_disponible: r3(delta * costo),
           },
         });
