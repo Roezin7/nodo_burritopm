@@ -267,7 +267,7 @@ export async function obtenerInventarioSemanalDesechables(
     select: { id: true, sku: true, nombre: true },
   });
   const ids = productos.map((p) => p.id);
-  const [conteoInicial, conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos, conteoFinal] = await Promise.all([
+  const [conteoInicial, conteoAnterior, semanaAnterior, compras, movimientosDespacho, movimientosDirectos, conteoFinal] = await Promise.all([
     prisma.conteos.findFirst({
       where: {
         negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio,
@@ -306,17 +306,18 @@ export async function obtenerInventarioSemanalDesechables(
       },
       include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cajas: true } } },
     }),
-    prisma.distribuciones.findMany({
+    // La salida de Bodega se reconoce cuando existe el movimiento FIFO real,
+    // no por la fecha programada del despacho. Una orden creada la semana
+    // anterior puede cargarse el lunes de ésta; usar fecha_entrega ocultaba
+    // justamente esos consumos y hacía que el físico pareciera cuadrar sin
+    // haber restado la salida.
+    prisma.movimientos_inventario.findMany({
       where: {
-        // Los consumibles de Tapatíos viajan embebidos en el pedido/ruta de
-        // carne de lunes, jueves y sábado. La bodega de salida depende del
-        // producto, no de la línea de la distribución; por eso aquí debemos
-        // leer todas las distribuciones y filtrar sus líneas por producto.
-        // Así cada línea física se resta una sola vez, aunque viaje junto con carne.
-        negocio_id: negocioId,
-        fecha_entrega: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
+        negocio_id: negocioId, product_id: { in: ids },
+        fecha: { gte: inicio, lt: finExclusivo }, documento_tipo: 'distribucion',
+        ubicacion_origen_id: ubicacion.id,
       },
-      include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cantidad_cargada: true } } },
+      select: { product_id: true, cantidad: true, fecha: true },
     }),
     prisma.movimientos_inventario.findMany({
       where: {
@@ -324,7 +325,7 @@ export async function obtenerInventarioSemanalDesechables(
         documento_tipo: { in: ['ingreso', 'retiro'] },
         OR: [{ ubicacion_origen_id: ubicacion.id }, { ubicacion_destino_id: ubicacion.id }],
       },
-      select: { product_id: true, cantidad: true, documento_tipo: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
+      select: { product_id: true, cantidad: true, documento_tipo: true, ubicacion_origen_id: true, ubicacion_destino_id: true, fecha: true },
     }),
     prisma.conteos.findFirst({
       where: {
@@ -358,15 +359,23 @@ export async function obtenerInventarioSemanalDesechables(
   const entradas = new Map<string, number>();
   const salidas = new Map<string, number>();
   const fisicoFinal = new Map(conteoFinal?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
+  // Un conteo final es una fotografía: los movimientos registrados después de
+  // su sello no pueden reescribir la historia de esa foto.
+  const corteFisico = conteoFinal?.cerrado_at ?? conteoFinal?.creado_at ?? null;
   const sumar = (mapa: Map<string, number>, productId: bigint, cantidad: number) => {
     const key = productId.toString();
     mapa.set(key, r3((mapa.get(key) ?? 0) + cantidad));
   };
-  for (const compra of compras) for (const linea of compra.lineas) sumar(entradas, linea.product_id, num0(linea.cajas));
-  for (const distribucion of distribuciones) for (const linea of distribucion.lineas) {
-    sumar(salidas, linea.product_id, num0(linea.cantidad_cargada));
+  for (const compra of compras) {
+    if (corteFisico && compra.creado_at > corteFisico) continue;
+    for (const linea of compra.lineas) sumar(entradas, linea.product_id, num0(linea.cajas));
+  }
+  for (const movimiento of movimientosDespacho) {
+    if (corteFisico && movimiento.fecha > corteFisico) continue;
+    sumar(salidas, movimiento.product_id, num0(movimiento.cantidad));
   }
   for (const movimiento of movimientosDirectos) {
+    if (corteFisico && movimiento.fecha > corteFisico) continue;
     const cantidad = num0(movimiento.cantidad);
     if (movimiento.ubicacion_destino_id === ubicacion.id) sumar(entradas, movimiento.product_id, cantidad);
     if (movimiento.ubicacion_origen_id === ubicacion.id) sumar(salidas, movimiento.product_id, cantidad);
