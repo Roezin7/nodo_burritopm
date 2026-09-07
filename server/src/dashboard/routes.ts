@@ -333,8 +333,8 @@ dashboardRouter.get(
     if (bajoMinimo > 0) alertas.push({ tipo: 'inventario', titulo: 'Inventario bajo mínimo', detalle: `${bajoMinimo} productos necesitan atención`, ruta: '/inventario' });
     if (provisionales > 0) alertas.unshift({
       tipo: 'inventario',
-      titulo: 'Cajas perdidas',
-      detalle: `${cajasPerdidas.toLocaleString('es-MX')} cajas en ${provisionales} ${provisionales === 1 ? 'producto' : 'productos'}; no bloquean el cierre`,
+      titulo: 'Faltante teórico',
+      detalle: `${cajasPerdidas.toLocaleString('es-MX')} cajas en ${provisionales} ${provisionales === 1 ? 'producto' : 'productos'}; no bloquea el cierre y requiere conteo sólo para confirmar una posible merma`,
       ruta: '/semana/inventario',
     });
     if (!usarFacturas && proteinasSinPrecio.length > 0) alertas.unshift({ tipo: 'inventario', titulo: 'Venta pendiente de producción', detalle: `Falta calcular costo + $15 de ${proteinasSinPrecio.map((p) => p.nombre).join(', ')}`, ruta: '/semana/produccion' });

@@ -270,7 +270,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     </div>
 
     {error && <p className="error-msg">{error}</p>}
-    {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} cajas perdidas.</strong> Se mostrarán en 0 y no bloquearán el cierre.</p>}
+    {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} de faltante teórico.</strong> Se mostrará en 0 y no bloqueará el cierre; toma un conteo físico sólo si necesitas confirmar una posible merma.</p>}
     <p className="context-note">{editando
       ? modoCaptura === 'apertura'
         ? <>Apertura de semana: captura lo que había el domingo, antes de compras, despachos y ventas. No modifica el saldo vivo.</>
