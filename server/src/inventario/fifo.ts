@@ -6,6 +6,13 @@ const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round((n + Number.EPSILON) * 1000) / 1000;
 const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 
+/** Mensaje operativo para un faltante FIFO: explica el bloqueo y las dos
+ * acciones válidas sin sugerir ajustes ficticios de inventario. */
+export function mensajeFaltanteFifo(producto: string, faltante: number) {
+  const cantidad = Number.isInteger(faltante) ? String(faltante) : r3(faltante).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  return `${producto}: faltan ${cantidad} unidades FIFO para completar la salida. Acción: registra una compra/recepción real de ${cantidad} unidades en Bodega o reduce/cancela esa cantidad en el despacho; después vuelve a confirmar. No se puede cerrar con inventario inventado.`;
+}
+
 export interface LoteFifoCalculable {
   cajas: number;
   peso_lb: number;
@@ -58,7 +65,7 @@ export async function prepararSalidaFifo(
     input.cantidad,
   );
   if (calculo.cajas_faltantes > 0.0001 && !input.permitirFaltante) {
-    throw new HttpError(409, `${input.producto}: faltan ${calculo.cajas_faltantes} unidades respaldadas por compras FIFO. Registra la compra antes de despachar.`);
+    throw new HttpError(409, mensajeFaltanteFifo(input.producto, calculo.cajas_faltantes));
   }
   const costoFaltante = calculo.cajas_faltantes * (input.costoFaltante ?? 0);
   const costoTotal = r2(calculo.costo_total + costoFaltante);

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { calcularConsumoFifo } from './fifo.js';
+import { calcularConsumoFifo, mensajeFaltanteFifo } from './fifo.js';
 
 describe('calcularConsumoFifo', () => {
+  it('explica la acción concreta ante un faltante FIFO', () => {
+    expect(mensajeFaltanteFifo('Trapos amarillos', 2)).toContain('registra una compra/recepción real de 2 unidades en Bodega');
+    expect(mensajeFaltanteFifo('Trapos amarillos', 2)).toContain('reduce/cancela esa cantidad en el despacho');
+  });
+
   it('consume un solo lote cuando alcanza', () => {
     const r = calcularConsumoFifo([{ cajas: 10, peso_lb: 500, costo: 100 }], 4);
     expect(r.cajas_faltantes).toBe(0);

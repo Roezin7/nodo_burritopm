@@ -362,7 +362,7 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
       : `No se pudieron integrar ${pedidosSinPreparar} venta(s) al despacho automático. Vuelve a intentar el cierre; no requieren preparación manual.`);
   }
   if (distribucionesActivas) {
-    throw new HttpError(409, `Faltan ${distribucionesActivas} despacho(s) por completar antes del cierre.`);
+    throw new HttpError(409, `No se puede cerrar todavía: hay ${distribucionesActivas} despacho(s) pendiente(s). Acción: abre Operación > Despachos y confirma la entrega o cancela el despacho que ya no corresponda; después vuelve a intentar el cierre.`);
   }
   return validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
 }
