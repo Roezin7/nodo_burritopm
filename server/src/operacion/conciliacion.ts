@@ -343,6 +343,41 @@ export async function obtenerInventarioSemanalDesechables(
     }),
   ]);
 
+  // Una bodega nueva todavía no tiene una fotografía anterior que heredar. En
+  // ese único caso (sin conteos, cierres, compras ni movimientos históricos y
+  // sin existencias positivas) se inicia explícitamente en cero. No se aplica
+  // este valor por defecto a una bodega con actividad previa: ahí la falta de
+  // una apertura sigue siendo un bloqueo para evitar mezclar inventario vivo
+  // con la semana que se está reconstruyendo.
+  if (!conteoInicial && !conteoAnterior && !semanaAnterior) {
+    const [comprasPrevias, movimientosPrevios, existenciasPrevias] = await Promise.all([
+      prisma.compras.count({
+        where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
+      }),
+      prisma.movimientos_inventario.count({
+        where: {
+          negocio_id: negocioId, fecha: { lt: inicio },
+          OR: [{ ubicacion_origen_id: ubicacion.id }, { ubicacion_destino_id: ubicacion.id }],
+        },
+      }),
+      prisma.existencias.count({
+        where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, cantidad_disponible: { gt: 0 } },
+      }),
+    ]);
+    if (!comprasPrevias && !movimientosPrevios && !existenciasPrevias) {
+      return {
+        ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
+        periodo: { desde, hasta },
+        origen_apertura: 'bodega_nueva_cero',
+        filas: productos.map((p) => ({
+          product_id: Number(p.id), sku: p.sku, nombre: p.nombre, inicial: 0,
+          entradas: 0, salidas: 0, teoricoFinal: 0, saldoOperativoFinal: 0,
+          fisico_final: null,
+        })),
+      };
+    }
+  }
+
   const aperturaInicial = new Map(conteoInicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const aperturaConteo = new Map(conteoAnterior?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
   const aperturaSnapshot = new Map(semanaAnterior?.inventario_semanal.map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)]) ?? []);
