@@ -8,6 +8,49 @@ const fecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
 
+/** Convierte medianoche de una fecha calendario del negocio al instante UTC equivalente. */
+export function inicioDiaEnZona(fechaIso: string, zonaHoraria: string) {
+  const [anio, mes, dia] = fechaIso.split('-').map(Number);
+  const objetivoCivil = Date.UTC(anio!, mes! - 1, dia!);
+  const formato = new Intl.DateTimeFormat('en-US', {
+    timeZone: zonaHoraria,
+    calendar: 'gregory',
+    numberingSystem: 'latn',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  let instante = objetivoCivil;
+  for (let intento = 0; intento < 3; intento += 1) {
+    const partes = Object.fromEntries(formato.formatToParts(new Date(instante)).map((parte) => [parte.type, parte.value]));
+    const fechaCivilActual = Date.UTC(
+      Number(partes.year), Number(partes.month) - 1, Number(partes.day),
+      Number(partes.hour), Number(partes.minute), Number(partes.second),
+    );
+    instante += objetivoCivil - fechaCivilActual;
+  }
+  return new Date(instante);
+}
+
+export function rangoInstantesEnZona(desde: string, hastaExclusivo: string, zonaHoraria: string) {
+  return {
+    inicio: inicioDiaEnZona(desde, zonaHoraria),
+    finExclusivo: inicioDiaEnZona(hastaExclusivo, zonaHoraria),
+  };
+}
+
+/** Salida de carga tras aplicar correcciones físicas vinculadas a la misma sucursal. */
+export function calcularSalidaNetaCargada(
+  cantidadCarga: number,
+  ubicacionDestinoId: bigint,
+  correcciones: { cantidad: number; ubicacion_origen_id: bigint | null; ubicacion_destino_id: bigint | null }[],
+) {
+  return r3(correcciones.reduce((neto, correccion) => {
+    if (correccion.ubicacion_destino_id === ubicacionDestinoId) return neto + correccion.cantidad;
+    if (correccion.ubicacion_origen_id === ubicacionDestinoId) return neto - correccion.cantidad;
+    return neto;
+  }, cantidadCarga));
+}
+
 export function rangoSemana(fechaIso: string) {
   const d = fecha(fechaIso);
   const inicio = sumarDias(d, -d.getUTCDay());
@@ -711,33 +754,49 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
     where: { distribucion_id: { in: distribucionIds }, cantidad_cargada: { gt: 0 } },
     select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, pedido_linea: { select: { pedido_id: true } } },
   }) : [];
+  const [lineasTodas, negocio] = await Promise.all([
+    distribucionIds.length ? prisma.distribucion_lineas.findMany({
+      where: { distribucion_id: { in: distribucionIds } },
+      select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, cantidad_recibida: true, pedido_linea: { select: { pedido_id: true } } },
+    }) : Promise.resolve([]),
+    prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true, zona_horaria: true } }),
+  ]);
   const llaves = lineasCargadas.map((linea) => `carga:${linea.id.toString()}`);
   const movimientos = llaves.length ? await prisma.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, idempotency_key: { in: llaves } },
     select: { id: true, product_id: true, cantidad: true, ubicacion_destino_id: true, idempotency_key: true },
   }) : [];
+  const rangoCorrecciones = rangoInstantesEnZona(desde, iso(sumarDias(fin, 1)), negocio?.zona_horaria ?? 'America/Chicago');
   const movimientosCorrectivos = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
     // Una modificación posterior a la carga puede quedar registrada como
     // correccion_venta en vez de correccion_distribucion. Sigue siendo el
-    // movimiento físico que respalda la línea si coincide en producto,
-    // cantidad, origen y destino.
-    where: { negocio_id: negocioId, documento_tipo: { in: ['correccion_distribucion', 'correccion_venta'] }, fecha: { gte: inicio, lt: sumarDias(fin, 1) } },
+    // movimiento físico que respalda la línea. Las correcciones con vínculo
+    // explícito pertenecen a esa salida aunque se hayan registrado después;
+    // las antiguas sin vínculo se acotan por fecha local del negocio.
+    where: {
+      negocio_id: negocioId,
+      documento_tipo: { in: ['correccion_distribucion', 'correccion_venta'] },
+      OR: [
+        { distribucion_linea_id: { in: lineasTodas.map((linea) => linea.id) } },
+        { distribucion_linea_id: null, fecha: { gte: rangoCorrecciones.inicio, lt: rangoCorrecciones.finExclusivo } },
+      ],
+    },
     select: { id: true, distribucion_linea_id: true, product_id: true, cantidad: true, documento_tipo: true, documento_id: true, ubicacion_origen_id: true, ubicacion_destino_id: true },
   }) : [];
   const movimientoPorLlave = new Map(movimientos.map((movimiento) => [movimiento.idempotency_key, movimiento]));
   for (const linea of lineasCargadas) {
     const movimiento = movimientoPorLlave.get(`carga:${linea.id.toString()}`);
     const cantidad = num0(linea.cantidad_cargada);
-    const correctivosDirectos = movimientosCorrectivos.filter((correccion) => correccion.distribucion_linea_id === linea.id
-      && correccion.product_id === linea.product_id
-      && correccion.ubicacion_destino_id === linea.ubicacion_destino_id);
+    const correctivosDirectos = movimientosCorrectivos.filter((correccion) => correccion.distribucion_linea_id === linea.id);
+    const correctivosDirectosValidos = correctivosDirectos.filter((correccion) => correccion.product_id === linea.product_id
+      && (correccion.ubicacion_origen_id === linea.ubicacion_destino_id || correccion.ubicacion_destino_id === linea.ubicacion_destino_id));
     const correctivosLegacy = movimientosCorrectivos.filter((correccion) => correccion.distribucion_linea_id == null
       && ((correccion.documento_tipo === 'correccion_distribucion' && correccion.documento_id === linea.distribucion_id)
         || (correccion.documento_tipo === 'correccion_venta' && correccion.documento_id === linea.pedido_linea?.pedido_id))
       && correccion.product_id === linea.product_id
       && Math.abs(num0(correccion.cantidad) - cantidad) <= 0.0001
       && (correccion.ubicacion_destino_id === linea.ubicacion_destino_id || correccion.ubicacion_origen_id === linea.ubicacion_destino_id));
-    const movimientoCorrectivo = correctivosDirectos.length > 0
+    const movimientoCorrectivo = correctivosDirectosValidos.length > 0
       || (correctivosDirectos.length === 0 && correctivosLegacy.length === 1);
     const correctivoAmbiguo = correctivosDirectos.length === 0 && correctivosLegacy.length > 1;
     if (correctivoAmbiguo) errores.push({
@@ -755,21 +814,30 @@ export async function auditarPedidosVsDistribuciones(negocioId: bigint, desde: s
       });
       continue;
     }
-    if (movimiento.product_id !== linea.product_id || Math.abs(num0(movimiento.cantidad) - cantidad) > 0.0001) {
+    const correccionDirectaInvalida = correctivosDirectos.some((correccion) => correccion.product_id !== linea.product_id
+      || (correccion.ubicacion_origen_id !== linea.ubicacion_destino_id && correccion.ubicacion_destino_id !== linea.ubicacion_destino_id));
+    const cantidadNeta = calcularSalidaNetaCargada(
+      num0(movimiento.cantidad),
+      linea.ubicacion_destino_id,
+      correctivosDirectosValidos.map((correccion) => ({
+        cantidad: num0(correccion.cantidad),
+        ubicacion_origen_id: correccion.ubicacion_origen_id,
+        ubicacion_destino_id: correccion.ubicacion_destino_id,
+      })),
+    );
+    if (movimiento.product_id !== linea.product_id
+      || movimiento.ubicacion_destino_id !== linea.ubicacion_destino_id
+      || correccionDirectaInvalida
+      || Math.abs(cantidadNeta - cantidad) > 0.0001) {
       errores.push({
         tipo: 'vinculo_pedido_incorrecto',
         distribucion_id: Number(linea.distribucion_id),
         distribucion_linea_id: Number(linea.id),
-        detalle: `El movimiento de la salida ${linea.id.toString()} no coincide en producto o cantidad.`,
+        detalle: `El movimiento neto de la salida ${linea.id.toString()} no coincide con el producto o cantidad cargada (${cantidadNeta.toFixed(3)} de ${cantidad.toFixed(3)}).`,
       });
     }
   }
 
-  const lineasTodas = distribucionIds.length ? await prisma.distribucion_lineas.findMany({
-    where: { distribucion_id: { in: distribucionIds } },
-    select: { id: true, distribucion_id: true, product_id: true, ubicacion_destino_id: true, cantidad_cargada: true, cantidad_recibida: true, pedido_linea: { select: { pedido_id: true } } },
-  }) : [];
-  const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
   const movimientosPorLinea = distribucionIds.length ? await prisma.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, distribucion_linea_id: { in: lineasTodas.map((linea) => linea.id) } },
     select: { id: true, distribucion_linea_id: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true, idempotency_key: true },

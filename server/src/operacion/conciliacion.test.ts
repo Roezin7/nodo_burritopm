@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aperturaConDatos, calcularFilaConciliacion, calcularSaldoSemanal, normalizarSaldoApertura, prefiereConteoFisicoAnterior, rangoSemana } from './conciliacion.js';
+import { aperturaConDatos, calcularFilaConciliacion, calcularSalidaNetaCargada, calcularSaldoSemanal, normalizarSaldoApertura, prefiereConteoFisicoAnterior, rangoInstantesEnZona, rangoSemana } from './conciliacion.js';
 
 describe('conciliación semanal de inventario', () => {
   it('aísla desechables a apertura + entradas − salidas del periodo', () => {
@@ -22,6 +22,29 @@ describe('conciliación semanal de inventario', () => {
       hasta: '2026-07-25',
       corteMiercoles: '2026-07-22',
     });
+  });
+
+  it('convierte el rango semanal desde medianoche local, incluyendo el sábado por la noche', () => {
+    const rango = rangoInstantesEnZona('2026-09-06', '2026-09-13', 'America/Chicago');
+    expect(rango.inicio.toISOString()).toBe('2026-09-06T05:00:00.000Z');
+    expect(rango.finExclusivo.toISOString()).toBe('2026-09-13T05:00:00.000Z');
+    expect(new Date('2026-09-13T02:42:39.951Z') < rango.finExclusivo).toBe(true);
+  });
+
+  it('concilia la carga original con la reducción física vinculada al despacho', () => {
+    expect(calcularSalidaNetaCargada(3, 20n, [{
+      cantidad: 1,
+      ubicacion_origen_id: 20n,
+      ubicacion_destino_id: 10n,
+    }])).toBe(2);
+  });
+
+  it('suma una corrección que aumenta la cantidad entregada', () => {
+    expect(calcularSalidaNetaCargada(2, 20n, [{
+      cantidad: 1,
+      ubicacion_origen_id: 10n,
+      ubicacion_destino_id: 20n,
+    }])).toBe(3);
   });
 
   it('calcula los cortes de miércoles y sábado en orden operativo', () => {
