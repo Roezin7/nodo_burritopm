@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError, getToken, nuevaClaveIdempotencia } from '../../api';
 import Spinner from '../../components/Spinner';
@@ -705,6 +705,7 @@ function Rutas({ catalogo, busy, setBusy, onDone, setError }: { catalogo: Catalo
 function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; setError: (v: string) => void }) {
   const toast = useToast();
   const [reporte, setReporte] = useState<Conciliacion | null>(null);
+  const [productosAbiertos, setProductosAbiertos] = useState<Set<number>>(() => new Set());
   const [almacenes, setAlmacenes] = useState<{ id: number; nombre: string; codigo: string }[]>([]);
   const [ubicacion, setUbicacion] = useState('');
   const [buscar, setBuscar] = useState('');
@@ -720,7 +721,7 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
     void api<Catalogo>('/operacion/catalogo').then(c => setAlmacenes(c.ubicaciones.filter(u => ['CARN', 'BOD'].includes(u.codigo)))).catch(() => {});
   }, []);
   useEffect(() => {
-    setReporte(null); void cargar();
+    setReporte(null); setProductosAbiertos(new Set()); void cargar();
     const actualizar = () => { void cargar(); };
     window.addEventListener('bpm-data-updated', actualizar);
     window.addEventListener('focus', actualizar);
@@ -755,13 +756,14 @@ function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: Sema
       <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Revisar producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Abrir inventario físico</Link></div>
       <div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto y origen</th><th>Apertura</th><th>+ Entradas D–X</th><th>− Uso/salida D–X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida J–S</th><th>Otros movimientos</th><th>Final calculado</th><th>Último físico</th><th>Ajuste físico</th><th>Saldo a heredar</th><th>Registrado hoy</th><th>Dif. registro</th><th>Dif. lotes</th></tr></thead><tbody>{visibles.map(f => {
         const diferencia = f.diferenciaFinal ?? 0;
-        return <tr key={f.product_id} className={Math.abs(diferencia) > 0.001 || Math.abs(f.diferencia_ledger) > 0.001 || Math.abs(f.diferencia_fifo ?? 0) > 0.001 ? 'is-different' : ''}>
-          <td><strong>{f.nombre}</strong>{f.tipo === 'materia_prima' && <small>Materia prima · no se vende en pedidos</small>}<small>{f.fuente_inicial ? `${etiquetas[f.fuente_inicial.tipo] ?? f.fuente_inicial.tipo} · ${f.fuente_inicial.fecha} · ${f.fuente_inicial.documento}` : 'Sin documento de apertura'}</small>
+        const abierto = productosAbiertos.has(f.product_id);
+        const diferente = Math.abs(diferencia) > 0.001 || Math.abs(f.diferencia_ledger) > 0.001 || Math.abs(f.diferencia_fifo ?? 0) > 0.001;
+        return <Fragment key={f.product_id}><tr className={diferente ? 'is-different' : ''}>
+          <td><button type="button" className="reconciliation-product-toggle" aria-expanded={abierto} onClick={() => setProductosAbiertos(actual => { const siguiente = new Set(actual); if (siguiente.has(f.product_id)) siguiente.delete(f.product_id); else siguiente.add(f.product_id); return siguiente; })}><span aria-hidden="true">{abierto ? '▾' : '▸'}</span><strong>{f.nombre}</strong></button>{f.tipo === 'materia_prima' && <small>Materia prima · no se vende en pedidos</small>}<small>{f.fuente_inicial ? `${etiquetas[f.fuente_inicial.tipo] ?? f.fuente_inicial.tipo} · ${f.fuente_inicial.fecha} · ${f.fuente_inicial.documento}` : 'Sin documento de apertura'}</small>
             {Math.abs(f.ajuste_apertura) > 0.001 && <small>Apertura corregida: {q(f.ajuste_apertura)} respecto al arrastre anterior.</small>}
-            <details><summary>Ver movimientos ({f.trazabilidad.length})</summary><ul>{f.trazabilidad.map((m, i) => <li key={i}>{m.fecha} · {etiquetas[m.tipo] ?? m.tipo} · {m.documento}: {q(m.cantidad)}{m.aplicada ? ` → saldo ${q(m.saldo)}${m.ajuste != null ? ` (ajuste ${q(m.ajuste)})` : ''}` : ' · referencia reemplazada por la herencia vigente'}</li>)}</ul><p>Operaciones posteriores: {q(f.movimientos_posteriores)}. Saldo vigente esperado: {q(f.saldo_actual_esperado)}.</p></details>
           </td>
           <td>{q(f.inicial)}</td><td>{q(f.compras1 + f.produccionSalida1)}</td><td>{q(f.produccionEntrada1 + f.salidas1)}</td><td>{q(f.saldoMiercoles)}</td><td>{q(f.compras2 + f.produccionSalida2)}</td><td>{q(f.produccionEntrada2 + f.salidas2)}</td><td>{q(f.directos1 + f.directos2)}</td><td>{q(f.teoricoFinal)}</td><td>{f.fisico_final == null ? 'Sin conteo' : q(f.fisico_final)}</td><td>{f.diferenciaFinal == null ? '—' : q(diferencia)}</td><td><strong>{q(f.saldoOperativoFinal)}</strong></td><td>{q(f.actual)}</td><td>{q(f.diferencia_ledger)}</td><td>{f.diferencia_fifo == null ? 'No aplica' : q(f.diferencia_fifo)}</td>
-        </tr>;
+        </tr>{abierto && <tr className={`reconciliation-detail-row${diferente ? ' is-different' : ''}`}><td colSpan={15}><div className="reconciliation-detail"><strong>Trazabilidad de {f.nombre}</strong><span className="reconciliation-detail-summary">{f.trazabilidad.length} movimientos · operaciones posteriores: {q(f.movimientos_posteriores)} · saldo vigente esperado: {q(f.saldo_actual_esperado)}</span><ul>{f.trazabilidad.map((m, i) => <li key={i}><span>{m.fecha} · {etiquetas[m.tipo] ?? m.tipo} · {m.documento}</span><strong>{q(m.cantidad)}</strong><small>{m.aplicada ? `Saldo ${q(m.saldo)}${m.ajuste != null ? ` · ajuste ${q(m.ajuste)}` : ''}` : 'Referencia reemplazada por la herencia vigente'}</small></li>)}</ul></div></td></tr>}</Fragment>;
       })}</tbody></table></div>
     </>}
   </section>;

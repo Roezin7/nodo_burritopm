@@ -3291,6 +3291,16 @@ a.flujo-paso { text-decoration: none; }
 .reconciliation-table thead th:first-child { background: var(--surface-2); z-index: 2; }
 .reconciliation-table td:first-child { min-width: 190px; }
 .reconciliation-table td:first-child small { display: block; color: var(--ink-3); margin-top: 0.2rem; }
+.reconciliation-product-toggle { display: flex; align-items: center; gap: 0.35rem; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; font: inherit; }
+.reconciliation-product-toggle:hover strong, .reconciliation-product-toggle:focus-visible strong { color: var(--primary); }
+.reconciliation-product-toggle > span { width: 0.85rem; color: var(--primary); font-size: 0.9rem; }
+.reconciliation-detail-row td { padding: 0; text-align: left; white-space: normal; background: var(--surface-2); }
+.reconciliation-table tr.reconciliation-detail-row td:first-child { position: static; background: var(--surface-2); }
+.reconciliation-detail { display: grid; gap: 0.55rem; padding: 0.8rem 1rem 1rem 2rem; border-top: 1px solid var(--border); }
+.reconciliation-detail-summary { color: var(--ink-3); font-size: 0.78rem; }
+.reconciliation-detail ul { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.reconciliation-detail li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(190px, 0.7fr); gap: 0.8rem; align-items: baseline; padding: 0.35rem 0; border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent); font-size: 0.78rem; }
+.reconciliation-detail li small { color: var(--ink-3); }
 .reconciliation-table tr.is-different td { background-color: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
 .reconciliation-table tr.is-different td:first-child { background-color: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
 .batch-card-actions { display: flex; align-items: center; gap: 0.55rem; }
