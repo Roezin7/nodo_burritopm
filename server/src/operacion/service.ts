@@ -33,6 +33,15 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 const sumarDias = (d: Date, dias: number) => new Date(d.getTime() + dias * 86400000);
 const consumiblesEnOrdenCarne = new Set(['BPM-0019', 'BPM-0047', 'BPM-0048', 'BPM-0049', 'BPM-0020', 'BPM-0029', 'BPM-0017', 'BPM-0008']);
 
+/** Evita crear dos distribuciones operativas con los mismos renglones confirmados. */
+async function bloquearNegocio(tx: Prisma.TransactionClient, negocioId: bigint) {
+  await tx.$queryRaw`SELECT id FROM negocios WHERE id = ${negocioId} FOR UPDATE`;
+}
+
+async function bloquearDistribucion(tx: Prisma.TransactionClient, id: bigint) {
+  await tx.$queryRaw`SELECT id FROM distribuciones WHERE id = ${id} FOR UPDATE`;
+}
+
 /** Un cargo de compra forma parte de la factura, pero no representa mercancía. */
 export function esCargoContableCompra(producto: { es_cargo_compra: boolean }) {
   return producto.es_cargo_compra;
@@ -112,16 +121,17 @@ export async function preciosVentaSemana(
   productos: ProductoPrecioSemanal[],
   desde: string,
   hasta: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
   const proteinas = productos.filter((p) => p.tipo_operativo === 'proteina');
-  const salidas = proteinas.length ? await prisma.produccion_salidas.findMany({
+  const salidas = proteinas.length ? await db.produccion_salidas.findMany({
     where: {
       product_id: { in: proteinas.map((p) => p.id) },
       produccion: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } },
     },
     select: { product_id: true, cajas: true, costo_total: true },
   }) : [];
-  const semanaAnterior = proteinas.length ? await prisma.semanas_operativas.findFirst({
+  const semanaAnterior = proteinas.length ? await db.semanas_operativas.findFirst({
     where: { negocio_id: negocioId, termina_at: { lt: fecha(desde) }, estado: 'cerrada' },
     orderBy: { termina_at: 'desc' },
     include: {
@@ -140,11 +150,11 @@ export async function preciosVentaSemana(
     },
   }) : null;
   const [semanaObjetivo, existenciasBodega] = proteinas.length ? await Promise.all([
-    prisma.semanas_operativas.findFirst({
+    db.semanas_operativas.findFirst({
       where: { negocio_id: negocioId, inicia_at: fecha(desde), termina_at: fecha(hasta) },
       select: { estado: true },
     }),
-    prisma.existencias.findMany({
+    db.existencias.findMany({
       where: {
         negocio_id: negocioId,
         product_id: { in: proteinas.map((p) => p.id) },
@@ -1214,7 +1224,21 @@ export async function crearDistribucionOperativa(
       ubicacion: { select: { id: true, nombre: true, entrega_en_ubicacion_id: true } },
     },
   });
-  if (!pedidos.length) throw new HttpError(400, 'No hay ventas pendientes de despacho para esa fecha');
+  if (!pedidos.length) {
+    // Un segundo clic después de que otro proceso ya vinculó las ventas es un
+    // no-op válido cuando se está creando un complemento.
+    if (permitirComplemento) {
+      const existente = await prisma.distribuciones.findFirst({
+        where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: { not: 'cancelada' } },
+        select: { id: true }, orderBy: { id: 'desc' },
+      });
+      if (existente) {
+        const rutas = await prisma.rutas.count({ where: { distribucion_id: existente.id } });
+        return { id: Number(existente.id), pedidos: 0, rutas, despacho_automatico: false };
+      }
+    }
+    throw new HttpError(400, 'No hay ventas pendientes de despacho para esa fecha');
+  }
   const ya = await prisma.distribuciones.findFirst({ where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: { not: 'cancelada' } } });
   if (ya && !permitirComplemento) throw new HttpError(409, 'Ya existe una distribución para esa línea y fecha');
   const dias = entrega.getUTCDay();
@@ -1232,14 +1256,41 @@ export async function crearDistribucionOperativa(
   });
   const rep = await prisma.usuarios.findFirst({ where: { negocio_id: negocioId, rol: 'encargado_bodega', activo: true }, orderBy: { id: 'asc' } });
 
-  const resultado = await prisma.$transaction(async (tx) => {
+  const resultado = await transaccionSerializable(async (tx) => {
+    // La distribución se crea después de una lectura preparatoria. Este bloqueo
+    // hace que dos solicitudes del mismo negocio vuelvan a validar los vínculos
+    // una detrás de otra, en lugar de fabricar dos salidas para una misma venta.
+    await bloquearNegocio(tx, negocioId);
+    const existente = await tx.distribuciones.findFirst({
+      where: { negocio_id: negocioId, linea_operacion: linea, fecha_entrega: entrega, estado: { not: 'cancelada' } },
+      orderBy: { id: 'desc' },
+    });
+    if (existente && !permitirComplemento) throw new HttpError(409, 'Ya existe una distribución para esa línea y fecha');
+
+    // La foto leída antes de bloquear puede estar desfasada. Quedan únicamente
+    // los renglones que aún no tienen distribución; los ya vinculados no se
+    // vuelven a insertar aunque el pedido original ya cambió de estado.
+    const pedidoLineaIds = pedidos.flatMap((p) => p.lineas.map((l) => l.id));
+    const vinculadas = await tx.distribucion_lineas.findMany({
+      where: { pedido_linea_id: { in: pedidoLineaIds } }, select: { pedido_linea_id: true },
+    });
+    const vinculadasIds = new Set(vinculadas.map((l) => l.pedido_linea_id?.toString()));
+    const pedidosTrabajo = pedidos.map((p) => ({
+      ...p,
+      lineas: p.lineas.filter((l) => !vinculadasIds.has(l.id.toString())),
+    })).filter((p) => p.lineas.length > 0);
+    if (!pedidosTrabajo.length) {
+      if (existente) return { d: existente, rutasCreadas: 0, pedidosCreados: 0 };
+      throw new HttpError(409, 'Las ventas ya fueron vinculadas a otra distribución; actualiza la pantalla.');
+    }
+
     const d = await tx.distribuciones.create({
       data: {
         negocio_id: negocioId, creado_por: usuarioId, estado: 'calculada', linea_operacion: linea, fecha_entrega: entrega,
         nombre: `${linea === 'carne' ? 'Carne' : 'Desechables'} · ${fechaEntrega}${ya ? ' · Complemento' : ''}`,
       },
     });
-    const lineas = pedidos.flatMap((p) => p.lineas.map((l) => ({
+    const lineas = pedidosTrabajo.flatMap((p) => p.lineas.map((l) => ({
       distribucion_id: d.id, ubicacion_destino_id: p.ubicacion_id, product_id: l.product_id,
       pedido_linea_id: l.id, cantidad_sugerida: l.cantidad, cantidad_aprobada: l.cantidad,
       costo_unitario: l.producto.ultimo_costo ?? l.producto.costo_promedio,
@@ -1247,7 +1298,7 @@ export async function crearDistribucionOperativa(
     })));
     if (lineas.length) await tx.distribucion_lineas.createMany({ data: lineas });
 
-    const destinosFisicos = new Set(pedidos.map((p) => (p.ubicacion.entrega_en_ubicacion_id ?? p.ubicacion_id).toString()));
+    const destinosFisicos = new Set(pedidosTrabajo.map((p) => (p.ubicacion.entrega_en_ubicacion_id ?? p.ubicacion_id).toString()));
     const asignados = new Set<string>();
     let rutasCreadas = 0;
     for (const plantilla of plantillasOrdenadas) {
@@ -1267,11 +1318,22 @@ export async function crearDistribucionOperativa(
       rutasCreadas += 1;
     }
     await tx.pedidos_operativos.updateMany({
-      where: { id: { in: pedidos.map((p) => p.id) }, estado: 'confirmado' },
+      where: { id: { in: pedidosTrabajo.map((p) => p.id) }, estado: 'confirmado' },
       data: { estado: 'en_preparacion' },
     });
-    return { d, rutasCreadas };
+    return { d, rutasCreadas, pedidosCreados: pedidosTrabajo.length };
   });
+
+  // Si el bloqueo encontró que otro proceso ya vinculó todas las ventas, no
+  // debemos volver a aprobar, cargar ni cerrar la distribución existente.
+  if (resultado.pedidosCreados === 0) {
+    return {
+      id: Number(resultado.d.id),
+      pedidos: 0,
+      rutas: resultado.rutasCreadas,
+      despacho_automatico: false,
+    };
+  }
 
   // Cuando Reparto está desactivado no existe una etapa manual de surtido/carga:
   // crear el despacho equivale a aprobarlo y entregarlo. Se hace después de crear todas
@@ -1282,7 +1344,10 @@ export async function crearDistribucionOperativa(
   });
   let despachoAutomatico = false;
   if (negocio && !negocio.reparto_habilitado) {
-    await prisma.$transaction(async (tx) => {
+    const aprobadoAutomaticamente = await transaccionSerializable(async (tx) => {
+      await bloquearDistribucion(tx, resultado.d.id);
+      const actual = await tx.distribuciones.findFirst({ where: { id: resultado.d.id, negocio_id: negocioId }, select: { estado: true } });
+      if (!actual || !['calculada', 'en_revision'].includes(actual.estado)) return false;
       const lineasSinAprobar = await tx.distribucion_lineas.findMany({
         where: { distribucion_id: resultado.d.id, cantidad_aprobada: null },
       });
@@ -1299,13 +1364,16 @@ export async function crearDistribucionOperativa(
         where: { id: resultado.d.id },
         data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
       });
+      return true;
     });
-    await confirmarCarga(negocioId, resultado.d.id, usuarioId);
-    despachoAutomatico = true;
+    if (aprobadoAutomaticamente) {
+      await confirmarCarga(negocioId, resultado.d.id, usuarioId);
+      despachoAutomatico = true;
+    }
   }
   return {
     id: Number(resultado.d.id),
-    pedidos: pedidos.length,
+    pedidos: resultado.pedidosCreados,
     rutas: resultado.rutasCreadas,
     despacho_automatico: despachoAutomatico,
   };

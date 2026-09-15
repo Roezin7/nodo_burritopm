@@ -32,6 +32,8 @@ Esto no implica que todas las diferencias físicas estén explicadas. Además de
 11. **Una operación tardía podía cambiar el saldo pese a existir un físico posterior.** Se agregó `inventario/saldo-fisico.ts`: al crear/editar/eliminar compras o producción, corregir pedidos procesados y confirmar/eliminar despachos, se recalcula el efecto de los físicos posteriores dentro de la misma transacción. Se conserva la cantidad contada y se actualiza su diferencia, ledger y FIFO. No exige borrar el físico para editar producción. Los cierres posteriores siguen bloqueando cambios históricos.
 12. **Cantidad preparada no equivale a salida física.** La conciliación solo considera distribuciones cargadas/en tránsito/entregadas/cerradas; no resta una cantidad digitada en una carga todavía sin confirmar. Raw también se rechaza al confirmar un despacho.
 13. **Un saldo provisional negativo no equivale a FIFO negativo.** Contar 3 unidades desde un ledger de −2 aplica +5 al ledger, pero crea solo 3 unidades en lotes. El ajuste de cantidades físicas y el ajuste FIFO se calculan por separado y terminan en el mismo saldo disponible.
+14. **Había carreras entre acciones administrativas.** Ajustar, aprobar, surtir, cargar, recibir, verificar o eliminar la misma distribución ahora revalida y bloquea su fila dentro de una transacción Serializable. Crear distribuciones bloquea el negocio y vuelve a filtrar renglones ya vinculados; un segundo clic queda como no-op y nunca genera una segunda salida.
+15. **El cierre podía usar una validación preparada antes de su escritura final.** El cierre vuelve a consultar dentro de la transacción los pedidos en borrador/confirmados, despachos pendientes, precios, facturación e inventario. La fotografía de cierre usa el reporte actual de cada almacén, mientras la factura se genera con las cantidades vigentes del despacho; una edición concurrente se rechaza o se incluye completa, pero no queda a medias.
 
 ## Correcciones de datos aplicadas
 
@@ -63,6 +65,7 @@ Ambos scripts son de simulación por defecto, requieren `--apply`, validan el es
 - 114 pruebas de servidor aprobadas en PostgreSQL temporal aislado, no en producción.
 - 2 pruebas de caché/lecturas asíncronas del cliente aprobadas; añadidas a CI.
 - Typecheck de cliente y compilación completa cliente/servidor aprobados.
+- Las transiciones concurrentes de distribución se protegen con bloqueos de fila de negocio/distribución y reintentos Serializable; el cierre y las operaciones tardías vuelven a validar la cadena dentro de su transacción.
 - Casos de apertura, físico final, cero, herencia automática obsoleta, compras posteriores, correcciones repetidas, Raw/terminado, diarios, restricciones de eliminación, pedidos RAW, edición de pedido con físico posterior, compra/producción tardías y ajuste FIFO desde negativo cubiertos.
 - La revisión en producción se hizo por consultas de solo lectura, salvo los dos scripts explícitos de corrección. No se cerró/reabrió ninguna semana ni se registraron compras/pagos nuevos.
 - QA visual pendiente: la habilidad Browser no encontró un navegador disponible. No se ejecutó una comprobación visual de la nueva tabla.

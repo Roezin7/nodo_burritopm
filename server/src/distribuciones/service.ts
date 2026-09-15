@@ -12,6 +12,16 @@ import { prepararSalidaFifo, registrarSalidaFifo, restaurarSalidaFifo } from '..
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { recalcularFisicosPosterioresEnTx } from '../inventario/saldo-fisico.js';
 
+/** Serializa transiciones que pueden crear vínculos o movimientos del mismo negocio. */
+async function bloquearNegocio(tx: Prisma.TransactionClient, negocioId: bigint) {
+  await tx.$queryRaw`SELECT id FROM negocios WHERE id = ${negocioId} FOR UPDATE`;
+}
+
+/** Impide que una acción administrativa vieja reescriba una distribución ya movida. */
+async function bloquearDistribucion(tx: Prisma.TransactionClient, id: bigint) {
+  await tx.$queryRaw`SELECT id FROM distribuciones WHERE id = ${id} FOR UPDATE`;
+}
+
 async function pedidosVinculados(tx: Prisma.TransactionClient, distribucionId: bigint) {
   const lineas = await tx.distribucion_lineas.findMany({
     where: { distribucion_id: distribucionId, pedido_linea_id: { not: null } },
@@ -140,6 +150,17 @@ export async function crearDistribucion(negocioId: bigint, usuarioId: bigint, ub
   }
 
   const dist = await transaccionSerializable(async (tx) => {
+    await bloquearNegocio(tx, negocioId);
+    const conteoIds = [...new Set(lineasData.map((linea) => linea.conteo_id).filter((id): id is bigint => id != null))];
+    const yaUsado = conteoIds.length ? await tx.distribucion_lineas.findFirst({
+      where: {
+        conteo_id: { in: conteoIds },
+        distribuciones: { negocio_id: negocioId, estado: { not: 'cancelada' } },
+      },
+      select: { distribucion_id: true },
+      orderBy: { id: 'asc' },
+    }) : null;
+    if (yaUsado) return tx.distribuciones.findUniqueOrThrow({ where: { id: yaUsado.distribucion_id } });
     const d = await tx.distribuciones.create({
       data: { negocio_id: negocioId, estado: 'calculada', creado_por: usuarioId },
     });
@@ -271,11 +292,18 @@ export async function cambiarEstadoAdmin(negocioId: bigint, id: bigint, estado: 
   if (estado !== 'en_revision' || !['calculada', 'en_revision', 'aprobada', 'verificada'].includes(dist.estado)) {
     throw new HttpError(409, 'Ese estado no puede forzarse. Usa las acciones del flujo o elimina el consolidado para reconstruirlo.');
   }
-  const movidas = await prisma.distribucion_lineas.count({
-    where: { distribucion_id: id, OR: [{ cantidad_cargada: { gt: 0 } }, { cantidad_recibida: { not: null } }] },
+  await transaccionSerializable(async (tx) => {
+    await bloquearDistribucion(tx, id);
+    const actual = await tx.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
+    if (!actual || !['calculada', 'en_revision', 'aprobada', 'verificada'].includes(actual.estado)) {
+      throw new HttpError(409, 'La distribución cambió; actualiza antes de cambiar su estado.');
+    }
+    const movidas = await tx.distribucion_lineas.count({
+      where: { distribucion_id: id, OR: [{ cantidad_cargada: { gt: 0 } }, { cantidad_recibida: { not: null } }] },
+    });
+    if (movidas) throw new HttpError(409, 'El consolidado ya movió inventario y no puede volver manualmente a revisión');
+    await tx.distribuciones.update({ where: { id }, data: { estado } });
   });
-  if (movidas) throw new HttpError(409, 'El consolidado ya movió inventario y no puede volver manualmente a revisión');
-  await prisma.distribuciones.update({ where: { id }, data: { estado } });
   return { ok: true, estado };
 }
 
@@ -343,6 +371,7 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
     : [];
 
   await transaccionSerializable(async (tx) => {
+    await bloquearDistribucion(tx, id);
     for (const l of lineas) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
@@ -625,24 +654,19 @@ export async function ajustarLineas(negocioId: bigint, id: bigint, ajustes: { li
   if (ajustes.some((a) => !Number.isFinite(a.cantidad_aprobada) || a.cantidad_aprobada < 0)) {
     throw new HttpError(400, 'Las cantidades aprobadas deben ser números positivos o cero');
   }
-  const lineas = await prisma.distribucion_lineas.findMany({
-    where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id },
+  await transaccionSerializable(async (tx) => {
+    await bloquearDistribucion(tx, id);
+    const actual = await tx.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
+    if (!actual || !['calculada', 'en_revision'].includes(actual.estado)) throw new HttpError(409, 'La distribución cambió; actualiza antes de ajustar cantidades.');
+    const lineas = await tx.distribucion_lineas.findMany({ where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id } });
+    if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a este consolidado');
+    const porId = new Map(lineas.map((l) => [l.id.toString(), l]));
+    for (const a of ajustes) {
+      const l = porId.get(a.linea_id.toString())!;
+      await tx.distribucion_lineas.update({ where: { id: BigInt(a.linea_id) }, data: { cantidad_aprobada: a.cantidad_aprobada, costo_total: valor(a.cantidad_aprobada, num(l.costo_unitario)) } });
+    }
+    if (actual.estado === 'calculada') await tx.distribuciones.update({ where: { id }, data: { estado: 'en_revision' } });
   });
-  if (lineas.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a este consolidado');
-  const porId = new Map(lineas.map((l) => [l.id.toString(), l]));
-  await prisma.$transaction(
-    ajustes.map((a) => {
-      const l = porId.get(a.linea_id.toString());
-      const costoUnit = num(l!.costo_unitario);
-      return prisma.distribucion_lineas.update({
-        where: { id: BigInt(a.linea_id) },
-        data: { cantidad_aprobada: a.cantidad_aprobada, costo_total: valor(a.cantidad_aprobada, costoUnit) },
-      });
-    }),
-  );
-  if (dist.estado === 'calculada') {
-    await prisma.distribuciones.update({ where: { id }, data: { estado: 'en_revision' } });
-  }
   return { ok: true, ajustadas: ajustes.length };
 }
 
@@ -653,21 +677,16 @@ export async function aprobarDistribucion(negocioId: bigint, id: bigint, usuario
   if (!['calculada', 'en_revision'].includes(dist.estado)) {
     throw new HttpError(409, 'Esta distribución ya no puede aprobarse en su estado actual');
   }
-  const lineas = await prisma.distribucion_lineas.findMany({ where: { distribucion_id: id } });
-  await prisma.$transaction([
-    ...lineas
-      .filter((l) => l.cantidad_aprobada == null)
-      .map((l) =>
-        prisma.distribucion_lineas.update({
-          where: { id: l.id },
-          data: { cantidad_aprobada: l.cantidad_sugerida, costo_total: valor(num0(l.cantidad_sugerida), num(l.costo_unitario)) },
-        }),
-      ),
-    prisma.distribuciones.update({
-      where: { id },
-      data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() },
-    }),
-  ]);
+  await transaccionSerializable(async (tx) => {
+    await bloquearDistribucion(tx, id);
+    const actual = await tx.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
+    if (!actual || !['calculada', 'en_revision'].includes(actual.estado)) throw new HttpError(409, 'La distribución cambió; actualiza antes de aprobarla.');
+    const lineas = await tx.distribucion_lineas.findMany({ where: { distribucion_id: id } });
+    for (const l of lineas) if (l.cantidad_aprobada == null) {
+      await tx.distribucion_lineas.update({ where: { id: l.id }, data: { cantidad_aprobada: l.cantidad_sugerida, costo_total: valor(num0(l.cantidad_sugerida), num(l.costo_unitario)) } });
+    }
+    await tx.distribuciones.update({ where: { id }, data: { estado: 'aprobada', aprobado_por: usuarioId, aprobado_at: new Date() } });
+  });
   // La operación actual no tiene una cuadrilla intermedia de carga: al aprobar, producción
   // registra la salida y el pedido queda directamente en tránsito hacia el restaurante.
   const despachoDirecto = await completarSalidaDirecta(negocioId, id, usuarioId);
@@ -743,7 +762,15 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   const sucursalesConCarga = new Set<string>(); // solo estas serán paradas de la ruta
 
   await transaccionSerializable(async (tx) => {
-    for (const l of [...lineas].sort((a, b) => Number(a.id - b.id))) {
+    await bloquearDistribucion(tx, id);
+    const estadoActual = await tx.distribuciones.findUnique({ where: { id }, select: { estado: true } });
+    if (!estadoActual) throw new HttpError(404, 'Distribución no encontrada');
+    if (!['aprobada', 'verificada'].includes(estadoActual.estado)) {
+      if (['cargada', 'en_transito', 'parcialmente_entregada', 'entregada', 'cerrada', 'cerrada_con_incidencias'].includes(estadoActual.estado)) return;
+      throw new HttpError(409, 'La distribución cambió; actualiza antes de confirmar la carga.');
+    }
+    const lineasTrabajo = await tx.distribucion_lineas.findMany({ where: { distribucion_id: id } });
+    for (const l of [...lineasTrabajo].sort((a, b) => Number(a.id - b.id))) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
       const aprobada = num(l.cantidad_aprobada) ?? num0(l.cantidad_sugerida);
@@ -1040,7 +1067,12 @@ export async function recibirDistribucion(
 
   let incidenciaEnSucursal = false;
   await transaccionSerializable(async (tx) => {
-    for (const l of lineas) {
+    await bloquearDistribucion(tx, id);
+    const estadoActual = await tx.distribuciones.findUnique({ where: { id }, select: { estado: true } });
+    if (!estadoActual) throw new HttpError(404, 'Distribución no encontrada');
+    if (!['en_transito', 'parcialmente_entregada'].includes(estadoActual.estado)) return;
+    const lineasActuales = await tx.distribucion_lineas.findMany({ where: { distribucion_id: id, ubicacion_destino_id: ubicacionId } });
+    for (const l of lineasActuales) {
       const bodega = bodegas.get(l.product_id.toString());
       if (!bodega) throw new HttpError(400, 'No hay bodega configurada para uno de los productos');
       if (l.cantidad_recibida != null) continue; // ya recibida (idempotencia a nivel línea)
@@ -1399,9 +1431,20 @@ export async function guardarCarga(negocioId: bigint, id: bigint, items: { linea
     const maxima = num(linea.cantidad_aprobada) ?? num0(linea.cantidad_sugerida);
     if (item.cantidad > maxima + 0.0001) throw new HttpError(400, `La carga de la línea ${item.linea_id} no puede superar las ${maxima} unidades aprobadas`);
   }
-  await prisma.$transaction(
-    items.map((i) => prisma.distribucion_lineas.update({ where: { id: BigInt(i.linea_id) }, data: { cantidad_cargada: i.cantidad } })),
-  );
+  await transaccionSerializable(async (tx) => {
+    await bloquearDistribucion(tx, id);
+    const actual = await tx.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
+    if (!actual || !['aprobada', 'verificada'].includes(actual.estado)) throw new HttpError(409, 'La distribución cambió; actualiza antes de guardar el surtido.');
+    const lineasActuales = await tx.distribucion_lineas.findMany({ where: { id: { in: ids.map((lineaId) => BigInt(lineaId)) }, distribucion_id: id }, select: { id: true, cantidad_aprobada: true, cantidad_sugerida: true } });
+    if (lineasActuales.length !== ids.length) throw new HttpError(400, 'Una o más líneas no pertenecen a este consolidado');
+    const porIdActual = new Map(lineasActuales.map((l) => [Number(l.id), l]));
+    for (const item of items) {
+      const linea = porIdActual.get(item.linea_id)!;
+      const maxima = num(linea.cantidad_aprobada) ?? num0(linea.cantidad_sugerida);
+      if (item.cantidad > maxima + 0.0001) throw new HttpError(400, `La carga de la línea ${item.linea_id} no puede superar las ${maxima} unidades aprobadas`);
+    }
+    for (const i of items) await tx.distribucion_lineas.update({ where: { id: BigInt(i.linea_id) }, data: { cantidad_cargada: i.cantidad } });
+  });
   return { ok: true, guardadas: items.length };
 }
 
@@ -1413,9 +1456,14 @@ export async function marcarVerificada(negocioId: bigint, id: bigint, usuarioId:
   const dist = await cargarDistribucion(negocioId, id);
   if (dist.fecha_entrega) await asegurarSemanaEditable(negocioId, dist.fecha_entrega.toISOString().slice(0, 10));
   if (dist.estado !== 'aprobada') throw new HttpError(409, 'Solo se verifica una distribución aprobada');
-  await prisma.distribuciones.update({
-    where: { id },
-    data: { estado: 'verificada', verificado_por: usuarioId, verificado_at: new Date() },
+  await transaccionSerializable(async (tx) => {
+    await bloquearDistribucion(tx, id);
+    const actual = await tx.distribuciones.findFirst({ where: { id, negocio_id: negocioId }, select: { estado: true } });
+    if (!actual || actual.estado !== 'aprobada') throw new HttpError(409, 'La distribución cambió; actualiza antes de verificarla.');
+    await tx.distribuciones.update({
+      where: { id },
+      data: { estado: 'verificada', verificado_por: usuarioId, verificado_at: new Date() },
+    });
   });
   return { ok: true };
 }

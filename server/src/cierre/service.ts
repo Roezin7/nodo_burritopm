@@ -175,16 +175,16 @@ export function numeroFactura(anio: number, semana: number, empresa: string, ubi
   return `${anio}-${String(semana).padStart(2, '0')}-${limpio(empresa, 8)}-${limpio(ubicacion, 12)}-${linea === 'carne' ? 'M' : 'D'}`;
 }
 
-async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) {
+async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date, db: Db = prisma) {
   const [pedidos, ajustes] = await Promise.all([
-    prisma.pedidos_operativos.findMany({
+    db.pedidos_operativos.findMany({
       where: { negocio_id: negocioId, fecha_entrega: { gte: desde, lte: hasta }, estado: { notIn: ['borrador', 'cancelado'] } },
       include: {
         empresa: true, ubicacion: true,
         lineas: { include: { producto: true, distribucion_lineas: { select: { cantidad_recibida: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true } } } },
       },
     }),
-    prisma.ajustes_facturacion.findMany({
+    db.ajustes_facturacion.findMany({
       where: { negocio_id: negocioId, estado: 'abierto', semana: { inicia_at: desde, termina_at: hasta } },
       include: { empresa: true, ubicacion: true },
       orderBy: { id: 'asc' },
@@ -193,7 +193,7 @@ async function prepararFacturacion(negocioId: bigint, desde: Date, hasta: Date) 
   if (!pedidos.length) throw new HttpError(400, 'No hay pedidos confirmados para cerrar esta semana');
 
   const productosVendidos = [...new Map(pedidos.flatMap((o) => o.lineas).map((l) => [l.product_id.toString(), l.producto])).values()];
-  const preciosCalculados = await preciosVentaSemana(negocioId, productosVendidos, iso(desde), iso(hasta));
+  const preciosCalculados = await preciosVentaSemana(negocioId, productosVendidos, iso(desde), iso(hasta), db);
   const proteinasSinProduccion = productosVendidos.filter((p) => p.tipo_operativo === 'proteina' && preciosCalculados.get(p.id.toString()) == null);
   if (proteinasSinProduccion.length) {
     throw new HttpError(409, `Falta registrar producción semanal para calcular costo + $15 de: ${proteinasSinProduccion.map((p) => p.nombre).join(', ')}.`);
@@ -614,14 +614,29 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
 
   await sincronizarVentasParaCierre(negocioId, usuarioId, semana);
   const alertaInventario = await validarSemanaCerrable(negocioId, semana);
-  const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at);
 
   // El cierre reconstruye las facturas de toda la semana, guarda la fotografía
   // completa de inventario y arrastra los saldos. En producción puede superar
   // el timeout genérico de 20 s; sigue siendo una sola transacción atómica.
   const cierre = await transaccionSerializable(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM semanas_operativas WHERE id = ${semana.id} FOR UPDATE`;
     const vigente = await tx.semanas_operativas.findUnique({ where: { id: semana.id }, select: { estado: true } });
     if (vigente?.estado === 'cerrada') throw new HttpError(409, 'La semana ya está cerrada');
+    // La vista previa se calcula antes de esta transacción. Revalidar aquí es
+    // indispensable: una edición tardía no puede colarse entre la validación
+    // y la fotografía/facturación que finalmente se persisten.
+    const negocioActual = await tx.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
+    const [pedidosSinPreparar, borradoresConVenta, distribucionesActivas] = await Promise.all([
+      tx.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: 'confirmado', lineas: { some: {} } } }),
+      tx.pedidos_operativos.count({ where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: 'borrador', lineas: { some: {} } } }),
+      negocioActual?.reparto_habilitado ? tx.distribuciones.count({ where: { negocio_id: negocioId, fecha_entrega: { gte: semana.inicia_at, lte: semana.termina_at }, estado: { notIn: ['entregada', 'cerrada', 'cerrada_con_incidencias', 'cancelada'] } } }) : Promise.resolve(0),
+    ]);
+    if (borradoresConVenta) throw new HttpError(409, `Hay ${borradoresConVenta} venta(s) con cantidades todavía en borrador. Confírmalas o elimínalas antes del cierre.`);
+    if (pedidosSinPreparar) throw new HttpError(409, negocioActual?.reparto_habilitado
+      ? `Faltan ${pedidosSinPreparar} venta(s) por integrar a un despacho antes del cierre.`
+      : `No se pudieron integrar ${pedidosSinPreparar} venta(s) al despacho automático. Vuelve a intentar el cierre; no requieren preparación manual.`);
+    if (distribucionesActivas) throw new HttpError(409, `No se puede cerrar todavía: hay ${distribucionesActivas} despacho(s) pendiente(s). Confirma la entrega o cancela el despacho que ya no corresponda.`);
+    const { pedidos, precios, grupos } = await prepararFacturacion(negocioId, semana.inicia_at, semana.termina_at, tx);
     // Conserva todo el historial para que un recierre genere v2, v3, etc. Consultar solo las
     // facturas vigentes hacía que una semana reabierta intentara crear otra v1 y chocara con
     // la llave única.
@@ -686,10 +701,13 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
     }
     // Los faltantes se calculan con la ecuación de la semana seleccionada. El saldo vivo
     // puede incluir ya movimientos posteriores y no debe contaminar la fotografía histórica.
-    const saldosCierre = alertaInventario.saldos.flatMap((saldo) => {
-      const existencia = existenciaDe.get(`${saldo.ubicacion_id}:${saldo.product_id}`);
-      return existencia ? [{ existencia, cantidad: saldo.cantidad }] : [];
-    });
+    const saldosCierre = reportes.flatMap((reporte) => reporte.filas
+      .filter((fila) => fila.saldoOperativoFinal < -0.0001)
+      .map((fila) => {
+        const existencia = existenciaDe.get(`${reporte.ubicacion.id}:${fila.product_id}`);
+        return existencia ? { existencia, cantidad: r3(-fila.saldoOperativoFinal) } : null;
+      })
+      .filter((saldo): saldo is { existencia: (typeof existencias)[number]; cantidad: number } => saldo != null));
     // Un saldo negativo representa cajas que salieron sin respaldo registrado. No tiene valor
     // contable ni bloquea el cierre: se conserva en la fotografía y se abre una incidencia visible.
     for (const saldo of saldosCierre) {
