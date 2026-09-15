@@ -1,10 +1,12 @@
 import type { LineaOperacion, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { aplicarMovimiento, crearCompraAjusteConteo } from '../ledger/service.js';
+import { aplicarMovimiento } from '../ledger/service.js';
 import { num, num0 } from '../lib/num.js';
 import { costoParaValuacionInventario } from '../inventario/valuacion.js';
+import { obtenerConciliacionAlmacen } from '../inventario/conciliacion-semanal.js';
 import { HttpError } from '../middleware/error.js';
-import { eliminarConteo, eliminarConteoEnTx } from '../conteos/service.js';
+import { eliminarConteo } from '../conteos/service.js';
+import { aplicarSaldoFisicoEnTx, recalcularFisicosPosterioresEnTx } from '../inventario/saldo-fisico.js';
 import { asegurarRangoEditable, asegurarSemanaEditable } from '../lib/semana-operativa.js';
 import { asegurarInventarioInicialSemanal, obtenerConciliacionSemanal, obtenerInventarioSemanalDesechables, rangoSemana, repararPedidosHuerfanos } from './conciliacion.js';
 import { confirmarCarga } from '../distribuciones/service.js';
@@ -352,6 +354,9 @@ async function prepararPedido(negocioId: bigint, input: GuardarPedidoInput, esAd
     where: { id: { in: productIds }, negocio_id: negocioId, linea_operacion: { not: null }, activo: true },
   });
   if (productos.length !== productIds.length) throw new HttpError(400, 'Hay productos que no pertenecen a la operación');
+  if (productos.some((p) => p.tipo_operativo === 'materia_prima' || p.sku.startsWith('RAW-'))) {
+    throw new HttpError(400, 'Las materias primas son exclusivas de compras y producción. Para pedidos utiliza Taco Meat terminado, nunca Taco Meat Raw.');
+  }
   if (productos.some(esCargoContableCompra)) throw new HttpError(400, 'Los cargos contables de compra no se pueden incluir en una venta');
   const fueraDeFormato = productos.some((p) => p.linea_operacion !== input.linea && !(input.linea === 'carne' && consumiblesEnOrdenCarne.has(p.sku)));
   if (fueraDeFormato) throw new HttpError(400, 'Hay productos fuera del formato de esta orden');
@@ -770,6 +775,8 @@ async function guardarPedidoEnTx(
         },
       });
     }
+  if (consolidado) await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, input.fecha_entrega,
+    [...new Set([...(pedidoExistente?.lineas.map(l => l.product_id) ?? []), ...positivas.map(l => BigInt(l.product_id))])]);
   return { id: Number(pedido.id), estado: pedido.estado, actualizado_at: pedido.actualizado_at.toISOString() };
 }
 
@@ -1489,6 +1496,7 @@ export async function registrarCompra(negocioId: bigint, usuarioId: bigint, inpu
       });
       await tx.products.update({ where: { id: pid }, data: { ultimo_costo: costoCaja, peso_caja_lb: esMateriaPrima ? pesoCaja : undefined } });
     }
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, input.fecha, input.lineas.map(l => BigInt(l.product_id)));
     return c;
   });
   let compra;
@@ -1662,6 +1670,8 @@ export async function editarCompra(negocioId: bigint, compraId: bigint, usuarioI
         datos: { anterior: { fecha: iso(anterior.fecha), total: num0(anterior.total) }, nuevo: { fecha: input.fecha, total } },
       },
     });
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, [input.fecha, iso(anterior.fecha)].sort()[0]!,
+      [...new Set([...input.lineas.map(l => BigInt(l.product_id)), ...anterior.lineas.map(l => l.product_id)])]);
     return { id: Number(compraId), total };
   });
 }
@@ -1780,6 +1790,7 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
         },
       });
     }
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, iso(compra.fecha), compra.lineas.map(l => l.product_id));
     return { ok: true, total_revertido: num0(compra.total), lineas_revertidas: compra.lineas.length };
   });
 }
@@ -1787,10 +1798,11 @@ export async function eliminarCompra(negocioId: bigint, compraId: bigint, usuari
 export async function guardarInventarioFinal(
   negocioId: bigint,
   usuarioId: bigint,
-  input: { ubicacion_id: number; fecha: string; tipo_captura?: 'apertura' | 'cierre'; motivo?: string | null; lineas: { product_id: number; cantidad: number }[] },
+  input: { ubicacion_id: number; fecha: string; tipo_captura?: 'apertura' | 'cierre' | 'diario'; motivo?: string | null; lineas: { product_id: number; cantidad: number }[] },
 ) {
   await asegurarSemanaEditable(negocioId, input.fecha);
   const tipoCaptura = input.tipo_captura ?? 'cierre';
+  if (input.lineas.some(l => !Number.isFinite(l.cantidad) || l.cantidad < 0)) throw new HttpError(400, 'Las cantidades contadas deben ser números mayores o iguales a cero.');
   const semana = rangoSemana(input.fecha);
   if (tipoCaptura === 'apertura' && input.fecha !== semana.desde) {
     throw new HttpError(400, `La apertura debe capturarse el domingo ${semana.desde}. Selecciona "Apertura de semana" para registrar el inventario inicial.`);
@@ -1821,81 +1833,35 @@ export async function guardarInventarioFinal(
       throw new HttpError(400, `El inventario debe incluir todos los productos. Faltan: ${faltantes.map((p) => p.nombre).join(', ')}.`);
     }
   }
-  // La apertura es una fotografía de referencia, no un ajuste contra el saldo
-  // vivo. Reemplazarla no resta ni suma ventas, despachos ni compras ya
-  // registrados; esos movimientos se aplican después en la conciliación.
-  if (tipoCaptura === 'apertura') {
-    const aperturaExistente = await prisma.conteos.findFirst({
-      where: {
-        negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(semana.desde),
-        OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }],
-      },
-      select: { id: true }, orderBy: { id: 'desc' },
-    });
-    const registro = await transaccionSerializable(async (tx) => {
-      const existente = aperturaExistente
-        ? await tx.conteos.findFirst({ where: { id: aperturaExistente.id, negocio_id: negocioId }, select: { id: true } })
-        : null;
-      const id = existente?.id ?? (await tx.conteos.create({
-        data: {
-          negocio_id: negocioId, ubicacion_id: ubicacionId, estado: 'cerrado', fecha: fecha(semana.desde),
-          creado_por: usuarioId, cerrado_por: usuarioId, cerrado_at: new Date(), tipo_captura: 'apertura',
-          notas: `inventario_inicial_operativo:${semana.desde}${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ': capturado'}`,
-        },
-        select: { id: true },
-      })).id;
-      const movimientos = await tx.movimientos_inventario.count({ where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: id } });
-      if (movimientos > 0) throw new HttpError(409, 'La apertura ya tiene ajustes aplicados; no se puede reemplazar sin conservar el saldo. Crea una corrección de inventario con auditoría.');
-      await tx.conteos.update({ where: { id }, data: {
-        tipo_captura: 'apertura', estado: 'cerrado', cerrado_por: usuarioId, cerrado_at: new Date(),
-        notas: `inventario_inicial_operativo:${semana.desde}${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ': capturado'}`,
-      } });
-      await tx.conteo_lineas.deleteMany({ where: { conteo_id: id } });
-      await tx.conteo_lineas.createMany({ data: input.lineas.map((l) => {
-        const producto = productos.find((p) => p.id === BigInt(l.product_id))!;
-        return { conteo_id: id, product_id: producto.id, qty: r3(l.cantidad), unidad_id: producto.unidad_distribucion_id, factor: 1, contado: true };
-      }) });
-      return { id };
-    });
-    return { ok: true, ajustes: 0, inventario_id: Number(registro.id), tipo_captura: 'apertura' as const, advertencias: [] };
-  }
-
-  if (['CARN', 'BOD'].includes(ubicacion.codigo)) {
+  if (tipoCaptura !== 'apertura' && ['CARN', 'BOD'].includes(ubicacion.codigo)) {
     await asegurarInventarioInicialSemanal(negocioId, usuarioId, input.fecha, ubicacionId);
   }
-  // El conteo físico es evidencia y debe conservarse aunque exista una diferencia.
-  // Antes la validación del motivo abortaba toda la transacción y el usuario perdía
-  // la captura. La observación sigue siendo opcional; los ajustes quedan auditados
-  // por el movimiento que los origina.
-  const conteoExistente = await prisma.conteos.findFirst({
-    where: {
-      negocio_id: negocioId,
-      ubicacion_id: ubicacionId,
-      fecha: fecha(input.fecha),
-      OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }],
-    },
-    select: { id: true },
-    orderBy: { id: 'desc' },
-  });
-  let ajustes = 0;
   const sello = Date.now();
-  const conteo = await transaccionSerializable(async (tx) => {
-    // Una captura por almacén y fecha: reintentar o corregir el mismo conteo
-    // reemplaza sus ajustes anteriores en vez de crear una segunda fotografía.
-    if (conteoExistente) await eliminarConteoEnTx(tx, negocioId, conteoExistente.id, usuarioId, 'reemplazar_conteo');
-    const registro = await tx.conteos.create({
-      data: {
-        negocio_id: negocioId,
-        ubicacion_id: ubicacionId,
-        estado: 'cerrado',
-        fecha: fecha(input.fecha),
-        creado_por: usuarioId,
-        cerrado_por: usuarioId,
-        cerrado_at: new Date(),
-        tipo_captura: 'cierre',
-        notas: `inventario_final_operativo${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ''}`,
-      },
+  const resultado = await transaccionSerializable(async (tx) => {
+    const cerrada = await tx.semanas_operativas.findFirst({
+      where: { negocio_id: negocioId, estado: 'cerrada', termina_at: { gte: fecha(input.fecha) } },
+      select: { semana: true },
     });
+    if (cerrada) throw new HttpError(409, `La semana ${cerrada.semana} ya está cerrada. Reábrela antes de cambiar un inventario del que depende su saldo.`);
+    const existente = await tx.conteos.findFirst({
+      where: { negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(input.fecha) },
+      include: { lineas: true },
+    });
+    const eraApertura = existente?.tipo_captura === 'apertura' || existente?.notas?.startsWith('inventario_inicial_operativo');
+    if (existente && Boolean(eraApertura) !== (tipoCaptura === 'apertura')) {
+      throw new HttpError(409, 'Ya existe otro tipo de conteo en esta fecha; conserva su fecha y captura el inventario en el día correspondiente.');
+    }
+    const notas = tipoCaptura === 'apertura'
+      ? `inventario_inicial_operativo:${semana.desde}: ${input.motivo?.trim() || 'capturado'}`
+      : `inventario_${tipoCaptura === 'diario' ? 'diario' : 'final'}_operativo${input.motivo?.trim() ? `: ${input.motivo.trim()}` : ''}`;
+    const datos = { estado: 'cerrado' as const, cerrado_por: usuarioId, cerrado_at: new Date(), tipo_captura: tipoCaptura, notas };
+    // Conservar el conteo y sus movimientos permite corregirlo incluso si sus
+    // lotes ya se usaron: solo se aplica la diferencia nueva, dentro de esta transacción.
+    const registro = existente
+      ? await tx.conteos.update({ where: { id: existente.id }, data: datos })
+      : await tx.conteos.create({ data: { ...datos, negocio_id: negocioId, ubicacion_id: ubicacionId, fecha: fecha(input.fecha), creado_por: usuarioId } });
+    if (existente) await tx.conteo_lineas.deleteMany({ where: { conteo_id: registro.id } });
+    let ajustes = 0;
     if (input.lineas.length) {
       await tx.conteo_lineas.createMany({
         data: input.lineas.map((l) => {
@@ -1904,106 +1870,24 @@ export async function guardarInventarioFinal(
         }),
       });
     }
+    const conciliacion = await obtenerConciliacionAlmacen(negocioId, semana.desde, semana.hasta, ubicacionId, tx);
     for (const l of input.lineas) {
-      const productId = BigInt(l.product_id);
-      const producto = productos.find((p) => p.id === productId)!;
-      // La comparación de un conteo se hace contra existencias vivas después de
-      // retirar, si aplica, el conteo anterior. Así una fotografía posterior no
-      // vuelve a restar producción/pedidos que ya están en el ledger.
-      const existenciaBase = await tx.existencias.findUnique({
-        where: { ubicacion_id_product_id: { ubicacion_id: ubicacionId, product_id: productId } },
-        select: { cantidad_disponible: true, costo_promedio: true },
-      });
-      const deltaConteo = r3(l.cantidad - num0(existenciaBase?.cantidad_disponible));
-      let costoLotes: number | null = null;
-
-      const manejaLote = producto.tipo_operativo === 'materia_prima' || producto.linea_operacion === 'desechables';
-      if (manejaLote) {
-        const lotes = await tx.lotes_materia_prima.findMany({
-          where: { negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: productId, cajas_disponibles: { gt: 0 } },
-          orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
-        });
-        const cajasLotes = r3(lotes.reduce((a, lote) => a + num0(lote.cajas_disponibles), 0));
-        const costoDisponible = lotes.reduce((a, lote) => a + num0(lote.costo_disponible), 0);
-        costoLotes = cajasLotes > 0 ? r4(costoDisponible / cajasLotes) : null;
-        if (deltaConteo > 0.0001) {
-          // Una diferencia física positiva también es inventario real. Se crea
-          // una capa FIFO fechada en el conteo para que la siguiente producción
-          // o salida consuma exactamente lo que se contó.
-          const costo = costoLotes ?? num(existenciaBase?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
-          if (costo == null || costo <= 0) throw new HttpError(409, `${producto.nombre}: falta costo para crear la capa FIFO del conteo.`);
-          const compraTecnica = producto.linea_operacion === 'desechables'
-            ? await crearCompraAjusteConteo(tx, { negocioId, conteoId: registro.id, usuarioId, ubicacionId, productId, fecha: fecha(input.fecha), cantidad: deltaConteo, costoUnitario: costo, sello })
-            : null;
-          const pesoCaja = producto.tipo_operativo === 'materia_prima' ? num0(producto.peso_caja_lb) : 0;
-          const lote = await tx.lotes_materia_prima.create({
-            data: {
-              negocio_id: negocioId, ubicacion_id: ubicacionId, product_id: productId,
-              compra_linea_id: compraTecnica?.compraLineaId ?? null,
-              fecha: fecha(input.fecha), congelado: false,
-              cajas_iniciales: deltaConteo, cajas_disponibles: deltaConteo,
-              peso_inicial_lb: r3(deltaConteo * pesoCaja), peso_disponible_lb: r3(deltaConteo * pesoCaja),
-              costo_inicial: r2(deltaConteo * costo), costo_disponible: r2(deltaConteo * costo),
-            },
-          });
-          await tx.conteo_ajustes_lote.create({ data: { conteo_id: registro.id, lote_id: lote.id, cajas: r3(-deltaConteo), peso_lb: r3(-deltaConteo * pesoCaja), costo: r2(-deltaConteo * costo) } });
-          costoLotes = costo;
-        } else if (Math.abs(deltaConteo) > cajasLotes + 0.0001) {
-          throw new HttpError(409, `${producto.nombre}: no quedan suficientes unidades FIFO para aplicar retroactivamente la diferencia de ${deltaConteo}.`);
-        } else {
-          let faltanteFisico = r3(Math.abs(Math.min(0, deltaConteo)));
-          let costoRetirado = 0;
-          for (const lote of lotes) {
-            if (faltanteFisico <= 0.0001) break;
-            const disponibles = num0(lote.cajas_disponibles);
-            const cajas = Math.min(faltanteFisico, disponibles);
-            const proporcion = disponibles > 0 ? cajas / disponibles : 0;
-            const peso = r3(num0(lote.peso_disponible_lb) * proporcion);
-            const costo = r2(num0(lote.costo_disponible) * proporcion);
-            costoRetirado = r2(costoRetirado + costo);
-            await tx.conteo_ajustes_lote.create({ data: { conteo_id: registro.id, lote_id: lote.id, cajas: r3(cajas), peso_lb: peso, costo } });
-            await tx.lotes_materia_prima.update({
-              where: { id: lote.id },
-              data: {
-                cajas_disponibles: r3(disponibles - cajas),
-                peso_disponible_lb: r3(num0(lote.peso_disponible_lb) - peso),
-                costo_disponible: r2(num0(lote.costo_disponible) - costo),
-              },
-            });
-            faltanteFisico = r3(faltanteFisico - cajas);
-          }
-          const cajasRestantes = r3(cajasLotes - Math.abs(Math.min(0, deltaConteo)));
-          costoLotes = cajasRestantes > 0 ? r4(Math.max(0, costoDisponible - costoRetirado) / cajasRestantes) : null;
-        }
-      }
-
-      const actual = existenciaBase;
-      // El delta se aplica contra el saldo vivo. Las capas FIFO ya fueron
-      // consumidas/creadas arriba y el movimiento mantiene existencias alineadas.
-      const delta = deltaConteo;
-      if (Math.abs(delta) >= 0.0001) {
-        const costo = costoLotes ?? num(actual?.costo_promedio) ?? num(producto.ultimo_costo) ?? num(producto.costo_promedio);
-        await aplicarMovimiento(tx, {
-          negocioId, productId, tipo: delta > 0 ? 'ajuste_positivo' : 'ajuste_negativo', cantidad: Math.abs(delta), usuarioId,
-          origenId: delta < 0 ? ubicacionId : null, destinoId: delta > 0 ? ubicacionId : null, costoUnitario: costo,
-          documentoTipo: 'conteo', documentoId: registro.id, comentario: `Inventario físico final · ${input.fecha}`,
-          idempotencyKey: `inventario-final:${registro.id}:${productId}`,
-          deltas: [{ ubicacionId, productId, disponible: delta, costoUnitario: costo }],
-        });
-        ajustes += 1;
-      }
-      // En productos con FIFO el costo visible siempre debe coincidir con las
-      // capas que quedaron, incluso si el conteo no cambió la cantidad total.
-      if (manejaLote) {
-        await tx.existencias.updateMany({
-          where: { ubicacion_id: ubicacionId, product_id: productId },
-          data: { costo_promedio: costoLotes },
-        });
-      }
+      const producto = productos.find(p => p.id === BigInt(l.product_id))!;
+      const objetivo = conciliacion.filas.find(f => f.product_id === l.product_id)!.saldo_actual_esperado;
+      if (await aplicarSaldoFisicoEnTx(tx, { negocioId, usuarioId, ubicacionId, producto, conteoId: registro.id,
+        fechaCaptura: input.fecha, tipoCaptura, objetivo, sello })) ajustes += 1;
     }
-    return registro;
-  });
-  return { ok: true, ajustes, inventario_id: Number(conteo.id), advertencias: [] };
+    await tx.auditoria_operativa.create({ data: {
+      negocio_id: negocioId, usuario_id: usuarioId, accion: existente ? 'editar' : 'crear', entidad: 'conteo', entidad_id: registro.id,
+      datos: { fecha: input.fecha, tipo_captura: tipoCaptura,
+        anterior: existente?.lineas.map(l => ({ product_id: Number(l.product_id), cantidad: num0(l.qty) })) ?? [],
+        nuevo: input.lineas, ajustes,
+        conciliacion: conciliacion.filas.map(f => ({ product_id: f.product_id, apertura: f.inicial, teorico: f.teoricoFinal, fisico: f.fisico_final, saldo: f.saldoOperativoFinal, saldo_vigente: f.saldo_actual_esperado })),
+      },
+    } });
+    return { id: registro.id, ajustes };
+  }, { timeout: 90_000 });
+  return { ok: true, ajustes: resultado.ajustes, inventario_id: Number(resultado.id), tipo_captura: tipoCaptura, advertencias: [] };
 }
 
 const claveInventarioLegacy = (key: string) => {
@@ -2270,6 +2154,8 @@ export async function registrarProducciones(negocioId: bigint, usuarioId: bigint
   const ejecutar = () => transaccionSerializable(async (tx) => {
     const creadas = [];
     for (const input of inputs) creadas.push(await registrarProduccionEnTransaccion(tx, negocioId, usuarioId, input));
+    for (const input of inputs) await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, input.fecha,
+      [BigInt(input.materia_prima_id), ...input.salidas.map(s => BigInt(s.product_id))]);
     return creadas;
   });
   let resultados;
@@ -2381,6 +2267,7 @@ export async function registrarProduccionExtraordinaria(
         deltas: [{ ubicacionId, productId: producto.id, disponible: salida.cajas, costoUnitario: 0 }],
       });
     }
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, input.fecha, ids);
     return { ...produccion, salidas: input.salidas };
   });
 
@@ -2401,14 +2288,6 @@ export async function eliminarProduccionExtraordinaria(negocioId: bigint, produc
   if (!produccion) throw new HttpError(404, 'Producción extraordinaria no encontrada');
   await asegurarSemanaEditable(negocioId, iso(produccion.fecha));
   const semana = rangoSemana(iso(produccion.fecha));
-  const inventarioFinal = await prisma.conteos.findFirst({
-    where: {
-      negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id,
-      fecha: { gte: fecha(semana.desde), lte: fecha(semana.hasta) }, notas: { startsWith: 'inventario_final_operativo' },
-    },
-    select: { id: true },
-  });
-  if (inventarioFinal) throw new HttpError(409, 'Elimina primero el inventario final de la semana para corregir esta producción.');
 
   await transaccionSerializable(async (tx) => {
     for (const salida of produccion.salidas) {
@@ -2434,6 +2313,7 @@ export async function eliminarProduccionExtraordinaria(negocioId: bigint, produc
       where: { negocio_id: negocioId, documento_tipo: 'produccion_extraordinaria', documento_id: produccion.id },
     });
     await tx.producciones_extraordinarias.delete({ where: { id: produccion.id } });
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, iso(produccion.fecha), produccion.salidas.map(s => s.product_id));
     await tx.auditoria_operativa.create({
       data: {
         negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar', entidad: 'produccion_extraordinaria', entidad_id: produccion.id,
@@ -2521,19 +2401,12 @@ export async function eliminarProduccion(negocioId: bigint, produccionId: bigint
   if (!produccion) throw new HttpError(404, 'Producción no encontrada');
   await asegurarSemanaEditable(negocioId, iso(produccion.fecha));
   const semana = rangoSemana(iso(produccion.fecha));
-  const inventarioFinal = await prisma.conteos.findFirst({
-    where: {
-      negocio_id: negocioId, ubicacion_id: produccion.ubicacion_id,
-      fecha: { gte: fecha(semana.desde), lte: fecha(semana.hasta) },
-      notas: { startsWith: 'inventario_final_operativo' },
-    },
-    select: { id: true },
-  });
-  if (inventarioFinal) throw new HttpError(409, 'Elimina primero el inventario final de la semana; después corrige la producción y vuelve a capturarlo.');
 
   let porProducto = new Map<string, { cajas: number; costo: number; actualizarCosto: boolean }>();
   await transaccionSerializable(async (tx) => {
     porProducto = await revertirProduccionEnTransaccion(tx, negocioId, produccion);
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, iso(produccion.fecha),
+      [produccion.materia_prima_id, ...produccion.salidas.map(s => s.product_id)]);
     await tx.auditoria_operativa.create({
       data: {
         negocio_id: negocioId, usuario_id: usuarioId, accion: 'eliminar', entidad: 'produccion', entidad_id: produccion.id,
@@ -2567,16 +2440,6 @@ export async function editarProduccion(
   if (semanaAnterior.desde !== semanaNueva.desde) {
     throw new HttpError(409, 'La edición debe permanecer dentro de la misma semana operativa');
   }
-  const inventarioFinal = await prisma.conteos.findFirst({
-    where: {
-      negocio_id: negocioId,
-      ubicacion_id: produccion.ubicacion_id,
-      fecha: { gte: fecha(semanaAnterior.desde), lte: fecha(semanaAnterior.hasta) },
-      notas: { startsWith: 'inventario_final_operativo' },
-    },
-    select: { id: true },
-  });
-  if (inventarioFinal) throw new HttpError(409, 'Elimina primero el inventario final de la semana para editar esta producción.');
 
   const anterior = {
     id: Number(produccion.id),
@@ -2591,6 +2454,8 @@ export async function editarProduccion(
       ...input,
       idempotency_key: input.idempotency_key ?? `edicion-produccion:${produccion.id}:${Date.now()}`,
     });
+    await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, [input.fecha, iso(produccion.fecha)].sort()[0]!,
+      [...new Set([produccion.materia_prima_id, BigInt(input.materia_prima_id), ...produccion.salidas.map(s => s.product_id), ...input.salidas.map(s => BigInt(s.product_id))])]);
     await tx.auditoria_operativa.create({
       data: {
         negocio_id: negocioId,

@@ -21,13 +21,15 @@ export async function transaccionSerializable<T>(
   trabajo: (tx: Prisma.TransactionClient) => Promise<T>,
   opciones: OpcionesTransaccion = {},
 ): Promise<T> {
-  const { maxWait = 5_000, timeout = 20_000, reintentos = 3, reintentarUnico = false } = opciones;
+  const { maxWait = 5_000, timeout = 20_000, reintentos = 5, reintentarUnico = false } = opciones;
   for (let intento = 0; ; intento += 1) {
     try {
       return await prisma.$transaction(trabajo, { isolationLevel: 'Serializable', maxWait, timeout });
     } catch (error) {
       const reintentable = esErrorPrisma(error, 'P2034') || (reintentarUnico && esErrorPrisma(error, 'P2002'));
       if (!reintentable || intento >= reintentos) throw error;
+      // Evitar que capturas concurrentes vuelvan a colisionar inmediatamente.
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000, 50 * 2 ** intento) + Math.floor(Math.random() * 50)));
     }
   }
 }

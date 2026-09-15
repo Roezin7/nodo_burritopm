@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../db.js';
-import { guardarPedido, listarPedidos } from './service.js';
+import { guardarPedido, guardarInventarioFinal, listarPedidos } from './service.js';
+import { obtenerConciliacionAlmacen } from '../inventario/conciliacion-semanal.js';
 
 describe('corrección de una venta procesada', () => {
   let negocioId: bigint;
@@ -120,6 +121,7 @@ describe('corrección de una venta procesada', () => {
     await prisma.pedido_operativo_lineas.deleteMany({ where: { pedido_id: pedidoId } });
     await prisma.pedidos_operativos.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.existencias.deleteMany({ where: { negocio_id: negocioId } });
+    await prisma.conteos.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.lotes_materia_prima.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.semanas_operativas.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.products.deleteMany({ where: { negocio_id: negocioId } });
@@ -129,6 +131,17 @@ describe('corrección de una venta procesada', () => {
     await prisma.empresas_clientes.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.unidades.deleteMany({ where: { negocio_id: negocioId } });
     await prisma.negocios.delete({ where: { id: negocioId } });
+  });
+
+  it('rechaza Taco Meat Raw por API tanto individual como en captura administrativa', async () => {
+    const raw = await prisma.products.create({ data: { negocio_id: negocioId, nombre: 'Taco Meat Raw', sku: 'RAW-TAPATIOS-TACO', unidad_distribucion_id: unidadId, linea_operacion: 'carne', tipo_operativo: 'materia_prima' } });
+    for (const admin of [true, false]) {
+      await expect(guardarPedido(negocioId, usuarioId, {
+        ubicacion_id: Number(sucursalId), linea: 'carne', fecha_entrega: '2037-07-15',
+        lineas: [{ product_id: Number(raw.id), cantidad: 1 }],
+      }, admin)).rejects.toThrow('materias primas son exclusivas');
+    }
+    expect(await prisma.pedido_operativo_lineas.count({ where: { product_id: raw.id } })).toBe(0);
   });
 
   it('muestra en la consulta global del admin el mismo pedido capturado por un restaurante', async () => {
@@ -360,5 +373,21 @@ describe('corrección de una venta procesada', () => {
     expect(Number(destino.cantidad_disponible)).toBe(9);
     const actualizada = await prisma.distribucion_lineas.findUniqueOrThrow({ where: { id: lineaDistribucion.id } });
     expect(Number(actualizada.cantidad_recibida)).toBe(9);
+  });
+
+  it('editar un pedido anterior al físico conserva el final contado y actualiza su diferencia', async () => {
+    await prisma.ubicaciones.update({ where: { id: bodegaId }, data: { codigo: 'CARN' } });
+    const productos = await prisma.products.findMany({ where: { negocio_id: negocioId, linea_operacion: 'carne' } });
+    await guardarInventarioFinal(negocioId, usuarioId, { ubicacion_id: Number(bodegaId), fecha: '2037-07-18', tipo_captura: 'cierre',
+      lineas: productos.map(p => ({ product_id: Number(p.id), cantidad: p.id === productoId ? 5 : 0 })) });
+    const antes = await obtenerConciliacionAlmacen(negocioId, '2037-07-12', '2037-07-18', bodegaId);
+    const pedido = await prisma.pedidos_operativos.findUniqueOrThrow({ where: { id: pedidoId } });
+    await guardarPedido(negocioId, usuarioId, { ubicacion_id: Number(sucursalId), fecha_entrega: '2037-07-15', linea: 'carne', actualizado_at: pedido.actualizado_at.toISOString(),
+      lineas: [{ product_id: Number(productoId), cantidad: 7 }] }, true);
+    const despues = await obtenerConciliacionAlmacen(negocioId, '2037-07-12', '2037-07-18', bodegaId);
+    const f = despues.filas.find(f => f.product_id === Number(productoId))!;
+    const anterior = antes.filas.find(f => f.product_id === Number(productoId))!;
+    expect([f.fisico_final, f.saldoOperativoFinal, f.actual, f.diferencia_ledger]).toEqual([5, 5, 5, 0]);
+    expect(f.diferenciaFinal).toBe(anterior.diferenciaFinal! + 1);
   });
 });

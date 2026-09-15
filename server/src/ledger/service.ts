@@ -139,7 +139,7 @@ export async function aplicarMovimiento(tx: Tx, p: MovimientoParams): Promise<bo
  * Es una entrada técnica: conserva costo/lote, pero se marca fuera de flujo de caja. */
 export async function crearCompraAjusteConteo(
   tx: Tx,
-  input: { negocioId: bigint; conteoId: bigint; usuarioId: bigint; ubicacionId: bigint; productId: bigint; fecha: Date; cantidad: number; costoUnitario: number; sello: number },
+  input: { negocioId: bigint; conteoId: bigint; usuarioId: bigint; ubicacionId: bigint; productId: bigint; fecha: Date; cantidad: number; costoUnitario: number; sello: number | string },
 ) {
   const costoTotal = r3(input.cantidad * input.costoUnitario);
   const compraKey = `conteo-compra:${input.conteoId}:${input.sello}:${input.productId}`;
@@ -177,7 +177,7 @@ export async function reconciliarConteo(negocioId: bigint, conteoId: bigint, usu
   const [conteo, lineas, ubicacion] = await Promise.all([
     prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId, ubicacion_id: ubicacionId }, select: { fecha: true } }),
     prisma.conteo_lineas.findMany({
-    where: { conteo_id: conteoId },
+    where: { conteo_id: conteoId, contado: true },
     include: { products: { select: { ultimo_costo: true, costo_promedio: true, linea_operacion: true } } },
     }),
     prisma.ubicaciones.findUnique({ where: { id: ubicacionId }, select: { codigo: true } }),

@@ -31,6 +31,7 @@ interface Existencia {
   costo_promedio: number | null;
   costo_transito_promedio?: number | null;
   valor: number;
+  apertura?: number;
 }
 
 interface Stock {
@@ -126,26 +127,31 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
 
   async function recargar() {
     if (!almacenId) return;
+    const solicitud = ++cargaActual.current;
     const [existencias, inventarios] = await Promise.all([
-      api<Stock>(`/existencias?ubicacion=${almacenId}&semana=${semana.inicio}`),
-      admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`) : Promise.resolve([]),
+      api<Stock>(`/existencias?ubicacion=${almacenId}&semana=${semana.inicio}`, { fresh: true }),
+      admin ? api<InventarioGuardado[]>(`/operacion/inventarios-finales?ubicacion_id=${almacenId}`, { fresh: true }) : Promise.resolve([]),
     ]);
     cacheAlmacen.current.set(`${almacenId}:${semana.inicio}`, { stock: existencias, historial: inventarios });
+    if (solicitud !== cargaActual.current) return;
     setStock(existencias); setHistorial(inventarios);
+    setResumenAlmacenes(actual => ({ ...actual, [Number(almacenId)]: existencias.valor_total }));
   }
 
+  useEffect(() => {
+    const actualizar = () => {
+      cacheAlmacen.current.clear();
+      if (!editando) void recargar().catch(e => setError(e instanceof Error ? e.message : 'No se pudo actualizar el inventario.'));
+    };
+    window.addEventListener('bpm-data-updated', actualizar);
+    window.addEventListener('focus', actualizar);
+    return () => { window.removeEventListener('bpm-data-updated', actualizar); window.removeEventListener('focus', actualizar); };
+  }, [almacenId, semana.inicio, admin, editando]);
+
   const historialSemana = historial.filter((i) => i.fecha >= semana.inicio && i.fecha <= semana.fin);
-  const capturaSemana = !semana.actual ? historialSemana.find((i) => i.tipo === 'trazable' && i.captura === 'cierre' && i.lineas?.length) : undefined;
+  const capturaSemana = historialSemana.find((i) => i.tipo === 'trazable' && i.captura === 'cierre' && i.lineas?.length);
   const aperturaSemana = historialSemana.find((i) => i.tipo === 'trazable' && i.captura === 'apertura' && i.lineas?.length);
-  const itemsPeriodo = useMemo(() => {
-    if (!capturaSemana?.lineas || !stock || stock.fuente === 'cierre_semanal') return stock?.items ?? [];
-    const cantidadesCapturadas = new Map(capturaSemana.lineas.map((l) => [l.product_id, l.cantidad]));
-      return stock.items.map((i) => {
-        const disponible = cantidadesCapturadas.get(i.product_id) ?? 0;
-        const valor = i.costo_promedio == null ? 0 : Math.round((disponible * i.costo_promedio + Number.EPSILON) * 100) / 100;
-        return { ...i, disponible, reservada: 0, transito: 0, valor };
-      });
-  }, [stock, capturaSemana]);
+  const itemsPeriodo = stock?.items ?? [];
 
   const filas = useMemo(() => {
     const q = buscar.trim().toLowerCase();
@@ -166,11 +172,8 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
   const totalInventarios = almacenes.reduce((total, almacen) => total + (resumenAlmacenes[almacen.id] ?? 0), 0);
 
   function iniciarCaptura(tipo: 'apertura' | 'cierre') {
-    const referencia = tipo === 'apertura' && aperturaSemana?.lineas?.length
-      ? new Map(aperturaSemana.lineas.map((linea) => [linea.product_id, linea.cantidad]))
-      : null;
     setModoCaptura(tipo);
-    setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(referencia?.get(i.product_id) ?? i.disponible)])));
+    setCantidades(Object.fromEntries((stock?.items ?? []).map((i) => [i.product_id, String(tipo === 'apertura' ? i.apertura ?? i.disponible : i.disponible)])));
     setFecha(tipo === 'apertura' ? semana.inicio : almacenActual?.codigo === 'CARN' ? semana.fin : fechaDentroDeSemana(semana));
     setObservacion('');
     setSoloDiferencias(false);
@@ -273,7 +276,7 @@ export default function InventarioOperacion({ integrado = false, semana = crearS
     {(stock?.cajas_perdidas ?? 0) > 0 && <p className="notice notice--warning"><strong>{stock!.cajas_perdidas!.toLocaleString('es-MX')} de faltante teórico.</strong> Se mostrará en 0 y no bloqueará el cierre; toma un conteo físico sólo si necesitas confirmar una posible merma.</p>}
     <p className="context-note">{editando
       ? modoCaptura === 'apertura'
-        ? <>Apertura de semana: captura lo que había el domingo, antes de compras, despachos y ventas. No modifica el saldo vivo.</>
+        ? <>Apertura de semana: captura lo que había el domingo. Se actualizarán el saldo y los lotes, conservando compras, producción, despachos y conteos posteriores.</>
         : <>Cierre físico: captura lo que realmente queda al final; se compara contra el teórico y registra diferencias auditables.</>
       : !semana.actual
         ? stock?.fuente === 'cierre_semanal' ? <>Vista del cierre contable de la semana {semana.numero}.</> : stock?.fuente === 'conteo_fisico_semanal' || capturaSemana ? <>Cierre físico de la semana {semana.numero}; valuado al costo vigente.</> : aperturaSemana ? <>Apertura registrada el {aperturaSemana.fecha}; el saldo mostrado aplica los movimientos de la semana.</> : stock?.fuente === 'conciliacion_semanal' ? <>Saldo teórico aislado de la semana {semana.numero}; no incluye movimientos posteriores.</> : <>Sin cierre histórico; se muestra el saldo actual.</>

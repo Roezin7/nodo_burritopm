@@ -5,6 +5,14 @@ const TOKEN_KEY = 'bpm_token';
 const CACHE_GET_MS = 15_000;
 const cacheGet = new Map<string, { hasta: number; datos: unknown }>();
 const getEnCurso = new Map<string, Promise<unknown>>();
+let versionCacheGet = 0;
+
+function invalidarLecturas() {
+  versionCacheGet += 1;
+  cacheGet.clear();
+  getEnCurso.clear();
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('bpm-data-updated'));
+}
 
 /** Llave estable para reintentar una mutación sin duplicarla en el servidor. */
 export function nuevaClaveIdempotencia(alcance: string): string {
@@ -47,13 +55,14 @@ function admiteColaOffline(method: string, path: string) {
 
 export async function api<T = unknown>(
   path: string,
-  opts: { method?: string; body?: unknown; auth?: boolean } = {},
+  opts: { method?: string; body?: unknown; auth?: boolean; fresh?: boolean } = {},
 ): Promise<T> {
   const { method = 'GET', body, auth = true } = opts;
   const esMutacion = method !== 'GET' && method !== 'HEAD';
   const token = auth ? getToken() : null;
   const claveGet = `${token ?? 'publico'}:${path}`;
-  if (method === 'GET') {
+  const versionLectura = versionCacheGet;
+  if (method === 'GET' && !opts.fresh) {
     const guardado = cacheGet.get(claveGet);
     if (guardado && guardado.hasta > Date.now()) return guardado.datos as T;
     const pendiente = getEnCurso.get(claveGet);
@@ -80,7 +89,10 @@ export async function api<T = unknown>(
       throw new ApiError(0, 'Sin conexión');
     }
 
-    if (res.status === 204) return undefined as T;
+    if (res.status === 204) {
+      if (esMutacion) invalidarLecturas();
+      return undefined as T;
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (res.status === 401) {
@@ -89,8 +101,12 @@ export async function api<T = unknown>(
       }
       throw new ApiError(res.status, (data as { error?: string }).error ?? 'Error de red');
     }
-    if (method === 'GET') cacheGet.set(claveGet, { hasta: Date.now() + CACHE_GET_MS, datos: data });
-    else cacheGet.clear();
+    if (method === 'GET') {
+      // Una lectura anterior a una mutación tampoco debe devolver datos viejos
+      // a su pantalla, aunque ya no pueda contaminar la caché.
+      if (versionLectura !== versionCacheGet) return api<T>(path, { ...opts, fresh: true });
+      if (getEnCurso.get(claveGet) === solicitud) cacheGet.set(claveGet, { hasta: Date.now() + CACHE_GET_MS, datos: data });
+    } else invalidarLecturas();
     return data as T;
   };
 
@@ -100,6 +116,6 @@ export async function api<T = unknown>(
   try {
     return await solicitud;
   } finally {
-    getEnCurso.delete(claveGet);
+    if (getEnCurso.get(claveGet) === solicitud) getEnCurso.delete(claveGet);
   }
 }

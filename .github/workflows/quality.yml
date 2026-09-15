@@ -44,6 +44,8 @@ jobs:
       - run: npm run seed:operacion -w server
       - run: npm run build
       - run: npm test
+      - run: npx vitest run --root .. client/test/api.test.ts
+        working-directory: server
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - if: always()

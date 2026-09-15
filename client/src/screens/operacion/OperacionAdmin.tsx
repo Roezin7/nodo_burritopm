@@ -13,7 +13,7 @@ import OperacionError from '../../components/OperacionError';
 
 export type OperacionSeccion = 'compras' | 'produccion' | 'rutas' | 'cierre';
 interface Catalogo {
-  ubicaciones: { id: number; nombre: string; tipo: string; empresa: { nombre: string } | null }[];
+  ubicaciones: { id: number; nombre: string; codigo: string; tipo: string; empresa: { nombre: string } | null }[];
   productos: { id: number; nombre: string; sku: string; linea: string; tipo: string; unidad: string; costo: number | null; precio: number | null; peso_caja_lb: number | null; produccion_dias: number[]; produccion_extraordinaria: boolean; es_cargo_compra: boolean }[];
   proveedores: { id: number; nombre: string }[];
   plantillas: { id: number; nombre: string; codigo: string; linea: string; dia_semana: number; conductor: string; paradas: { ubicacion_id: number; nombre: string; orden: number; opcional: boolean }[] }[];
@@ -77,12 +77,17 @@ interface ConciliacionFila {
   compras1: number; compras2: number; produccionEntrada1: number; produccionEntrada2: number;
   produccionSalida1: number; produccionSalida2: number; salidas1: number; salidas2: number;
   pedidos1: number; pedidos2: number; saldoMiercoles: number; teoricoFinal: number; diferenciaFinal: number | null;
+  directos1: number; directos2: number; saldoOperativoFinal: number; ajuste_apertura: number;
+  saldo_actual_esperado: number; movimientos_posteriores: number; diferencia_ledger: number; diferencia_fifo: number | null;
+  fuente_inicial: { fecha: string; documento: string; tipo: string } | null;
+  trazabilidad: { fecha: string; documento: string; tipo: string; cantidad: number; saldo: number; ajuste: number | null; aplicada: boolean }[];
 }
 interface Conciliacion {
   ubicacion: { id: number; nombre: string };
   periodo: { desde: string; hasta: string; corte_miercoles: string };
   inicial_fijado: boolean; final_capturado: boolean; origen_inicial: 'fijado' | 'cierre_anterior' | 'reconstruido'; filas: ConciliacionFila[];
-  resumen: { saldos_provisionales: number; cajas_perdidas: number; diferencias_fisicas: number; producciones: number; pedidos: number };
+  resumen: { saldos_provisionales: number; cajas_perdidas: number; diferencias_fisicas: number; producciones: number; pedidos: number;
+    diferencias_ledger: number; diferencias_fifo: number; aperturas_desactualizadas: number };
 }
 const hoy = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -700,40 +705,65 @@ function Rutas({ catalogo, busy, setBusy, onDone, setError }: { catalogo: Catalo
 function ConciliacionSemanal({ semana, busy, setBusy, setError }: { semana: SemanaSeleccionada; busy: boolean; setBusy: (v: boolean) => void; setError: (v: string) => void }) {
   const toast = useToast();
   const [reporte, setReporte] = useState<Conciliacion | null>(null);
+  const [almacenes, setAlmacenes] = useState<{ id: number; nombre: string; codigo: string }[]>([]);
+  const [ubicacion, setUbicacion] = useState('');
+  const [buscar, setBuscar] = useState('');
+  const solicitud = useRef(0);
   async function cargar() {
-    try { setReporte(await api<Conciliacion>(`/operacion/conciliacion?desde=${semana.inicio}&hasta=${semana.fin}`)); }
-    catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo calcular la conciliación semanal.'); }
+    const turno = ++solicitud.current;
+    try {
+      const r = await api<Conciliacion>(`/operacion/conciliacion?desde=${semana.inicio}&hasta=${semana.fin}${ubicacion ? `&ubicacion_id=${ubicacion}` : ''}`, { fresh: true });
+      if (turno === solicitud.current) setReporte(r);
+    } catch (e) { if (turno === solicitud.current) setError(e instanceof ApiError ? e.message : 'No se pudo calcular la conciliación semanal.'); }
   }
-  useEffect(() => { setReporte(null); void cargar(); }, [semana.inicio, semana.fin]);
+  useEffect(() => {
+    void api<Catalogo>('/operacion/catalogo').then(c => setAlmacenes(c.ubicaciones.filter(u => ['CARN', 'BOD'].includes(u.codigo)))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    setReporte(null); void cargar();
+    const actualizar = () => { void cargar(); };
+    window.addEventListener('bpm-data-updated', actualizar);
+    window.addEventListener('focus', actualizar);
+    return () => { solicitud.current += 1; window.removeEventListener('bpm-data-updated', actualizar); window.removeEventListener('focus', actualizar); };
+  }, [semana.inicio, semana.fin, ubicacion]);
   async function fijarInicio() {
     setBusy(true); setError('');
     try {
-      await api('/operacion/conciliacion/inicializar', { method: 'POST', body: { desde: semana.inicio } });
-      await cargar(); toast.ok('Inventario inicial fijado sin modificar existencias.');
+      await api('/operacion/conciliacion/inicializar', { method: 'POST', body: { desde: semana.inicio, ubicacion_id: ubicacion ? Number(ubicacion) : undefined } });
+      await cargar(); toast.ok('Referencia inicial registrada; la herencia se actualizará con la operación anterior.');
     } catch (e) { setError(e instanceof ApiError ? e.message : 'No se pudo fijar el inventario inicial.'); }
     finally { setBusy(false); }
   }
-  const q = (n: number) => Math.abs(n) < 0.0001 ? '—' : n.toLocaleString('es-MX', { maximumFractionDigits: 3 });
-  if (!reporte) return <section className="workspace-card"><Spinner label="Calculando conciliación…" /></section>;
+  const q = (n: number) => n.toLocaleString('es-MX', { maximumFractionDigits: 3 });
+  const etiquetas: Record<string, string> = { apertura: 'Apertura contada', heredado: 'Referencia automática', fisico: 'Conteo físico', snapshot: 'Cierre semanal', compra: 'Compra', produccion: 'Producción recibida', consumo_produccion: 'Uso en producción', despacho: 'Despacho', ingreso: 'Ingreso directo', retiro: 'Retiro directo' };
+  const visibles = reporte?.filas.filter(f => `${f.nombre} ${f.sku}`.toLowerCase().includes(buscar.toLowerCase())) ?? [];
   return <section className="workspace-card weekly-reconciliation">
-    <div className="workspace-card-head">
-      <div><span className="eyebrow">Control de cierre</span><h2>Auditoría de inventario</h2><p>Compara el movimiento calculado con el conteo físico capturado en Inventario.</p></div>
-      {!reporte.inicial_fijado && <button className="btn btn-primary" disabled={busy} onClick={() => void fijarInicio()}>Fijar inventario inicial</button>}
-    </div>
-    <div className="reconciliation-status">
-      <span className={`chip ${reporte.inicial_fijado ? 'chip--ok' : 'chip--warn'}`}>{reporte.inicial_fijado ? 'Inicio fijado' : reporte.origen_inicial === 'cierre_anterior' ? 'Inicio tomado del sábado anterior' : 'Inicio reconstruido, falta fijar'}</span>
-      <span className={`chip ${reporte.final_capturado ? 'chip--ok' : 'chip--muted'}`}>{reporte.final_capturado ? 'Doble check físico capturado' : 'Sin conteo físico · opcional'}</span>
-      {reporte.resumen.saldos_provisionales > 0 && <span className="chip chip--warn">{reporte.resumen.cajas_perdidas.toLocaleString('es-MX')} faltante teórico · no bloquea cierre</span>}
-      {reporte.resumen.diferencias_fisicas > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fisicas} diferencias documentadas</span>}
-    </div>
-    <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Corregir producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Abrir inventario físico</Link></div>
-    <CollapsibleSection title="Detalle de conciliación" count={reporte.filas.length} defaultOpen={false}><div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto</th><th>Inicio</th><th>+ Entradas L–X</th><th>− Uso/salida X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida S</th><th>Final calculado</th><th>Físico opcional</th><th>Diferencia</th></tr></thead><tbody>{reporte.filas.map((f) => {
-      const entradas1 = f.compras1 + f.produccionSalida1; const salidas1 = f.produccionEntrada1 + f.salidas1;
-      const entradas2 = f.compras2 + f.produccionSalida2; const salidas2 = f.produccionEntrada2 + f.salidas2;
-      const diferencia = f.diferenciaFinal ?? 0;
-      return <tr key={f.product_id} className={Math.abs(diferencia) > 0.0001 || f.actual < -0.0001 ? 'is-different' : ''}><td><strong>{f.nombre}</strong><small>{f.tipo?.replaceAll('_', ' ')} · pedidos {q(f.pedidos1)} / {q(f.pedidos2)}</small></td><td>{q(f.inicial)}</td><td>{q(entradas1)}</td><td>{q(salidas1)}</td><td><strong>{q(f.saldoMiercoles)}</strong></td><td>{q(entradas2)}</td><td>{q(salidas2)}</td><td><strong>{q(f.teoricoFinal)}</strong></td><td>{f.fisico_final == null ? 'Sin conteo' : q(f.fisico_final)}</td><td className={Math.abs(diferencia) > 0.0001 ? 'txt-danger' : ''}>{f.diferenciaFinal == null ? '—' : q(diferencia)}</td></tr>;
-    })}</tbody></table></div></CollapsibleSection>
-    {!reporte.filas.length && <div className="empty-state"><strong>Sin movimiento de carne</strong><span>No hay productos que conciliar en esta semana.</span></div>}
+    <div className="workspace-card-head"><div><span className="eyebrow">Control de cierre</span><h2>Auditoría de inventario</h2><p>Apertura + entradas − salidas + diferencias físicas = saldo a heredar.</p></div>
+      <button className="btn btn-secondary" disabled={busy} onClick={() => void cargar()}>Actualizar</button></div>
+    <div className="workspace-toolbar"><label className="field"><span>Almacén</span><select value={ubicacion || String(almacenes.find(a => a.codigo === 'CARN')?.id ?? '')} onChange={e => setUbicacion(e.target.value)}>{almacenes.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select></label><label className="field"><span>Buscar producto</span><input value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Ej. Taco Meat" /></label></div>
+    {!reporte ? <Spinner label="Calculando conciliación…" /> : <>
+      <div className="reconciliation-status">
+        <span className="chip chip--ok">{reporte.origen_inicial === 'fijado' ? 'Apertura capturada' : reporte.origen_inicial === 'cierre_anterior' ? 'Apertura heredada de la operación anterior' : 'Apertura reconstruida'}</span>
+        <span className={`chip ${reporte.final_capturado ? 'chip--ok' : 'chip--muted'}`}>{reporte.final_capturado ? 'Físico capturado' : 'Sin conteo físico'}</span>
+        {reporte.resumen.diferencias_fisicas > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fisicas} diferencias físicas</span>}
+        {reporte.resumen.diferencias_ledger > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_ledger} diferencias con existencias registradas</span>}
+        {reporte.resumen.diferencias_fifo > 0 && <span className="chip chip--warn">{reporte.resumen.diferencias_fifo} diferencias con lotes</span>}
+        {reporte.resumen.aperturas_desactualizadas > 0 && <span className="chip chip--muted">Herencia recalculada desde la evidencia más reciente</span>}
+        {!reporte.inicial_fijado && <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void fijarInicio()}>Registrar referencia inicial</button>}
+      </div>
+      <p className="context-note">El saldo a heredar pertenece a esta semana. Las diferencias de registro y lotes comparan el saldo vigente esperado después de las operaciones posteriores. Un cero físico significa que se contaron cero unidades.</p>
+      <div className="reconciliation-links"><Link to={`/semana/produccion?semana=${semana.inicio}`}>Revisar producción</Link><Link to={`/semana/inventario?semana=${semana.inicio}`}>Abrir inventario físico</Link></div>
+      <div className="reconciliation-table-wrap"><table className="reconciliation-table"><thead><tr><th>Producto y origen</th><th>Apertura</th><th>+ Entradas D–X</th><th>− Uso/salida D–X</th><th>Saldo miércoles</th><th>+ Entradas J–S</th><th>− Uso/salida J–S</th><th>Otros movimientos</th><th>Final calculado</th><th>Último físico</th><th>Ajuste físico</th><th>Saldo a heredar</th><th>Registrado hoy</th><th>Dif. registro</th><th>Dif. lotes</th></tr></thead><tbody>{visibles.map(f => {
+        const diferencia = f.diferenciaFinal ?? 0;
+        return <tr key={f.product_id} className={Math.abs(diferencia) > 0.001 || Math.abs(f.diferencia_ledger) > 0.001 || Math.abs(f.diferencia_fifo ?? 0) > 0.001 ? 'is-different' : ''}>
+          <td><strong>{f.nombre}</strong>{f.tipo === 'materia_prima' && <small>Materia prima · no se vende en pedidos</small>}<small>{f.fuente_inicial ? `${etiquetas[f.fuente_inicial.tipo] ?? f.fuente_inicial.tipo} · ${f.fuente_inicial.fecha} · ${f.fuente_inicial.documento}` : 'Sin documento de apertura'}</small>
+            {Math.abs(f.ajuste_apertura) > 0.001 && <small>Apertura corregida: {q(f.ajuste_apertura)} respecto al arrastre anterior.</small>}
+            <details><summary>Ver movimientos ({f.trazabilidad.length})</summary><ul>{f.trazabilidad.map((m, i) => <li key={i}>{m.fecha} · {etiquetas[m.tipo] ?? m.tipo} · {m.documento}: {q(m.cantidad)}{m.aplicada ? ` → saldo ${q(m.saldo)}${m.ajuste != null ? ` (ajuste ${q(m.ajuste)})` : ''}` : ' · referencia reemplazada por la herencia vigente'}</li>)}</ul><p>Operaciones posteriores: {q(f.movimientos_posteriores)}. Saldo vigente esperado: {q(f.saldo_actual_esperado)}.</p></details>
+          </td>
+          <td>{q(f.inicial)}</td><td>{q(f.compras1 + f.produccionSalida1)}</td><td>{q(f.produccionEntrada1 + f.salidas1)}</td><td>{q(f.saldoMiercoles)}</td><td>{q(f.compras2 + f.produccionSalida2)}</td><td>{q(f.produccionEntrada2 + f.salidas2)}</td><td>{q(f.directos1 + f.directos2)}</td><td>{q(f.teoricoFinal)}</td><td>{f.fisico_final == null ? 'Sin conteo' : q(f.fisico_final)}</td><td>{f.diferenciaFinal == null ? '—' : q(diferencia)}</td><td><strong>{q(f.saldoOperativoFinal)}</strong></td><td>{q(f.actual)}</td><td>{q(f.diferencia_ledger)}</td><td>{f.diferencia_fifo == null ? 'No aplica' : q(f.diferencia_fifo)}</td>
+        </tr>;
+      })}</tbody></table></div>
+    </>}
   </section>;
 }
 

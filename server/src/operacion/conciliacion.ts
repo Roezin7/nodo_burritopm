@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { obtenerConciliacionAlmacen } from '../inventario/conciliacion-semanal.js';
 import { num0 } from '../lib/num.js';
 import { HttpError } from '../middleware/error.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
@@ -138,365 +139,20 @@ async function ubicacionConciliable(negocioId: bigint, ubicacionId?: bigint) {
 
 export async function obtenerConciliacionSemanal(negocioId: bigint, desde: string, hasta: string, ubicacionId?: bigint) {
   const ubicacion = await ubicacionConciliable(negocioId, ubicacionId);
-  const inicio = fecha(desde);
-  const fin = fecha(hasta);
-  const corte = sumarDias(inicio, 3);
-  const enPrimerCorte = (d: Date) => d <= corte;
-  const productos = await prisma.products.findMany({
-    where: { negocio_id: negocioId, activo: true, linea_operacion: 'carne', es_cargo_compra: false },
-    include: { unidad_distribucion: { select: { nombre: true } } },
-    orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
-  });
-  const ids = productos.map((p) => p.id);
-  const [existencias, compras, producciones, produccionesExtraordinarias, distribuciones, pedidos, inicial, final, cierreAnterior, semanaAnterior, movimientosConteo] = await Promise.all([
-    prisma.existencias.findMany({ where: { ubicacion_id: ubicacion.id, product_id: { in: ids } } }),
-    prisma.compras.findMany({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
-      include: { lineas: true },
-    }),
-    prisma.producciones.findMany({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin } },
-      include: { salidas: true },
-    }),
-    prisma.producciones_extraordinarias.findMany({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin } },
-      include: { salidas: true },
-    }),
-    prisma.distribuciones.findMany({
-      where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: inicio, lte: fin }, estado: { not: 'cancelada' } },
-      include: { lineas: true },
-    }),
-    prisma.pedidos_operativos.findMany({
-      where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: inicio, lte: fin }, estado: { notIn: ['borrador', 'cancelado'] } },
-      include: { lineas: true },
-    }),
-    prisma.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio, OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }] },
-      include: { lineas: true }, orderBy: { id: 'desc' },
-    }),
-    prisma.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fin }, OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }] },
-      include: { lineas: true }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
-    }),
-    prisma.conteos.findFirst({
-      where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio }, OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }] },
-      include: { lineas: true }, orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
-    }),
-    prisma.semanas_operativas.findFirst({
-      where: { negocio_id: negocioId, termina_at: { lt: inicio }, estado: 'cerrada' },
-      orderBy: { termina_at: 'desc' },
-      include: {
-        inventario_semanal: {
-          where: { ubicacion_id: ubicacion.id },
-          select: { product_id: true, cantidad_disponible: true },
-        },
-      },
-    }),
-    // Un conteo físico final es una corrección de la fotografía, no una entrada
-    // operativa. Si se conserva al reabrir una semana, hay que excluir su delta
-    // al reconstruir la apertura desde el saldo vivo para no convertirlo en
-    // inventario inicial artificial.
-    prisma.movimientos_inventario.findMany({
-      where: {
-        negocio_id: negocioId,
-        product_id: { in: ids },
-        fecha: { gte: inicio, lte: fin },
-        documento_tipo: 'conteo',
-        OR: [{ ubicacion_destino_id: ubicacion.id }, { ubicacion_origen_id: ubicacion.id }],
-      },
-      select: { product_id: true, tipo: true, cantidad: true },
-    }),
-  ]);
-
-  const acumulados = new Map(ids.map((id) => [id.toString(), vacio()]));
-  const sumar = (productId: bigint, campo: keyof Acumulado, cantidad: number) => {
-    const a = acumulados.get(productId.toString());
-    if (a) a[campo] = r3(a[campo] + cantidad);
-  };
-  for (const compra of compras) for (const l of compra.lineas) {
-    sumar(l.product_id, enPrimerCorte(compra.fecha) ? 'compras1' : 'compras2', num0(l.cajas));
-  }
-  for (const p of producciones) {
-    sumar(p.materia_prima_id, enPrimerCorte(p.fecha) ? 'produccionEntrada1' : 'produccionEntrada2', num0(p.cajas_materia_prima));
-    for (const s of p.salidas) sumar(s.product_id, enPrimerCorte(p.fecha) ? 'produccionSalida1' : 'produccionSalida2', num0(s.cajas));
-  }
-  for (const p of produccionesExtraordinarias) {
-    for (const s of p.salidas) sumar(s.product_id, enPrimerCorte(p.fecha) ? 'produccionSalida1' : 'produccionSalida2', num0(s.cajas));
-  }
-  for (const d of distribuciones) for (const l of d.lineas) {
-    const cantidad = l.cantidad_cargada == null ? 0 : num0(l.cantidad_cargada);
-    sumar(l.product_id, enPrimerCorte(d.fecha_entrega ?? d.creado_at) ? 'salidas1' : 'salidas2', cantidad);
-  }
-  for (const p of pedidos) for (const l of p.lineas) {
-    sumar(l.product_id, enPrimerCorte(p.fecha_entrega) ? 'pedidos1' : 'pedidos2', num0(l.cantidad));
-  }
-
-  const actualDe = new Map(existencias.map((e) => [e.product_id.toString(), num0(e.cantidad_disponible)]));
-  const ajustesConteoDe = new Map<string, number>();
-  for (const movimiento of movimientosConteo) {
-    const key = movimiento.product_id.toString();
-    const signo = movimiento.tipo === 'ajuste_negativo' ? -1 : 1;
-    ajustesConteoDe.set(key, r3((ajustesConteoDe.get(key) ?? 0) + signo * num0(movimiento.cantidad)));
-  }
-  const inicialDe = new Map(inicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
-  const cierreAnteriorDe = new Map(cierreAnterior?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
-  const snapshotAnteriorDe = new Map(semanaAnterior?.inventario_semanal
-    .map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)] as const) ?? []);
-  const fisicoDe = new Map(final?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
-  const usarCierreAnterior = prefiereConteoFisicoAnterior(cierreAnterior?.fecha, semanaAnterior?.termina_at);
-  const filas = productos.map((p) => {
-    const a = acumulados.get(p.id.toString()) ?? vacio();
-    const actual = actualDe.get(p.id.toString()) ?? 0;
-    const actualSinConteos = r3(actual - (ajustesConteoDe.get(p.id.toString()) ?? 0));
-    // El cierre físico anterior es la apertura más confiable. Solo si no existe se
-    // reconstruye hacia atrás desde el saldo vivo y los movimientos de la semana.
-    const inicialCalculado = normalizarSaldoApertura(usarCierreAnterior
-      ? (cierreAnteriorDe.get(p.id.toString()) ?? 0)
-      : semanaAnterior
-        ? (snapshotAnteriorDe.get(p.id.toString()) ?? 0)
-        : r3(actualSinConteos - a.compras1 - a.compras2 - a.produccionSalida1 - a.produccionSalida2
-          + a.produccionEntrada1 + a.produccionEntrada2 + a.salidas1 + a.salidas2));
-    // También protege semanas que ya tenían una apertura histórica negativa fijada.
-    const inicialCantidad = normalizarSaldoApertura(inicialDe.get(p.id.toString()) ?? inicialCalculado);
-    const fisicoFinal = fisicoDe.has(p.id.toString()) ? fisicoDe.get(p.id.toString())! : null;
-    return {
-      product_id: Number(p.id), sku: p.sku, nombre: p.nombre, tipo: p.tipo_operativo,
-      unidad: p.unidad_distribucion.nombre, inicial: inicialCantidad, inicial_calculado: inicialCalculado,
-      actual, fisico_final: fisicoFinal, ...a,
-      ...calcularFilaConciliacion({ inicial: inicialCantidad, actual, fisicoFinal, ...a }),
-    };
-  }).filter((f) => Math.abs(f.inicial) > 0.0001 || Math.abs(f.actual) > 0.0001
-    || f.compras1 + f.compras2 + f.produccionEntrada1 + f.produccionEntrada2 + f.produccionSalida1 + f.produccionSalida2 + f.salidas1 + f.salidas2 + f.pedidos1 + f.pedidos2 > 0);
-
-  return {
-    ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
-    periodo: { desde, hasta, corte_miercoles: iso(corte) },
-    inicial_fijado: Boolean(inicial), inventario_inicial_id: inicial ? Number(inicial.id) : null,
-    origen_inicial: inicial ? 'fijado' : (usarCierreAnterior || semanaAnterior ? 'cierre_anterior' : 'reconstruido'),
-    inventario_anterior_id: cierreAnterior ? Number(cierreAnterior.id) : null,
-    final_capturado: Boolean(final), inventario_final_id: final ? Number(final.id) : null,
-    filas,
-    resumen: {
-      saldos_provisionales: filas.filter((f) => f.actual < -0.0001).length,
-      cajas_perdidas: r3(filas.filter((f) => f.actual < -0.0001).reduce((total, f) => total + Math.abs(f.actual), 0)),
-      diferencias_fisicas: filas.filter((f) => f.diferenciaFinal != null && Math.abs(f.diferenciaFinal) > 0.0001).length,
-      producciones: producciones.length + produccionesExtraordinarias.length,
-      pedidos: pedidos.length,
-    },
-  };
+  return obtenerConciliacionAlmacen(negocioId, desde, hasta, ubicacion.id);
 }
 
-/**
- * Reconstruye el disponible de desechables al final de una semana sin consultar el
- * saldo vivo como apertura. La fotografía/conteo anterior es el ancla; por eso las
- * compras y despachos de semanas posteriores no pueden contaminar el resultado.
- */
-export async function obtenerInventarioSemanalDesechables(
-  negocioId: bigint,
-  desde: string,
-  hasta: string,
-  ubicacionId: bigint,
-) {
-  const ubicacion = await prisma.ubicaciones.findFirst({
-    where: { id: ubicacionId, negocio_id: negocioId, codigo: 'BOD', tipo: 'bodega', activo: true },
-    select: { id: true, nombre: true },
-  });
-  if (!ubicacion) throw new HttpError(400, 'No existe una Bodega Adison activa para conciliar');
-  const inicio = fecha(desde);
-  const finExclusivo = sumarDias(fecha(hasta), 1);
-  const productos = await prisma.products.findMany({
-    where: { negocio_id: negocioId, activo: true, linea_operacion: 'desechables', es_cargo_compra: false },
-    orderBy: [{ orden_operativo: 'asc' }, { nombre: 'asc' }],
-    select: { id: true, sku: true, nombre: true },
-  });
-  const ids = productos.map((p) => p.id);
-  const [conteoInicial, conteoAnterior, semanaAnterior, compras, distribuciones, movimientosDirectos, conteoFinal] = await Promise.all([
-    prisma.conteos.findFirst({
-      where: {
-        negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: inicio,
-        OR: [{ tipo_captura: 'apertura' }, { notas: { startsWith: 'inventario_inicial_operativo' } }],
-      },
-      include: { lineas: { where: { product_id: { in: ids } } } },
-      orderBy: { id: 'desc' },
-    }),
-    prisma.conteos.findFirst({
-      where: {
-        negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio },
-        OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }],
-      },
-      include: { lineas: { where: { product_id: { in: ids } } } },
-      orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
-    }),
-    prisma.semanas_operativas.findFirst({
-      where: {
-        negocio_id: negocioId, termina_at: { lt: inicio }, estado: 'cerrada',
-        // Las semanas 30/31 pueden existir solo para cartera. Sin renglones de
-        // inventario no representan una apertura en cero y deben ignorarse.
-        inventario_semanal: { some: { ubicacion_id: ubicacion.id } },
-      },
-      orderBy: { termina_at: 'desc' },
-      include: {
-        inventario_semanal: {
-          where: { ubicacion_id: ubicacion.id, product_id: { in: ids } },
-          select: { product_id: true, cantidad_disponible: true },
-        },
-      },
-    }),
-    prisma.compras.findMany({
-      where: {
-        negocio_id: negocioId, ubicacion_id: ubicacion.id,
-        fecha: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' },
-      },
-      include: { lineas: { where: { product_id: { in: ids } }, select: { product_id: true, cajas: true } } },
-    }),
-    // La salida se atribuye al día de entrega y se reconcilia con el movimiento
-    // de carga si existe. El movimiento puede haberse creado días después (por
-    // ejemplo al sincronizar un despacho), por lo que filtrar por su fecha
-    // dejaba la existencia semanal inflada. Si no hay movimiento, la línea
-    // cargada es el respaldo operativo explícito.
-    prisma.distribuciones.findMany({
-      where: {
-        negocio_id: negocioId, fecha_entrega: { gte: inicio, lt: finExclusivo }, estado: { not: 'cancelada' },
-      },
-      include: {
-        lineas: {
-          where: { product_id: { in: ids } },
-          select: {
-            id: true, product_id: true, cantidad_cargada: true, cantidad_aprobada: true, cantidad_sugerida: true,
-            movimientos: { select: { id: true, tipo: true, cantidad: true, ubicacion_origen_id: true, ubicacion_destino_id: true, idempotency_key: true } },
-          },
-        },
-      },
-    }),
-    prisma.movimientos_inventario.findMany({
-      where: {
-        negocio_id: negocioId, product_id: { in: ids }, fecha: { gte: inicio, lt: finExclusivo },
-        documento_tipo: { in: ['ingreso', 'retiro'] },
-        OR: [{ ubicacion_origen_id: ubicacion.id }, { ubicacion_destino_id: ubicacion.id }],
-      },
-      select: { product_id: true, cantidad: true, documento_tipo: true, ubicacion_origen_id: true, ubicacion_destino_id: true, fecha: true },
-    }),
-    prisma.conteos.findFirst({
-      where: {
-        negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { gte: inicio, lte: fecha(hasta) },
-        OR: [{ tipo_captura: 'cierre' }, { notas: { startsWith: 'inventario_final_operativo' } }],
-      },
-      include: { lineas: { where: { product_id: { in: ids } } } },
-      orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
-    }),
-  ]);
-
-  // Una bodega nueva todavía no tiene una fotografía anterior que heredar. En
-  // ese único caso (sin conteos, cierres, compras ni movimientos históricos y
-  // sin existencias positivas) se inicia explícitamente en cero. No se aplica
-  // este valor por defecto a una bodega con actividad previa: ahí la falta de
-  // una apertura sigue siendo un bloqueo para evitar mezclar inventario vivo
-  // con la semana que se está reconstruyendo.
-  if (!conteoInicial && !conteoAnterior && !semanaAnterior) {
-    const [comprasPrevias, movimientosPrevios, existenciasPrevias] = await Promise.all([
-      prisma.compras.count({
-        where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, fecha: { lt: inicio }, estado: { not: 'cancelada' }, origen: { not: 'conteo_fisico' } },
-      }),
-      prisma.movimientos_inventario.count({
-        where: {
-          negocio_id: negocioId, fecha: { lt: inicio },
-          OR: [{ ubicacion_origen_id: ubicacion.id }, { ubicacion_destino_id: ubicacion.id }],
-        },
-      }),
-      prisma.existencias.count({
-        where: { negocio_id: negocioId, ubicacion_id: ubicacion.id, cantidad_disponible: { gt: 0 } },
-      }),
-    ]);
-    if (!comprasPrevias && !movimientosPrevios && !existenciasPrevias) {
-      return {
-        ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
-        periodo: { desde, hasta },
-        origen_apertura: 'bodega_nueva_cero',
-        filas: productos.map((p) => ({
-          product_id: Number(p.id), sku: p.sku, nombre: p.nombre, inicial: 0,
-          entradas: 0, salidas: 0, teoricoFinal: 0, saldoOperativoFinal: 0,
-          fisico_final: null,
-        })),
-      };
-    }
-  }
-
-  const aperturaInicial = new Map(conteoInicial?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
-  const aperturaConteo = new Map(conteoAnterior?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
-  const aperturaSnapshot = new Map(semanaAnterior?.inventario_semanal.map((l) => [l.product_id.toString(), num0(l.cantidad_disponible)]) ?? []);
-  const fechaConteo = aperturaConDatos(aperturaConteo) ? conteoAnterior!.fecha : null;
-  const fechaSnapshot = aperturaConDatos(aperturaSnapshot) ? semanaAnterior!.termina_at : null;
-  const usarInicial = aperturaConDatos(aperturaInicial);
-  // El conteo físico del sábado y el snapshot contable se generan el mismo día.
-  // En ese caso el físico sigue siendo la evidencia operativa más reciente; usar
-  // `>` hacía que se heredara el snapshot anterior aunque ambos fueran del mismo
-  // sábado.
-  const usarConteo = !usarInicial && Boolean(fechaConteo && (!fechaSnapshot || fechaConteo >= fechaSnapshot));
-  const apertura = usarInicial ? aperturaInicial : usarConteo ? aperturaConteo : aperturaConDatos(aperturaSnapshot) ? aperturaSnapshot : null;
-  if (!aperturaConDatos(apertura)) {
-    throw new HttpError(
-      409,
-      'Falta un cierre o conteo final anterior de Bodega Adison para reconstruir esta semana sin mezclar inventario posterior.',
-    );
-  }
-
-  const entradas = new Map<string, number>();
-  const salidas = new Map<string, number>();
-  const fisicoFinal = new Map(conteoFinal?.lineas.map((l) => [l.product_id.toString(), num0(l.qty)]) ?? []);
-  // Un conteo final es una fotografía: los movimientos registrados después de
-  // su sello no pueden reescribir la historia de esa foto.
-  const corteFisico = conteoFinal?.cerrado_at ?? conteoFinal?.creado_at ?? null;
-  const sumar = (mapa: Map<string, number>, productId: bigint, cantidad: number) => {
-    const key = productId.toString();
-    mapa.set(key, r3((mapa.get(key) ?? 0) + cantidad));
-  };
-  for (const compra of compras) {
-    if (corteFisico && compra.creado_at > corteFisico) continue;
-    for (const linea of compra.lineas) sumar(entradas, linea.product_id, num0(linea.cajas));
-  }
-  for (const distribucion of distribuciones) {
-    for (const linea of distribucion.lineas) {
-      // Sólo `carga` descuenta la bodega. En rutas con tránsito la recepción
-      // también referencia la bodega, pero no debe volver a restarse.
-      const cargas = linea.movimientos.filter((movimiento) =>
-        movimiento.ubicacion_origen_id === ubicacion.id && movimiento.idempotency_key.startsWith('carga:')),
-        cantidadMovimiento = cargas.reduce((total, movimiento) => total + num0(movimiento.cantidad), 0);
-      const cantidad = cantidadMovimiento > 0
-        ? cantidadMovimiento
-        : num0(linea.cantidad_cargada ?? linea.cantidad_aprobada ?? linea.cantidad_sugerida);
-      if (cantidad > 0) sumar(salidas, linea.product_id, cantidad);
-    }
-  }
-  for (const movimiento of movimientosDirectos) {
-    if (corteFisico && movimiento.fecha > corteFisico) continue;
-    const cantidad = num0(movimiento.cantidad);
-    if (movimiento.ubicacion_destino_id === ubicacion.id) sumar(entradas, movimiento.product_id, cantidad);
-    if (movimiento.ubicacion_origen_id === ubicacion.id) sumar(salidas, movimiento.product_id, cantidad);
-  }
-
+/** La misma herencia y ecuación física gobiernan ambos almacenes. */
+export async function obtenerInventarioSemanalDesechables(negocioId: bigint, desde: string, hasta: string, ubicacionId: bigint) {
+  const reporte = await obtenerConciliacionAlmacen(negocioId, desde, hasta, ubicacionId);
   return {
-    ubicacion: { id: Number(ubicacion.id), nombre: ubicacion.nombre },
-    periodo: { desde, hasta },
-    origen_apertura: usarInicial ? 'inicio_fijado' : usarConteo ? 'conteo_anterior' : 'cierre_anterior',
-    filas: productos.map((producto) => {
-      const key = producto.id.toString();
-      const inicial = r3(apertura!.get(key) ?? 0);
-      const comprasCantidad = r3(entradas.get(key) ?? 0);
-      const despachosCantidad = r3(salidas.get(key) ?? 0);
-      return {
-        product_id: Number(producto.id),
-        sku: producto.sku,
-        nombre: producto.nombre,
-        inicial,
-        entradas: comprasCantidad,
-        salidas: despachosCantidad,
-        teoricoFinal: calcularSaldoSemanal(inicial, comprasCantidad, despachosCantidad),
-        fisico_final: fisicoFinal.has(key) ? fisicoFinal.get(key)! : null,
-        saldoOperativoFinal: fisicoFinal.has(key)
-          ? fisicoFinal.get(key)!
-          : calcularSaldoSemanal(inicial, comprasCantidad, despachosCantidad),
-      };
-    }),
+    ...reporte,
+    origen_apertura: reporte.origen_inicial,
+    filas: reporte.filas.map(f => ({
+      ...f,
+      entradas: r3(f.compras1 + f.compras2 + Math.max(0, f.directos1) + Math.max(0, f.directos2)),
+      salidas: r3(f.salidas1 + f.salidas2 + Math.max(0, -f.directos1) + Math.max(0, -f.directos2)),
+    })),
   };
 }
 
@@ -598,48 +254,26 @@ export async function fijarInventarioInicialSemanal(negocioId: bigint, usuarioId
 }
 
 export async function validarConciliacionParaCierre(negocioId: bigint, desde: string, hasta: string) {
-  // Compatibilidad con despachos históricos: antes de auditar, normaliza el estado
-  // de los pedidos que ya fueron entregados/cerrados físicamente. Esto evita que una
-  // distribución cerrada bloquee el cierre sólo porque el pedido conservó un estado
-  // antiguo en_preparacion.
   await repararEstadosPedidosDesdeDespachos(negocioId, desde, hasta);
   const integridad = await auditarPedidosVsDistribuciones(negocioId, desde, hasta);
   if (!integridad.ok) {
-    const detalle = integridad.errores.slice(0, 3).map((error) => error.detalle).join(' · ');
-    throw new HttpError(409, `No se puede cerrar: hay ${integridad.errores.length} inconsistencia(s) entre pedidos y despachos. ${detalle}`);
+    throw new HttpError(409, `No se puede cerrar: hay ${integridad.errores.length} inconsistencia(s) entre pedidos y despachos. ${integridad.errores.slice(0, 3).map(e => e.detalle).join(' · ')}`);
   }
-  const [pedidosCarne, producciones, produccionesExtraordinarias] = await Promise.all([
-    prisma.pedidos_operativos.count({
-      where: { negocio_id: negocioId, linea_operacion: 'carne', fecha_entrega: { gte: fecha(desde), lte: fecha(hasta) }, estado: { notIn: ['borrador', 'cancelado'] } },
-    }),
-    prisma.producciones.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
-    prisma.producciones_extraordinarias.count({ where: { negocio_id: negocioId, fecha: { gte: fecha(desde), lte: fecha(hasta) } } }),
-  ]);
-  const reporte = await obtenerConciliacionSemanal(negocioId, desde, hasta);
-  if (!reporte.inicial_fijado) throw new HttpError(409, 'Falta fijar el inventario inicial de Carnicería en la conciliación semanal.');
-  const saldos = reporte.filas
-    .filter((fila) => (fila.saldoOperativoFinal ?? fila.teoricoFinal) < -0.0001)
-    .map((fila) => ({
-      product_id: fila.product_id,
-      ubicacion_id: reporte.ubicacion.id,
-      producto: fila.nombre,
-      ubicacion: reporte.ubicacion.nombre,
-      cantidad: r3(Math.abs(fila.saldoOperativoFinal ?? fila.teoricoFinal)),
-    }));
-  const alertaNegativos = {
-    cajas_perdidas: r3(saldos.reduce((total, saldo) => total + saldo.cantidad, 0)),
-    saldos,
-    inventario: reporte.filas.map((fila) => ({
-      product_id: fila.product_id,
-      ubicacion_id: reporte.ubicacion.id,
-      cantidad: r3(fila.saldoOperativoFinal ?? fila.teoricoFinal),
-    })),
+  const bodegas = await prisma.ubicaciones.findMany({ where: { negocio_id: negocioId, codigo: { in: ['CARN', 'BOD'] }, tipo: 'bodega', activo: true }, select: { id: true } });
+  const reportes = await Promise.all(bodegas.map(b => obtenerConciliacionAlmacen(negocioId, desde, hasta, b.id)));
+  const diferencias = reportes.flatMap(r => r.filas.filter(f => Math.abs(f.diferencia_ledger) > 0.001 || Math.abs(f.diferencia_fifo ?? 0) > 0.001)
+    .map(f => `${r.ubicacion.nombre} · ${f.nombre}: esperado ${f.saldo_actual_esperado}, registrado ${f.actual}${f.fifo_disponible == null ? '' : `, lotes ${f.fifo_disponible}`}`));
+  if (diferencias.length) throw new HttpError(409, `Hay ${diferencias.length} diferencia(s) de inventario que requieren conciliación antes de cerrar. ${diferencias.slice(0, 3).join(' · ')}`);
+  const sinAncla = reportes.flatMap(r => r.filas.filter(f => f.sin_ancla && (Math.abs(f.inicial) > 0.001 || f.trazabilidad.some(e => e.cantidad !== 0)))
+    .map(f => `${r.ubicacion.nombre} · ${f.nombre}`));
+  if (sinAncla.length) throw new HttpError(409, `Falta documentar la apertura de: ${sinAncla.slice(0, 3).join(', ')}.`);
+  const saldos = reportes.flatMap(r => r.filas.filter(f => f.saldoOperativoFinal < -0.0001).map(f => ({
+    product_id: f.product_id, ubicacion_id: r.ubicacion.id, producto: f.nombre, ubicacion: r.ubicacion.nombre, cantidad: r3(-f.saldoOperativoFinal),
+  })));
+  return {
+    cajas_perdidas: r3(saldos.reduce((n, s) => n + s.cantidad, 0)), saldos,
+    inventario: reportes.flatMap(r => r.filas.map(f => ({ product_id: f.product_id, ubicacion_id: r.ubicacion.id, cantidad: f.saldoOperativoFinal }))),
   };
-  if (!pedidosCarne && !producciones && !produccionesExtraordinarias) return alertaNegativos;
-  // El físico final es una auditoría opcional. El cierre usa el saldo vivo que ya integra
-  // exclusivamente apertura + compras + producción − despachos del periodo seleccionado.
-  // Los movimientos de semanas posteriores nunca alteran esta conciliación.
-  return alertaNegativos;
 }
 
 type ErrorIntegridadPedidos = {

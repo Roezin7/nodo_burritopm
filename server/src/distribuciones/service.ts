@@ -10,6 +10,7 @@ import { asegurarInventarioInicialSemanal, repararPedidosHuerfanos } from '../op
 import type { Prisma } from '@prisma/client';
 import { prepararSalidaFifo, registrarSalidaFifo, restaurarSalidaFifo } from '../inventario/fifo.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
+import { recalcularFisicosPosterioresEnTx } from '../inventario/saldo-fisico.js';
 
 async function pedidosVinculados(tx: Prisma.TransactionClient, distribucionId: bigint) {
   const lineas = await tx.distribucion_lineas.findMany({
@@ -415,6 +416,7 @@ export async function eliminarDistribucion(negocioId: bigint, id: bigint, usuari
     await tx.incidencias.deleteMany({ where: { negocio_id: negocioId, documento_tipo: 'distribucion', documento_id: id } });
     // La distribución arrastra por cascada: líneas, rutas y paradas.
     await tx.distribuciones.delete({ where: { id } });
+    if (distribucion.fecha_entrega) await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, distribucion.fecha_entrega.toISOString().slice(0, 10), lineas.map(l => l.product_id));
     // La preparación operativa no es el pedido: al eliminarla se conserva la venta y vuelve a
     // "confirmado", permitiendo corregirla y generar de nuevo preparación/rutas sin quedar
     // atorada para siempre en "en_preparacion".
@@ -719,8 +721,9 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
   const bodegas = await bodegasDeProductos(negocioId, lineas.map((l) => l.product_id));
   const productos = await prisma.products.findMany({
     where: { negocio_id: negocioId, id: { in: lineas.map((l) => l.product_id) } },
-    select: { id: true, nombre: true, linea_operacion: true },
+    select: { id: true, nombre: true, linea_operacion: true, tipo_operativo: true, sku: true },
   });
+  if (productos.some(p => p.tipo_operativo === 'materia_prima' || p.sku.startsWith('RAW-'))) throw new HttpError(409, 'Las materias primas no se despachan a restaurantes; utiliza el producto terminado.');
   const productoDe = new Map(productos.map((producto) => [producto.id.toString(), producto]));
 
   if (dist.fecha_entrega) {
@@ -835,6 +838,7 @@ export async function confirmarCarga(negocioId: bigint, id: bigint, usuarioId: b
     const entregaDirecta = !negocio?.reparto_habilitado;
     await tx.distribuciones.update({ where: { id }, data: { estado: entregaDirecta ? 'cerrada' : 'en_transito', cargado_por: usuarioId, cargado_at: new Date() } });
     await marcarPedidosDeDistribucion(tx, id, entregaDirecta ? 'entregado' : 'despachado');
+    if (dist.fecha_entrega) await recalcularFisicosPosterioresEnTx(tx, negocioId, usuarioId, dist.fecha_entrega.toISOString().slice(0, 10), lineas.map(l => l.product_id));
     if (negocio?.reparto_habilitado) {
       // Con seguimiento de reparto, el camión cargado pone las rutas planeadas en curso.
       await asegurarRutaEnCurso(tx, negocioId, id, usuarioId, sucursalesConCarga);

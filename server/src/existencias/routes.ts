@@ -394,6 +394,7 @@ existenciasRouter.get(
       : null;
     const conciliacionHistorica = conciliacion ?? conciliacionDesechables;
     const saldoOperativoPorProducto = new Map(conciliacionHistorica?.filas.map((f) => [String(f.product_id), f.saldoOperativoFinal ?? f.teoricoFinal]) ?? []);
+    const detallePorProducto = new Map(conciliacionHistorica?.filas.map(f => [String(f.product_id), f]) ?? []);
     const snapshotIds = snapshot.map((e) => e.product_id);
     const [productos, filas] = await Promise.all([
       prisma.products.findMany({
@@ -430,6 +431,11 @@ existenciasRouter.get(
         tipo: producto.tipo_operativo,
         unidad: producto.unidad_distribucion.nombre,
         disponible: disp,
+        apertura: detallePorProducto.get(String(producto.id))?.inicial,
+        teorico: detallePorProducto.get(String(producto.id))?.teoricoFinal,
+        fisico: detallePorProducto.get(String(producto.id))?.fisico_final,
+        diferencia_ledger: detallePorProducto.get(String(producto.id))?.diferencia_ledger,
+        diferencia_fifo: detallePorProducto.get(String(producto.id))?.diferencia_fifo,
         reservada: conciliacionHistorica && !componentesVivos ? 0 : Math.max(0, num0(e?.cantidad_reservada)),
         transito,
         // Una semana cerrada consulta su fotografía: el saldo ya está valuado en

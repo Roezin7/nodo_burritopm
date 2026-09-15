@@ -255,6 +255,19 @@ export async function cerrarConteo(negocioId: bigint, conteoId: bigint, usuarioI
         'Un conteo diario antiguo no puede reconciliarse contra el inventario vivo. Captura la corrección desde la semana operativa correspondiente.',
       );
     }
+    const almacen = await prisma.ubicaciones.findUniqueOrThrow({ where: { id: conteo.ubicacion_id }, select: { codigo: true } });
+    if (['CARN', 'BOD'].includes(almacen.codigo)) {
+      const lineas = await prisma.conteo_lineas.findMany({ where: { conteo_id: conteoId } });
+      if (lineas.some(l => !l.contado)) throw new HttpError(409, 'Hay productos sin contar. Captura cada cantidad; cero contado no es lo mismo que pendiente.');
+      // La captura diaria operativa usa la misma transacción, herencia y FIFO
+      // que apertura/final. No publica el estado cerrado antes del movimiento.
+      const { guardarInventarioFinal } = await import('../operacion/service.js');
+      return guardarInventarioFinal(negocioId, usuarioId, {
+        ubicacion_id: Number(conteo.ubicacion_id), fecha: fechaConteo!,
+        tipo_captura: conteo.tipo_captura === 'apertura' || conteo.notas?.startsWith('inventario_inicial_operativo') ? 'apertura' : conteo.tipo_captura === 'cierre' ? 'cierre' : 'diario',
+        lineas: lineas.map(l => ({ product_id: Number(l.product_id), cantidad: num0(l.qty) })),
+      });
+    }
   }
   await prisma.conteos.update({
     where: { id: conteoId },
@@ -279,6 +292,8 @@ export async function reabrirConteo(negocioId: bigint, conteoId: bigint) {
   const conteo = await prisma.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
   if (conteo.estado !== 'cerrado') throw new HttpError(409, 'Solo se puede reabrir un conteo cerrado');
+  const almacen = await prisma.ubicaciones.findUniqueOrThrow({ where: { id: conteo.ubicacion_id }, select: { codigo: true } });
+  if (['CARN', 'BOD'].includes(almacen.codigo)) throw new HttpError(409, 'Corrige este inventario desde la semana operativa. Reabrir el conteo por esta vía retiraría su referencia sin revertir el stock.');
   await prisma.conteos.update({ where: { id: conteoId }, data: { estado: 'reabierto', cerrado_por: null, cerrado_at: null } });
   return { ok: true };
 }
@@ -291,6 +306,13 @@ export async function reabrirConteo(negocioId: bigint, conteoId: bigint) {
 export async function eliminarConteoEnTx(tx: Prisma.TransactionClient, negocioId: bigint, conteoId: bigint, usuarioId: bigint, accion = 'eliminar') {
   const conteo = await tx.conteos.findFirst({ where: { id: conteoId, negocio_id: negocioId } });
   if (!conteo) throw new HttpError(404, 'Conteo no encontrado');
+  if (conteo.estado === 'cerrado' && conteo.fecha) {
+    const [cerrada, posterior] = await Promise.all([
+      tx.semanas_operativas.findFirst({ where: { negocio_id: negocioId, estado: 'cerrada', termina_at: { gte: conteo.fecha } } }),
+      tx.conteos.findFirst({ where: { negocio_id: negocioId, ubicacion_id: conteo.ubicacion_id, estado: 'cerrado', fecha: { gt: conteo.fecha } } }),
+    ]);
+    if (cerrada || posterior) throw new HttpError(409, 'Este inventario tiene cierres o conteos posteriores que dependen de él. Corrige sus cantidades sin eliminar su trazabilidad; reabre primero las semanas cerradas.');
+  }
 
   const movs = await tx.movimientos_inventario.findMany({
     where: { negocio_id: negocioId, documento_tipo: 'conteo', documento_id: conteoId },

@@ -6,7 +6,8 @@ import { preciosVentaSemana, sincronizarDespachosConfirmados } from '../operacio
 import { asegurarInventarioInicialSemanal, validarConciliacionParaCierre } from '../operacion/conciliacion.js';
 import { transaccionSerializable } from '../lib/transaccion.js';
 import { confirmarRecepcionesSinFaltantesEnRango } from '../distribuciones/service.js';
-import { aplicarMovimiento, crearCompraAjusteConteo } from '../ledger/service.js';
+import { aplicarMovimiento } from '../ledger/service.js';
+import { obtenerConciliacionAlmacen } from '../inventario/conciliacion-semanal.js';
 import { avisarAdminFaltantesInventario } from '../push/service.js';
 import { costoParaValuacionInventario, valorExistenciaRedondeado } from '../inventario/valuacion.js';
 import { hoyNegocio } from '../lib/semana-operativa.js';
@@ -280,7 +281,27 @@ async function valuacionInventario(
   }
   let fresca = 0;
   let congelada = 0;
-  for (const l of lotes) (l.congelado ? (congelada += num0(l.costo_disponible)) : (fresca += num0(l.costo_disponible)));
+  const cajasPorProducto = new Map<string, number>();
+  for (const l of lotes) {
+    const clave = `${l.ubicacion_id}:${l.product_id}`;
+    cajasPorProducto.set(clave, (cajasPorProducto.get(clave) ?? 0) + num0(l.cajas_disponibles));
+  }
+  for (const l of lotes) {
+    const clave = `${l.ubicacion_id}:${l.product_id}`;
+    const cajas = cajasPorProducto.get(clave)!;
+    const cantidad = cantidadesAisladas.get(clave);
+    const proporcion = cantidad == null ? 1 : Math.max(0, cantidad) / cajas;
+    const valor = num0(l.costo_disponible) * proporcion;
+    if (l.congelado) congelada += valor; else fresca += valor;
+  }
+  // Un físico histórico puede tener unidades aunque hoy sus lotes estén agotados.
+  for (const e of existencias) {
+    const clave = `${e.ubicacion_id}:${e.product_id}`;
+    const cantidad = cantidadesAisladas.get(clave);
+    if (e.products.tipo_operativo === 'materia_prima' && !cajasPorProducto.has(clave) && cantidad != null && cantidad > 0) {
+      fresca += cantidad * costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo);
+    }
+  }
   return { valor_carne: r2(terminada + fresca), valor_congelado: r2(congelada), valor_desechables: r2(desechables) };
 }
 
@@ -376,63 +397,6 @@ async function validarSemanaCerrable(negocioId: bigint, semana: SemanaCierre) {
   return validarConciliacionParaCierre(negocioId, iso(semana.inicia_at), iso(semana.termina_at));
 }
 
-/**
- * Backfill seguro para conteos físicos capturados antes de la compra técnica:
- * si una fotografía de Bodega confirma más desechables que las capas FIFO vivas,
- * crea sólo la capa faltante (sin volver a sumar existencias). Es idempotente porque
- * en el siguiente intento compara de nuevo contra las capas ya creadas.
- */
-async function respaldarConteosFisicosEnFifo(negocioId: bigint, usuarioId: bigint, semana: SemanaCierre) {
-  const conteos = await prisma.conteos.findMany({
-    where: {
-      negocio_id: negocioId,
-      estado: 'cerrado',
-      fecha: { gte: semana.inicia_at, lte: semana.termina_at },
-      notas: { startsWith: 'inventario_final_operativo' },
-      ubicaciones: { codigo: 'BOD' },
-    },
-    include: { lineas: { include: { products: { select: { id: true, nombre: true, linea_operacion: true, ultimo_costo: true, costo_promedio: true } } } } },
-    orderBy: [{ fecha: 'asc' }, { id: 'asc' }],
-  });
-  if (!conteos.length) return;
-  const sello = Date.now();
-  await transaccionSerializable(async (tx) => {
-    for (const conteo of conteos) {
-      if (!conteo.fecha) continue;
-      for (const linea of conteo.lineas) {
-        if (linea.products.linea_operacion !== 'desechables') continue;
-        const fisico = r3(num0(linea.qty));
-        if (fisico <= 0) continue;
-        const lotes = await tx.lotes_materia_prima.findMany({
-          where: { negocio_id: negocioId, ubicacion_id: conteo.ubicacion_id, product_id: linea.product_id, cajas_disponibles: { gt: 0 } },
-          orderBy: [{ fecha: 'desc' }, { id: 'desc' }],
-          select: { cajas_disponibles: true, costo_disponible: true, cajas_iniciales: true, costo_inicial: true },
-        });
-        const fifo = r3(lotes.reduce((total, lote) => total + num0(lote.cajas_disponibles), 0));
-        const faltante = r3(fisico - fifo);
-        if (faltante <= 0.0001) continue;
-        const ultimo = lotes[0];
-        const costoLote = ultimo && num0(ultimo.cajas_iniciales) > 0 ? num(ultimo.costo_inicial) : null;
-        const costo = costoLote != null && costoLote > 0
-          ? costoLote / num0(ultimo!.cajas_iniciales)
-          : num(linea.products.ultimo_costo) ?? num(linea.products.costo_promedio);
-        if (costo == null || costo <= 0) throw new HttpError(409, `${linea.products.nombre}: falta costo para respaldar el conteo físico en FIFO.`);
-        const compra = await crearCompraAjusteConteo(tx, {
-          negocioId, conteoId: conteo.id, usuarioId, ubicacionId: conteo.ubicacion_id,
-          productId: linea.product_id, fecha: conteo.fecha, cantidad: faltante, costoUnitario: costo, sello,
-        });
-        await tx.lotes_materia_prima.create({
-          data: {
-            negocio_id: negocioId, ubicacion_id: conteo.ubicacion_id, product_id: linea.product_id,
-            compra_linea_id: compra.compraLineaId, fecha: conteo.fecha, congelado: false,
-            cajas_iniciales: faltante, cajas_disponibles: faltante, peso_inicial_lb: 0, peso_disponible_lb: 0,
-            costo_inicial: compra.costoTotal, costo_disponible: compra.costoTotal,
-          },
-        });
-      }
-    }
-  });
-}
 
 /**
  * Completa despachos automáticos pendientes cuando Reparto está desactivado. Esto permite
@@ -441,7 +405,8 @@ async function respaldarConteosFisicosEnFifo(negocioId: bigint, usuarioId: bigin
 async function sincronizarVentasParaCierre(negocioId: bigint, usuarioId: bigint, semana: SemanaCierre) {
   const negocio = await prisma.negocios.findUnique({ where: { id: negocioId }, select: { reparto_habilitado: true } });
   if (!negocio?.reparto_habilitado) {
-    await respaldarConteosFisicosEnFifo(negocioId, usuarioId, semana);
+    // Los lotes se crean al capturar mercancía o un conteo. Un cierre no vuelve
+    // a convertir un físico histórico en entradas contra el saldo de hoy.
     const desde = iso(semana.inicia_at);
     const hasta = iso(semana.termina_at);
     await sincronizarDespachosConfirmados(negocioId, usuarioId, desde, hasta);
@@ -711,10 +676,14 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
       `${existencia.ubicacion_id}:${existencia.product_id}`,
       existencia,
     ]));
-    const inventarioAisladoDe = new Map(alertaInventario.inventario.map((saldo) => [
-      `${saldo.ubicacion_id}:${saldo.product_id}`,
-      saldo.cantidad,
-    ]));
+    const bodegas = await tx.ubicaciones.findMany({ where: { negocio_id: negocioId, codigo: { in: ['CARN', 'BOD'] }, activo: true, tipo: 'bodega' }, select: { id: true } });
+    const reportes = await Promise.all(bodegas.map(b => obtenerConciliacionAlmacen(negocioId, iso(semana.inicia_at), iso(semana.termina_at), b.id, tx)));
+    const inventarioAisladoDe = new Map<string, number>(reportes.flatMap(r => r.filas.map(f => [
+      `${r.ubicacion.id}:${f.product_id}`, f.saldoOperativoFinal,
+    ] as const)));
+    if (reportes.some(r => r.resumen.diferencias_ledger || r.resumen.diferencias_fifo)) {
+      throw new HttpError(409, 'El inventario cambió durante el cierre. Actualiza la conciliación y revisa las diferencias antes de continuar.');
+    }
     // Los faltantes se calculan con la ecuación de la semana seleccionada. El saldo vivo
     // puede incluir ya movimientos posteriores y no debe contaminar la fotografía histórica.
     const saldosCierre = alertaInventario.saldos.flatMap((saldo) => {
@@ -741,11 +710,11 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
         },
       });
     }
-    const totalesLote = new Map<string, { peso: number; costo: number }>();
+    const totalesLote = new Map<string, { cajas: number; peso: number; costo: number }>();
     for (const lote of lotesCierre) {
       const key = `${lote.ubicacion_id}:${lote.product_id}`;
-      const previo = totalesLote.get(key) ?? { peso: 0, costo: 0 };
-      totalesLote.set(key, { peso: previo.peso + num0(lote.peso_disponible_lb), costo: previo.costo + num0(lote.costo_disponible) });
+      const previo = totalesLote.get(key) ?? { cajas: 0, peso: 0, costo: 0 };
+      totalesLote.set(key, { cajas: previo.cajas + num0(lote.cajas_disponibles), peso: previo.peso + num0(lote.peso_disponible_lb), costo: previo.costo + num0(lote.costo_disponible) });
     }
     await tx.inventario_semanal.deleteMany({ where: { semana_id: semana.id } });
     if (existencias.length) {
@@ -764,8 +733,8 @@ export async function cerrarSemana(negocioId: bigint, usuarioId: bigint, fechaCi
           cantidad_transito: transito,
           costo_promedio: costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo),
           costo_transito_promedio: num(e.costo_transito_promedio) ?? costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo),
-          peso_total_lb: lote?.peso ?? null,
-          costo_total: lote?.costo ?? r2(disponible * costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo)),
+          peso_total_lb: lote?.cajas ? r3(lote.peso * disponible / lote.cajas) : null,
+          costo_total: lote?.cajas ? r2(lote.costo * disponible / lote.cajas) : r2(disponible * costoParaValuacionInventario(e.costo_promedio, e.products.costo_promedio, e.products.ultimo_costo)),
         }; }),
       });
     }
