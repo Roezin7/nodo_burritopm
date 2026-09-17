@@ -96,7 +96,7 @@ export default function Pedidos({ integrado = false, semana = crearSemana() }: {
   }, [catalogo, admin, usuario]);
   const ubicacionSeleccionada = ubicaciones.find((u) => String(u.id) === ubicacionId);
   const productos = useMemo(
-    () => catalogo ? productosParaPedido(catalogo.productos, linea, ubicacionSeleccionada?.empresa?.codigo) : [],
+    () => catalogo ? productosParaPedido(catalogo.productos, linea, ubicacionSeleccionada?.empresa?.codigo, ubicacionSeleccionada?.id) : [],
     [catalogo, linea, ubicacionSeleccionada?.empresa?.codigo],
   );
   const entregas = useMemo(

@@ -19,6 +19,9 @@ interface Item {
   stock_seguridad: number;
   multiplo_distribucion: number;
   minimo_envio: number;
+  linea_operacion: 'carne' | 'desechables' | null;
+  tipo_operativo: string | null;
+  orden_operativo: number;
 }
 
 /** Productos por ubicación: qué puede pedir cada sucursal y mínimos operativos de bodega. */
@@ -92,6 +95,7 @@ export default function StockObjetivo() {
       <UbicacionPicker label="Ubicación" opciones={ubicaciones.map((u) => ({ id: u.id, nombre: u.nombre, tipo: u.tipo }))} value={ubicId} onChange={setUbicId} />
       {error && <p className="error-msg">{error}</p>}
       {ok && <p className="ok-msg">{ok}</p>}
+      {ubicActual && <p className="context-note">Activa aquí los productos que puede pedir esta ubicación. El orden marcado (#) se define en Productos y se usa también en pedidos, inventario y Excel. En BOD/CARN los productos de su línea se habilitan automáticamente.</p>}
 
       {cargando ? (
         <Spinner />
@@ -104,7 +108,7 @@ export default function StockObjetivo() {
           </div><div className="so-rows">
             {items.map((it, idx) => (
               <div key={it.product_id} className={`so-row ${esBodega ? 'so-row--bodega' : 'so-row--simple'} ${it.habilitado ? '' : 'so-row--off'}`}>
-                <div className="so-prod"><strong>{it.nombre}</strong><small className="muted">{it.unidad_distribucion}{it.categoria ? ` · ${it.categoria}` : ''}</small></div>
+                <div className="so-prod"><strong>{it.nombre}</strong><small className="muted">#{it.orden_operativo} · {it.unidad_distribucion}{it.categoria ? ` · ${it.categoria}` : ''}</small></div>
                 <label className="so-check"><input type="checkbox" checked={it.habilitado} onChange={(e) => set(idx, 'habilitado', e.target.checked)} /></label>
                 {esBodega && (
                   <>

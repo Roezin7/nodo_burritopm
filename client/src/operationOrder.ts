@@ -8,6 +8,8 @@ export interface ProductoOrdenable {
   tipo: string;
   /** Orden maestro proveniente del catálogo/Excel. */
   orden?: number;
+  /** Si existe, la configuración explícita de sucursal limita dónde se pide. */
+  ubicaciones_habilitadas?: number[];
 }
 
 export interface FilaOrden {
@@ -51,7 +53,22 @@ export const FILAS_DESECHABLES: readonly FilaOrden[] = [
 ] as const;
 
 export function filasOrden(linea: LineaOperacion, productos: ProductoOrdenable[]): FilaOrden[] {
-  if (linea === 'carne') return [...FILAS_CARNE];
+  if (linea === 'carne') {
+    const porSku = new Map(productos.map((p) => [p.sku, p]));
+    const conocidos = new Set(FILAS_CARNE.flatMap((fila) => fila.skus));
+    const filasConOrden = FILAS_CARNE
+      .map((fila, indice) => {
+        const encontrados = fila.skus.map((sku) => porSku.get(sku)).filter((p): p is ProductoOrdenable => Boolean(p));
+        return { fila, indice, orden: encontrados.length ? Math.min(...encontrados.map((p) => p.orden ?? 999)) : 999 };
+      })
+      .filter(({ fila }) => fila.skus.some((sku) => porSku.has(sku)));
+    const adicionales = productos
+      .filter((p) => p.linea === 'carne' && p.tipo !== 'materia_prima' && !conocidos.has(p.sku))
+      .map((p, indice) => ({ fila: { nombre: p.nombre.toUpperCase(), skus: [p.sku] }, indice: FILAS_CARNE.length + indice, orden: p.orden ?? 999 }));
+    return [...filasConOrden, ...adicionales]
+      .sort((a, b) => a.orden - b.orden || a.indice - b.indice)
+      .map(({ fila }) => fila);
+  }
   const catalogo = productos
     .filter((p) => p.linea === 'desechables' && p.tipo !== 'materia_prima')
     .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999) || a.nombre.localeCompare(b.nombre, 'es') || a.sku.localeCompare(b.sku));
@@ -75,14 +92,15 @@ export function nombreEnVenta(sku: string, nombre: string, linea: LineaOperacion
   return nombreEnOrden(sku, nombre, linea);
 }
 
-export function productosParaPedido<T extends ProductoOrdenable>(productos: T[], linea: LineaOperacion, empresaCodigo?: string): T[] {
+export function productosParaPedido<T extends ProductoOrdenable>(productos: T[], linea: LineaOperacion, empresaCodigo?: string, ubicacionId?: number): T[] {
+  const disponibles = productos.filter((p) => !p.ubicaciones_habilitadas || ubicacionId == null || p.ubicaciones_habilitadas.includes(ubicacionId));
   if (linea === 'desechables') {
-    return productos
+    return disponibles
       .filter((p) => p.linea === 'desechables' && p.tipo !== 'materia_prima')
       .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999) || a.nombre.localeCompare(b.nombre, 'es') || a.sku.localeCompare(b.sku));
   }
-  const porSku = new Map(productos.map((p) => [p.sku, p]));
-  const filas = filasOrden(linea, productos);
+  const porSku = new Map(disponibles.map((p) => [p.sku, p]));
+  const filas = filasOrden(linea, disponibles);
   const resultado: T[] = [];
   for (const fila of filas) {
     const esConsumibleExclusivoTapatios = fila.skus.includes('BPM-0017') || fila.skus.includes('BPM-0008');

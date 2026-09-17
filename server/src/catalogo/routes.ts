@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { num, num0 } from '../lib/num.js';
 import { asyncHandler, HttpError } from '../middleware/error.js';
@@ -200,6 +201,30 @@ function productoDTO(p: ProductoConRel) {
   };
 }
 
+/** Mantiene el producto operativo presente en la bodega que alimenta su línea.
+ * Antes un producto nuevo sólo se guardaba en `products`; por eso podía verse en
+ * Configuración pero no tenía renglón para apertura/conteo en inventario. */
+async function asegurarMapaBodega(
+  tx: Prisma.TransactionClient,
+  negocioId: bigint,
+  producto: { id: bigint; linea_operacion: 'carne' | 'desechables' | null; es_cargo_compra: boolean; stock_min_bodega: Prisma.Decimal | null; stock_seguridad_bodega: Prisma.Decimal | null },
+) {
+  if (!producto.linea_operacion || producto.es_cargo_compra) return;
+  const codigo = producto.linea_operacion === 'carne' ? 'CARN' : 'BOD';
+  const bodega = await tx.ubicaciones.findFirst({ where: { negocio_id: negocioId, codigo, tipo: 'bodega', activo: true }, select: { id: true } });
+  if (!bodega) return;
+  await tx.producto_ubicacion.upsert({
+    where: { ubicacion_id_product_id: { ubicacion_id: bodega.id, product_id: producto.id } },
+    create: {
+      negocio_id: negocioId, ubicacion_id: bodega.id, product_id: producto.id, habilitado: true,
+      stock_min: producto.stock_min_bodega ?? 0, stock_seguridad: producto.stock_seguridad_bodega ?? 0,
+      stock_objetivo: 0, stock_max: null, multiplo_distribucion: 1, minimo_envio: 0,
+      origen_calculo: 'manual', actualizado_por: null,
+    },
+    update: {},
+  });
+}
+
 catalogoRouter.get(
   '/productos',
   requireAuth,
@@ -304,6 +329,7 @@ catalogoRouter.post(
         negocio_id: req.auth!.negocioId, materia_prima_id: BigInt(b.materia_prima_id), producto_salida_id: creado.id,
         sin_costo: b.subproducto_sin_costo ?? false, orden: b.orden_operativo ?? 999,
       } });
+      await asegurarMapaBodega(tx, req.auth!.negocioId, creado);
       return creado;
     });
     res.status(201).json({ id: Number(p.id) });
@@ -340,6 +366,13 @@ catalogoRouter.patch(
     }
 
     await prisma.$transaction(async (tx) => {
+      if (b.linea_operacion !== undefined && b.linea_operacion !== actual.linea_operacion) {
+        const codigoAnterior = actual.linea_operacion === 'carne' ? 'CARN' : actual.linea_operacion === 'desechables' ? 'BOD' : null;
+        if (codigoAnterior) {
+          const bodegaAnterior = await tx.ubicaciones.findFirst({ where: { negocio_id: req.auth!.negocioId, codigo: codigoAnterior, tipo: 'bodega' }, select: { id: true } });
+          if (bodegaAnterior) await tx.producto_ubicacion.updateMany({ where: { ubicacion_id: bodegaAnterior.id, product_id: id }, data: { habilitado: false } });
+        }
+      }
       await tx.products.update({ where: { id }, data: {
         nombre: b.nombre?.trim(),
         sku,
@@ -366,6 +399,8 @@ catalogoRouter.patch(
         orden_operativo: b.orden_operativo,
         activo: b.activo,
       } });
+      const actualizado = await tx.products.findUniqueOrThrow({ where: { id }, select: { id: true, linea_operacion: true, es_cargo_compra: true, stock_min_bodega: true, stock_seguridad_bodega: true } });
+      await asegurarMapaBodega(tx, req.auth!.negocioId, actualizado);
       if (b.materia_prima_id !== undefined) {
         if (b.materia_prima_id == null) await tx.recetas_produccion.deleteMany({ where: { producto_salida_id: id, negocio_id: req.auth!.negocioId } });
         else await tx.recetas_produccion.upsert({
@@ -395,7 +430,12 @@ catalogoRouter.get(
 
     const [productos, params] = await Promise.all([
       prisma.products.findMany({
-        where: { negocio_id: req.auth!.negocioId, activo: true, es_cargo_compra: false },
+        where: {
+          negocio_id: req.auth!.negocioId,
+          activo: true,
+          es_cargo_compra: false,
+          ...(ubic.tipo === 'sucursal' ? { tipo_operativo: { not: 'materia_prima' } } : {}),
+        },
         include: { categorias: true, unidad_distribucion: true },
         orderBy: [{ linea_operacion: 'asc' }, { orden_operativo: 'asc' }, { nombre: 'asc' }],
       }),
@@ -407,6 +447,8 @@ catalogoRouter.get(
       ubicacion: { id: Number(ubic.id), nombre: ubic.nombre, tipo: ubic.tipo },
       items: productos.map((p) => {
         const pu = porProducto.get(p.id.toString());
+        const esBodegaOperativa = ubic.tipo === 'bodega'
+          && ((ubic.codigo === 'BOD' && p.linea_operacion === 'desechables') || (ubic.codigo === 'CARN' && p.linea_operacion === 'carne'));
         return {
           product_id: Number(p.id),
           nombre: p.nombre,
@@ -414,13 +456,16 @@ catalogoRouter.get(
           categoria: p.categorias?.nombre ?? null,
           unidad_distribucion: p.unidad_distribucion.nombre,
           configurado: !!pu,
-          habilitado: pu?.habilitado ?? false,
+          habilitado: pu?.habilitado ?? esBodegaOperativa,
           stock_objetivo: num(pu?.stock_objetivo) ?? 0,
           stock_min: num(pu?.stock_min) ?? 0,
           stock_max: num(pu?.stock_max),
           stock_seguridad: num(pu?.stock_seguridad) ?? 0,
           multiplo_distribucion: num(pu?.multiplo_distribucion) ?? 1,
           minimo_envio: num(pu?.minimo_envio) ?? 0,
+          linea_operacion: p.linea_operacion,
+          tipo_operativo: p.tipo_operativo,
+          orden_operativo: p.orden_operativo,
         };
       }),
     });

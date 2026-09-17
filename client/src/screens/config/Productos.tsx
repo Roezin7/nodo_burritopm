@@ -258,6 +258,8 @@ export default function Productos() {
           <div><span className="muted">Días sugeridos de producción</span><div className="dist-suc-mini">{['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((dia, i) => <label className="chip" key={dia}><input type="checkbox" checked={form.produccion_dias.includes(i)} onChange={(e) => setForm({ ...form, produccion_dias: e.target.checked ? [...form.produccion_dias, i].sort() : form.produccion_dias.filter((d) => d !== i) })} /> {dia}</label>)}</div></div>
         </details>
 
+        <p className="context-note">La línea y el tipo controlan el flujo: los productos terminados aparecen en pedidos; las materias primas (Raw) quedan sólo para compras y producción. Para limitar un producto a sucursales LBT o BPM, actívalo en “Productos por ubicación”.</p>
+
         <label className="ubic-check">
           <input type="checkbox" checked={form.administrado_bodega} onChange={(e) => setForm({ ...form, administrado_bodega: e.target.checked })} />
           <span>Se administra desde la bodega central</span>

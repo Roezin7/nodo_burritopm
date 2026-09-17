@@ -242,6 +242,24 @@ async function main() {
   if (repartoCreado) {
     for (const ubicacion_id of [adison.id, carniceria.id]) await prisma.usuario_ubicaciones.create({ data: { usuario_id: reparto.id, ubicacion_id } });
   }
+  // Un producto operativo siempre nace con su renglón en la bodega de la línea.
+  // Así el primer conteo/apertura no depende de que alguien visite antes la
+  // pantalla de Productos por ubicación.
+  const operativos = await prisma.products.findMany({
+    where: { negocio_id: org.id, activo: true, es_cargo_compra: false, linea_operacion: { not: null } },
+    select: { id: true, linea_operacion: true, stock_min_bodega: true, stock_seguridad_bodega: true },
+  });
+  await prisma.producto_ubicacion.createMany({
+    data: operativos.map((p) => ({
+      negocio_id: org.id,
+      ubicacion_id: p.linea_operacion === 'carne' ? carniceria.id : adison.id,
+      product_id: p.id,
+      habilitado: true,
+      stock_min: p.stock_min_bodega ?? 0,
+      stock_seguridad: p.stock_seguridad_bodega ?? 0,
+    })),
+    skipDuplicates: true,
+  });
   console.log('✅ Operación 3Q preparada: empresas, ubicaciones, productos, proveedores y rutas logísticas.');
 }
 

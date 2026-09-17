@@ -258,6 +258,18 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
     }),
     prisma.recetas_produccion.findMany({ where: { negocio_id: negocioId }, orderBy: [{ materia_prima_id: 'asc' }, { orden: 'asc' }] }),
   ]);
+  const sucursales = ubicaciones.filter((u) => u.tipo === 'sucursal' && u.empresa_cliente_id);
+  const configuracionesProducto = await prisma.producto_ubicacion.findMany({
+    where: { negocio_id: negocioId, ubicacion_id: { in: sucursales.map((u) => u.id) } },
+    select: { product_id: true, ubicacion_id: true, habilitado: true },
+  });
+  const configuracionesPorProducto = new Map<string, typeof configuracionesProducto>();
+  for (const configuracion of configuracionesProducto) {
+    const clave = configuracion.product_id.toString();
+    const lista = configuracionesPorProducto.get(clave) ?? [];
+    lista.push(configuracion);
+    configuracionesPorProducto.set(clave, lista);
+  }
   const rangoPrecio = fechaReferencia ? rangoSemana(fechaReferencia) : null;
   const preciosSemana = rangoPrecio ? await preciosVentaSemana(negocioId, productos, rangoPrecio.desde, rangoPrecio.hasta) : null;
   const calendarioPedidos = ubicaciones
@@ -290,6 +302,17 @@ export async function catalogoOperacion(negocioId: bigint, esAdmin: boolean, ubi
       peso_caja_lb: num(p.peso_caja_lb), produccion_dias: p.produccion_dias,
       produccion_extraordinaria: skusProduccionExtraordinaria.has(p.sku),
       es_cargo_compra: esAdmin ? p.es_cargo_compra : undefined,
+      // Sin configuración explícita el producto conserva compatibilidad con el
+      // catálogo anterior y queda disponible para todas las sucursales. En cuanto
+      // existe una configuración, sólo las sucursales habilitadas pueden pedirlo.
+      ubicaciones_habilitadas: (() => {
+        const configuraciones = configuracionesPorProducto.get(p.id.toString()) ?? [];
+        const habilitadas = configuraciones.filter((x) => x.habilitado);
+        // Filas antiguas creadas sólo con FALSE eran defaults de stock, no una
+        // restricción comercial. Una selección explícita empieza al habilitar
+        // al menos una sucursal.
+        return habilitadas.length ? habilitadas.map((x) => Number(x.ubicacion_id)) : undefined;
+      })(),
     })),
     proveedores: esAdmin ? proveedores.map((p) => ({ id: Number(p.id), nombre: p.nombre })) : [],
     plantillas: esAdmin ? plantillas.map((p) => ({
@@ -368,6 +391,25 @@ async function prepararPedido(negocioId: bigint, input: GuardarPedidoInput, esAd
     throw new HttpError(400, 'Las materias primas son exclusivas de compras y producción. Para pedidos utiliza Taco Meat terminado, nunca Taco Meat Raw.');
   }
   if (productos.some(esCargoContableCompra)) throw new HttpError(400, 'Los cargos contables de compra no se pueden incluir en una venta');
+  const configuraciones = await prisma.producto_ubicacion.findMany({
+    where: { negocio_id: negocioId, product_id: { in: productIds }, ubicaciones: { tipo: 'sucursal', activo: true } },
+    select: { product_id: true, ubicacion_id: true, habilitado: true },
+  });
+  const configuracionesPorProducto = new Map<string, typeof configuraciones>();
+  for (const configuracion of configuraciones) {
+    const clave = configuracion.product_id.toString();
+    const lista = configuracionesPorProducto.get(clave) ?? [];
+    lista.push(configuracion);
+    configuracionesPorProducto.set(clave, lista);
+  }
+  const deshabilitados = productos.filter((p) => {
+    const lista = configuracionesPorProducto.get(p.id.toString()) ?? [];
+    if (!lista.some((x) => x.habilitado)) return false;
+    return !lista.some((x) => x.ubicacion_id === ubicacion.id && x.habilitado);
+  });
+  if (deshabilitados.length) {
+    throw new HttpError(400, `Producto no habilitado para ${ubicacion.nombre}: ${deshabilitados.map((p) => p.nombre).join(', ')}. Actívalo en Configuración → Productos por ubicación.`);
+  }
   const fueraDeFormato = productos.some((p) => p.linea_operacion !== input.linea && !(input.linea === 'carne' && consumiblesEnOrdenCarne.has(p.sku)));
   if (fueraDeFormato) throw new HttpError(400, 'Hay productos fuera del formato de esta orden');
   if (input.linea === 'carne') {

@@ -55,7 +55,7 @@ export default function CapturaSemanalPedidos({ catalogo, linea, semana, ubicaci
   const programadas = useMemo(() => ubicaciones.map((ubicacion) => ({
     ubicacion,
     entregas: entregasDeSemana(catalogo.calendario_pedidos, String(ubicacion.id), linea, semana),
-    productos: productosParaPedido(catalogo.productos, linea, ubicacion.empresa?.codigo),
+    productos: productosParaPedido(catalogo.productos, linea, ubicacion.empresa?.codigo, ubicacion.id),
   })).filter((fila) => fila.entregas.length > 0), [ubicaciones, catalogo, linea, semana.inicio, semana.fin]);
   const claveBorrador = `bpm-borrador-ventas:${semana.inicio}:${linea}`;
   useUnsavedChanges(cambios.length > 0);
